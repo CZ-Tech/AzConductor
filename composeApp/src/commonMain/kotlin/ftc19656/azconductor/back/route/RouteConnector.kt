@@ -1,10 +1,20 @@
 package ftc19656.azconductor.back.route
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 
 class RouteConnector(private var totalTime: Double) : ViewModel() {
-    // 1. 唯一的数据源：路点列表
-    private val waypoints = mutableListOf<DifferentialPoint2D>()
+    // 增加一个状态，专门用来通知 UI 路径已经更新
+    var pathVersion by mutableStateOf(0)
+        private set
+
+    // 使用 Compose 提供的 State List，这样增删改会自动触发关联的 UI 重组
+    // 不需要直接修改它，只需通过暴露的方法修改即可a
+    private val _waypoints = mutableStateListOf<DifferentialPoint2D>()
+    val waypoints: List<DifferentialPoint2D> get() = _waypoints
 
     // 2. 派生数据：轨迹列表
     val trajectoryList = mutableListOf<TrajectoryGenerator2D>()
@@ -29,6 +39,8 @@ class RouteConnector(private var totalTime: Double) : ViewModel() {
             trajectoryList.add(TrajectoryGenerator2D(start, end, 0.0, 0.0))
         }
         recalculateTimes()
+        // 轨迹重新生成完毕，版本号 +1
+        pathVersion++
     }
 
     private fun recalculateTimes() {
@@ -46,18 +58,15 @@ class RouteConnector(private var totalTime: Double) : ViewModel() {
     // --- 增删改查 ---
 
     fun addPoint(point: DifferentialPoint2D) {
-        waypoints.add(point)
+        _waypoints.add(point)
         rebuildTrajectories()
     }
 
-    /**
-     * 按索引移动
-     * 若越界则不会改变
-     */
     fun moveNode(index: Int, newPoint: DifferentialPoint2D) {
-        if (index in waypoints.indices) {
-            waypoints[index] = newPoint
-            rebuildTrajectories() // 重新生成轨迹并重算时间
+        if (index in _waypoints.indices) {
+            // 赋值一个全新复制的对象（触发 Compose 重组）
+            _waypoints[index] = newPoint
+            rebuildTrajectories()
         }
     }
 
@@ -67,7 +76,7 @@ class RouteConnector(private var totalTime: Double) : ViewModel() {
      */
     fun removeNode(index: Int) {
         if (index in waypoints.indices) {
-            waypoints.removeAt(index)
+            _waypoints.removeAt(index)
             rebuildTrajectories()
         }
     }
