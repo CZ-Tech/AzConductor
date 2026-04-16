@@ -156,6 +156,10 @@ class RouteConnector(private var totalTime: Double) : ViewModel() {
         return stringBuilder.toString()
     }
 
+    fun getNodeAt(index: Int): DifferentialPoint2D {
+        return _waypoints[index]
+    }
+
 
 
 }

@@ -1,5 +1,6 @@
 package ftc19656.azconductor.back.route
 
+import kotlinx.serialization.Serializable
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -127,20 +128,29 @@ class TrajectoryGenerator2D(
 }
 
 // 简单的数据类用于存储坐标
-data class Point2D(val x: Double, val y: Double) {
+data class Point2D(val x: Double, val y: Double, val heading: Double = 0.0) {
     infix fun isCloseTo(other: DifferentialPoint2D): Boolean {
         val epsilon = 1e-7
         return abs(x - other.x) < epsilon &&
-                abs(y - other.y) < epsilon
+                abs(y - other.y) < epsilon &&
+                abs(heading - other.heading) < epsilon
     }
 }
 
-data class DifferentialPoint2D(val x: Double, val dx: Double, val y: Double, val dy: Double) {
+@Serializable
+data class DifferentialPoint2D(val x: Double,
+                               val dx: Double,
+                               val y: Double,
+                               val dy: Double,
+                               val heading: Double = 0.0,
+                               val dHeading: Double = 0.0) {
     infix fun isCloseTo(other: DifferentialPoint2D): Boolean {
         val epsilon = 1e-7
         return abs(x - other.x) < epsilon &&
                 abs(y - other.y) < epsilon &&
                 abs(dx - other.dx) < epsilon &&
-                abs(dy - other.dy) < epsilon
+                abs(dy - other.dy) < epsilon &&
+                abs(heading - other.heading) < epsilon &&
+                abs(dHeading - other.dHeading) < epsilon
     }
 }

@@ -24,6 +24,8 @@ import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.*
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import ftc19656.azconductor.back.route.RouteConnector
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 import kotlin.math.cos
 import kotlin.math.sin
@@ -35,10 +37,19 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
     var canvasPhysicalSize by remember { mutableStateOf(IntSize.Zero) }
     val rotationDegrees = canvasRotateDeg
 
-    val selectedNodeIndex = remember { mutableStateOf(0) }
+    val selectedNodeIndex = remember { mutableStateOf<Int?>(null) }  // 当前被选中显示速度拖拽条的节点
+    var editingNodeIndex by remember { mutableStateOf<Int?>(null) }  // 正在右键编辑的节点
 
     // 决定使用哪套配色，这里简单示例硬编码为浅色
     val colorScheme = MyLightColors
+
+    // 【新增】：强制预热序列化器引擎
+    LaunchedEffect(Unit) {
+        // 切到默认线程池，绝对不卡主线程的 UI 渲染
+        withContext(Dispatchers.Default) {
+            preloadSerializer()
+        }
+    }
 
     // 逻辑边界计算
     val originRatioX = 0.5f
@@ -131,8 +142,11 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
                             bounds = bounds,
                             onMove = { idx, newNode -> route.moveNode(idx, newNode) },
                             onClick = {
-                                println("Selected node: $it")
-                                selectedNodeIndex.value = index
+                                println("Clicked node: $it")
+                                selectedNodeIndex.value = if (selectedNodeIndex.value != index) index else null
+                            },
+                            onRightClick = { idx ->
+                                editingNodeIndex = idx // 触发弹窗显示
                             }
                         )
                         // 如果该节点被选中，则显示向量调节手柄
@@ -141,14 +155,38 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
                                 node = node,
                                 mapper = mapper,
                                 onVectorChanged = { newDx, newDy ->
-                                    // 更新该节点的向量属性，保持 x, y 不变
-                                    val updatedNode = node.copy(dx = newDx, dy = newDy)
+                                    // 更新该节点的向量属性，保持 x, y 不变（从表中重新获取最新状态避免暂存状态过期导致瞬移）
+                                    val updatedNode = route.getNodeAt(index).copy(dx = newDx, dy = newDy)
                                     route.moveNode(index, updatedNode)
                                 }
                             )
                         }
                     }
                 }
+
+                editingNodeIndex?.let { indexToEdit ->
+                    val targetNode = route.waypoints.getOrNull(indexToEdit)
+                    if (targetNode != null) {
+                        NodeEditorDialog(
+                            node = targetNode,
+                            onDismiss = { editingNodeIndex = null },
+                            onConfirm = { updatedNode ->
+                                route.moveNode(indexToEdit, updatedNode)
+                            },
+                            onDelete = {
+                                route.removeNode(indexToEdit) // 假设你的 RouteConnector 有这个方法
+                                // 如果删除的是当前选中的节点，重置选中状态
+                                if (selectedNodeIndex.value == indexToEdit) {
+                                    selectedNodeIndex.value = -1
+                                }
+                            }
+                        )
+                    } else {
+                        // 防御性编程：如果因为外部原因越界，关闭弹窗
+                        editingNodeIndex = null
+                    }
+                }
+
             }
         }
     }

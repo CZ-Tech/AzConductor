@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -16,6 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -23,7 +26,10 @@ import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray.Companion.serializer
+import kotlinx.serialization.serializer
 import kotlin.math.roundToInt
+
 /**
  * 核心组件：可拖拽的路点
  */
@@ -34,7 +40,8 @@ fun DraggableNode(
     mapper: CoordinateMapper,
     bounds: RectBounds,
     onMove: (Int, DifferentialPoint2D) -> Unit,
-    onClick: (Int) -> Unit
+    onClick: (Int) -> Unit,
+    onRightClick: (Int) -> Unit
 ) {
     val density = LocalDensity.current
     val dotSizeDp = 20.dp
@@ -93,6 +100,21 @@ fun DraggableNode(
                                 onMove(index, newNode)
                             }
                         )
+                    }
+                }
+            }
+            // 的右键监听
+            .pointerInput(index) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        // 判断是否为鼠标右键按下
+                        if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Press &&
+                            event.buttons.isSecondaryPressed
+                        ) {
+                            event.changes.forEach { it.consume() } // 消费事件，防止穿透
+                            onRightClick(index)
+                        }
                     }
                 }
             }
