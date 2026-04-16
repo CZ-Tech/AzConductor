@@ -40,8 +40,8 @@ fun VectorHandle(
     // 1. 计算父节点和手柄末端的物理屏幕坐标
     val startPx = mapper.logicalToScreen(node.x.toFloat(), node.y.toFloat())
     val endPx = mapper.logicalToScreen(
-        (node.x + node.dx / KVelocityHandle).toFloat(),  // 需要除掉延长倍率以保证视觉长度不变
-        (node.y + node.dy / KVelocityHandle).toFloat()
+        (node.x + node.dx).toFloat(),
+        (node.y + node.dy).toFloat()
     )
 
     val currentNode by rememberUpdatedState(node)  // 储存当前节点的最新状态
@@ -96,8 +96,8 @@ fun VectorHandle(
                             )
 
                             // 计算新的 dx, dy (相对于父节点坐标)
-                            val newDx = (initialVector.x + logicDelta.x * KVelocityHandle)  // 乘上延长倍率增大逻辑速度
-                            val newDy = (initialVector.y + logicDelta.y * KVelocityHandle)
+                            val newDx = (initialVector.x + logicDelta.x).toDouble() * KVelocityHandle
+                            val newDy = (initialVector.y + logicDelta.y).toDouble() * KVelocityHandle  // TODO 手柄会太长！
 
                             onVectorChanged(newDx, newDy)
                         }
