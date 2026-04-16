@@ -6,12 +6,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -25,6 +27,7 @@ import ftc19656.azconductor.*
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import ftc19656.azconductor.back.route.RouteConnector
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 import kotlin.math.cos
@@ -43,11 +46,24 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
     // 决定使用哪套配色，这里简单示例硬编码为浅色
     val colorScheme = MyLightColors
 
-    // 【新增】：强制预热序列化器引擎
-    LaunchedEffect(Unit) {
-        // 切到默认线程池，绝对不卡主线程的 UI 渲染
-        withContext(Dispatchers.Default) {
-            preloadSerializer()
+    var isPreheated by remember { mutableStateOf(false) }
+
+    // 预热右键弹窗避免首次右键加载延迟
+    // App 启动时，让这个 Dialog 渲染 100 毫秒然后消失
+    if (!isPreheated) {
+        // 使用一个极其透明且不干扰交互的状态
+        CompositionLocalProvider(LocalContentColor provides Color.Transparent) {
+            NodeEditorDialog(
+                node = preloadSerializer(), // 假数据
+                onDismiss = { isPreheated = true },
+                onConfirm = { isPreheated = true },
+                onDelete = { isPreheated = true }
+            )
+        }
+        // 启动后自动关闭它
+        LaunchedEffect(Unit) {
+            delay(100) // 给 UI 线程留出足够时间完成第一次 Layout 和 Draw
+            isPreheated = true
         }
     }
 

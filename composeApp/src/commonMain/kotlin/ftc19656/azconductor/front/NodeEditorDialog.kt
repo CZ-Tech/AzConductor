@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -25,16 +26,31 @@ import kotlinx.serialization.serializer
 val serializer = serializer<DifferentialPoint2D>()
 val descriptor = serializer.descriptor
 
-fun preloadSerializer(){
+@OptIn(ExperimentalSerializationApi::class)
+fun preloadSerializer(): DifferentialPoint2D {
     // 强制预热序列化器引擎
-    try {
-        val serializer = DifferentialPoint2D.serializer()
-        // 1. 强行读取 descriptor，触发底层结构解析
-        val count = serializer.descriptor.elementsCount
-        println("Serializer preloaded! Got $count fields")
-    } catch (e: Exception) {
-        // 静默失败即可，这只是个预热操作
+    val serializer = DifferentialPoint2D.serializer()
+    // 读取 descriptor，触发底层结构解析
+    val count = serializer.descriptor.elementsCount
+
+    val map: MutableMap<String, String> = hashMapOf()
+    for (s in serializer.descriptor.elementNames) {
+        map[s] = "1.0"  // 填满数据
     }
+
+    // 保存一次数据以供预热
+    val jsonContent = map.mapValues { (_, stringValue) ->
+        // 智能尝试转换，确保 Json 能识别它是数字还是字符串
+        stringValue.toDoubleOrNull()?.let { JsonPrimitive(it) }
+            ?: stringValue.toBooleanStrictOrNull()?.let { JsonPrimitive(it) }
+            ?: JsonPrimitive(stringValue)
+    }
+    // 预热反序列化
+    val newNode = Json.decodeFromJsonElement(ftc19656.azconductor.front.serializer, JsonObject(jsonContent))
+    val jsonElement = Json.encodeToJsonElement(ftc19656.azconductor.front.serializer, newNode) as JsonObject
+
+    println("Serializer preloaded! Got $count fields")
+    return newNode
 }
 
 

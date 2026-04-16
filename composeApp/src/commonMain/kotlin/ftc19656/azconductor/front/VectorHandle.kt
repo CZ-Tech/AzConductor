@@ -22,6 +22,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import ftc19656.azconductor.KVelocityHandle
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import kotlin.math.roundToInt
 
@@ -95,8 +96,8 @@ fun VectorHandle(
                             )
 
                             // 计算新的 dx, dy (相对于父节点坐标)
-                            val newDx = (initialVector.x + logicDelta.x).toDouble()
-                            val newDy = (initialVector.y + logicDelta.y).toDouble()
+                            val newDx = (initialVector.x + logicDelta.x).toDouble() * KVelocityHandle
+                            val newDy = (initialVector.y + logicDelta.y).toDouble() * KVelocityHandle  // TODO 手柄会太长！
 
                             onVectorChanged(newDx, newDy)
                         }

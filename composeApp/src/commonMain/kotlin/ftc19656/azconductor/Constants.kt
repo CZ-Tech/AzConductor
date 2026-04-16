@@ -49,3 +49,5 @@ private val MyDarkColors = darkColorScheme(
 // 无论屏幕多大，路径算法都基于这个尺寸进行计算
 const val canvasLogicalWidth = 144f
 const val canvasLogicalHeight = 144f
+
+const val KVelocityHandle = 10.2  // 这个数字越大，那么每单位长度速度向量手柄代表的dx、dy越大，也就是说更短的手柄可以代表更大的速度
