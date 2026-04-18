@@ -1,6 +1,7 @@
 package ftc19656.azconductor.back.route
 
 import kotlinx.serialization.Serializable
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -37,7 +38,7 @@ class CubicHermiteSpline1D(
 /**
  * 二维平面两点间的轨迹生成器（解耦 X 和 Y）
  */
-class TrajectoryGenerator2D(
+open class TrajectoryGenerator2D(
     var startX: Double, var startY: Double, var startDx: Double, var startDy: Double, // 起点状态
     var endX: Double, var endY: Double, var endDx: Double, var endDy: Double,         // 终点状态
     var startTime: Double, var endTime: Double        // 时间区间
@@ -50,8 +51,8 @@ class TrajectoryGenerator2D(
 
     // 分别为 X 轴和 Y 轴生成独立的一维样条
     // 样条对象：每次访问 get() 都会根据当前坐标生成新的样条逻辑
-    private val splineX get() = CubicHermiteSpline1D(startX, startDx, endX, endDx)
-    private val splineY get() = CubicHermiteSpline1D(startY, startDy, endY, endDy)
+    protected open val splineX get() = CubicHermiteSpline1D(startX, startDx, endX, endDx)
+    protected open val splineY get() = CubicHermiteSpline1D(startY, startDy, endY, endDy)
 
 
     val length: Double get() = calculateArcLength(100)
@@ -89,26 +90,23 @@ class TrajectoryGenerator2D(
     }
 
 
+    // 计算 u 的逻辑提取出来，方便子类复用
+    protected fun getU(currentTime: Double): Double {
+        val duration = endTime - startTime
+        return if (duration > 0) {
+            ((currentTime - startTime) / duration).coerceIn(0.0, 1.0)
+        } else 1.0
+    }
+
     /**
      * 根据当前绝对时间，计算机器人在该时刻的期望位置 (gotoX, gotoY)
      */
-    fun getPointAtTime(currentTime: Double): Point2D {
-        // 防止除零，并计算归一化进度 u
-        val duration = endTime - startTime
-        val u = if (duration > 0) {
-            // 将当前时间映射到 0.0 ~ 1.0，并限制越界（对应原代码中的 (now - this.lt) / (this.t - this.lt)）
-            ((currentTime - startTime) / duration).coerceIn(0.0, 1.0)
-        } else {
-            1.0
-        }
-
-        return Point2D(
-            x = splineX.getPosition(u),
-            y = splineY.getPosition(u)
-        )
+    open fun getPointAtTime(currentTime: Double): Point2D {
+        val u = getU(currentTime)
+        return Point2D(splineX.getPosition(u), splineY.getPosition(u))
     }
 
-    fun getStartPoint(): DifferentialPoint2D {
+    open fun getStartPoint(): DifferentialPoint2D {
         return DifferentialPoint2D(
             startX,
             startDx,
@@ -116,7 +114,7 @@ class TrajectoryGenerator2D(
             startDy)
     }
 
-    fun getEndPoint(): DifferentialPoint2D {
+    open fun getEndPoint(): DifferentialPoint2D {
         return DifferentialPoint2D(
             endX,
             endDx,
@@ -125,6 +123,59 @@ class TrajectoryGenerator2D(
         )
     }
 
+}
+
+/**
+ * 带朝向的一体化轨迹生成器
+ */
+class OrientedTrajectoryGenerator2D(
+    startX: Double, startY: Double, startDx: Double, startDy: Double,
+    var startHeading: Double, var startDHeading: Double, // 新增朝向属性
+    endX: Double, endY: Double, endDx: Double, endDy: Double,
+    var endHeading: Double, var endDHeading: Double,     // 新增朝向属性
+    startTime: Double, endTime: Double
+) : TrajectoryGenerator2D(
+    startX, startY, startDx, startDy,
+    endX, endY, endDx, endDy,
+    startTime, endTime
+) {
+
+    // 方便的次级构造函数，直接传入 DifferentialPoint2D
+    constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, startTime: Double, endTime: Double) : this(
+        start.x, start.y, start.dx, start.dy, start.heading, start.dHeading,
+        end.x, end.y, end.dx, end.dy, end.heading, end.dHeading,
+        startTime, endTime
+    )
+
+    // 专属于朝向的样条
+    private val splineHeading get() = CubicHermiteSpline1D(
+        startHeading,
+        startDHeading,
+        normalizeRelative(startHeading, endHeading),
+        endDHeading)
+
+    /**
+     * 复写获取点的方法，填充 heading 字段
+     */
+    override fun getPointAtTime(currentTime: Double): Point2D {
+        val u = getU(currentTime)
+        // 调用 super 获取基础的 x, y，然后注入新的 heading
+        val basePoint = super.getPointAtTime(currentTime)
+        return basePoint.copy(
+            heading = splineHeading.getPosition(u)
+        )
+    }
+
+    /**
+     * 覆盖获取起始点的方法，返回包含完整信息的 DifferentialPoint2D
+     */
+    override fun getStartPoint(): DifferentialPoint2D {
+        return DifferentialPoint2D(startX, startDx, startY, startDy, startHeading, startDHeading)
+    }
+
+    override fun getEndPoint(): DifferentialPoint2D {
+        return DifferentialPoint2D(endX, endDx, endY, endDy, endHeading, endDHeading)
+    }
 }
 
 // 简单的数据类用于存储坐标
@@ -153,4 +204,14 @@ data class DifferentialPoint2D(val x: Double,
                 abs(heading - other.heading) < epsilon &&
                 abs(dHeading - other.dHeading) < epsilon
     }
+}
+
+/**
+ * 将目标角度调整为相对于起始角度的最短路径对应值
+ * 例如：从 350° 到 10°，会把 10° 转换为 370°，样条插值就会顺时针走 20°
+ */
+fun normalizeRelative(start: Double, end: Double): Double {
+    val diff = (end - start + PI) % (2 * PI) - PI
+    val adjustedDiff = if (diff < -PI) diff + 2 * PI else diff
+    return start + adjustedDiff
 }
