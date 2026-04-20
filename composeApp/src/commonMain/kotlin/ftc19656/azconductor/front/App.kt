@@ -26,9 +26,7 @@ import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.*
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import ftc19656.azconductor.back.route.RouteConnector
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 import kotlin.math.cos
 import kotlin.math.sin
@@ -79,7 +77,7 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
         )
     }
 
-    MaterialTheme(colorScheme = colorScheme,) {
+    MaterialTheme(colorScheme = colorScheme) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -111,9 +109,11 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
                                 route.addPoint(
                                     DifferentialPoint2D(
                                         logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
-                                        10.0,
+                                        10.0*KVelocityHandle,
                                         logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),
-                                        10.0
+                                        0.0,
+                                        0.0,
+                                        0.0
                                     )
                                 )
                             }
@@ -190,7 +190,7 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
                                 route.moveNode(indexToEdit, updatedNode)
                             },
                             onDelete = {
-                                route.removeNode(indexToEdit) // 假设你的 RouteConnector 有这个方法
+                                route.removeNode(indexToEdit)
                                 // 如果删除的是当前选中的节点，重置选中状态
                                 if (selectedNodeIndex.value == indexToEdit) {
                                     selectedNodeIndex.value = -1
