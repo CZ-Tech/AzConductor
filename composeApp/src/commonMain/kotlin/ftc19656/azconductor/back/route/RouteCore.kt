@@ -1,6 +1,6 @@
 package ftc19656.azconductor.back.route
 
-class RouteCore(var totalTime: Double) {
+class RouteCore() {
     // 使用标准的 MutableList 存储点位
     private val _waypoints = mutableListOf<DifferentialPoint2D>()
     val waypoints: List<DifferentialPoint2D> get() = _waypoints
@@ -11,6 +11,7 @@ class RouteCore(var totalTime: Double) {
     // 获取最后一个点
     val lastPoint: DifferentialPoint2D? get() = waypoints.lastOrNull()
     val totalLength: Double get() = trajectoryList.sumOf { it.length }
+    val totalTime: Double get() = trajectoryList.sumOf { it.duration }
 
     // 根据 waypoints 重新构建整条轨迹
     private fun rebuildTrajectories() {
@@ -20,21 +21,8 @@ class RouteCore(var totalTime: Double) {
         for (i in 0 until waypoints.lastIndex) {
             val start = waypoints[i]
             val end = waypoints[i + 1]
-            // 时间先随便填，稍后重新分配
-            trajectoryList.add(OrientedTrajectoryGenerator2D(start, end, 0.0, 0.0))
-        }
-        recalculateTimes()
-    }
-
-    private fun recalculateTimes() {
-        if (totalLength == 0.0) return
-        val totalLengthTemp = totalLength
-        var currentTime = 0.0
-        for (trajectory in trajectoryList) {
-            trajectory.startTime = currentTime
-            val timeCost = (trajectory.length / totalLengthTemp) * totalTime
-            currentTime += timeCost
-            trajectory.endTime = currentTime
+            // 使用 end 点的 duration 作为轨迹段的持续时间
+            trajectoryList.add(OrientedTrajectoryGenerator2D(start, end, end.duration))
         }
     }
 
@@ -83,7 +71,6 @@ class RouteCore(var totalTime: Double) {
 
     /**
      * 获取指定绝对时间点 t 的机器人坐标
-     * 采用二分查找 (O(log N)) 定位轨迹段
      * @return 若列表为空则返回null
      * @throws IndexOutOfBoundsException 若超出时间范围
      */
@@ -91,30 +78,27 @@ class RouteCore(var totalTime: Double) {
         if (trajectoryList.isEmpty()) {
             return null
         }
+        val totalTime = this.totalTime
         val epsilon = 1e-7
         if (time < -epsilon || time > totalTime + epsilon) throw IndexOutOfBoundsException("Time out of range.")
 
-        // 避免变量遮蔽，这里改用局部变量 coercedTime
         val coercedTime = time.coerceIn(0.0, totalTime)
 
-        var low = 0
-        var high = trajectoryList.lastIndex
-
-        while (low <= high) {
-            val mid = (low + high) / 2
-            val traj = trajectoryList[mid]
-
-            when {
-                coercedTime < traj.startTime -> high = mid - 1
-                coercedTime > traj.endTime -> low = mid + 1
-                // 命中直接调用该段轨迹的局部时间计算
-                else -> return traj.getPointAtTime(coercedTime)
+        var accumulatedTime = 0.0
+        for (traj in trajectoryList) {
+            val nextAccumulatedTime = accumulatedTime + traj.duration
+            if (coercedTime <= nextAccumulatedTime) {
+                val localTime = coercedTime - accumulatedTime
+                return traj.getPointAtTime(localTime)
             }
+            accumulatedTime = nextAccumulatedTime
         }
-        // 理论上二分查找一定能命中，但为了防止极限情况下的浮点精度微小误差导致跳出循环
+        // 理论上循环一定能命中，但为了防止极限情况下的浮点精度微小误差导致跳出循环
         // 直接返回最后一段轨迹的终点状态
-        return trajectoryList.last().getPointAtTime(coercedTime)
+        return trajectoryList.last().getPointAtTime(trajectoryList.last().duration)
     }
+
+    // 移除了 updateTrajectoryDuration 方法，因为 duration 现在是 DifferentialPoint2D 的属性
 
     override fun toString(): String {
         val stringBuilder = StringBuilder()

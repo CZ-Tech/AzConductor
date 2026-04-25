@@ -5,9 +5,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,29 +18,53 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toOffset
 import azconductor.composeapp.generated.resources.FTC_MAP26
 import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.*
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import ftc19656.azconductor.back.route.RouteConnector
 import kotlinx.coroutines.delay
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.jetbrains.compose.resources.painterResource
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 @Composable
 @Preview
-fun App(route: RouteConnector = RouteConnector(20.0)) {
+fun App(route: RouteConnector = RouteConnector()) {
     val painter = painterResource(Res.drawable.FTC_MAP26)
     var canvasPhysicalSize by remember { mutableStateOf(IntSize.Zero) }
     val rotationDegrees = canvasRotateDeg
 
     val selectedNodeIndex = remember { mutableStateOf<Int?>(null) }  // 当前被选中显示速度拖拽条的节点
     var editingNodeIndex by remember { mutableStateOf<Int?>(null) }  // 正在右键编辑的节点
+
+    // 右键菜单状态
+    var showContextMenu by remember { mutableStateOf(false) }
+    var contextMenuOffset by remember { mutableStateOf(Offset.Zero) }
+
+    // 导出 JSON 对话框状态
+    var showExportDialog by remember { mutableStateOf(false) }
+    var exportedJson by remember { mutableStateOf("") }
+    val exportJsonConfig = remember { Json { 
+        prettyPrint = true 
+        encodeDefaults = true
+    } }
 
     // 决定使用哪套配色，这里简单示例硬编码为浅色
     val colorScheme = MyLightColors
@@ -77,13 +102,30 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
         )
     }
 
-    MaterialTheme(colorScheme = colorScheme) {
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = MyTypography
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .wrapContentSize(Alignment.Center)
                 .aspectRatio(canvasLogicalWidth / canvasLogicalHeight)
                 .onSizeChanged { canvasPhysicalSize = it }
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                val isConsumed = event.changes.any { it.isConsumed }
+                                if (!isConsumed) {
+                                    contextMenuOffset = event.changes.first().position
+                                    showContextMenu = true
+                                }
+                            }
+                        }
+                    }
+                }
         ) {
             if (canvasPhysicalSize != IntSize.Zero) {
                 val mapper = remember(canvasPhysicalSize, rotationDegrees) {
@@ -104,18 +146,27 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
                         .fillMaxSize()
                         .drawBehind { with(painter) { draw(size = size) } }
                         .pointerInput(mapper) {
-                            detectTapGestures { offset ->
-                                val logicPos = mapper.screenToLogical(offset.x, offset.y)
-                                route.addPoint(
-                                    DifferentialPoint2D(
-                                        logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
-                                        10.0*KVelocityHandle,
-                                        logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),
-                                        0.0,
-                                        0.0,
-                                        0.0
-                                    )
-                                )
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.type == PointerEventType.Press) {
+                                        val change = event.changes.first()
+                                        if (change.pressed && event.buttons.isPrimaryPressed) {
+                                            // 左键点击（添加点）
+                                            val logicPos = mapper.screenToLogical(change.position.x, change.position.y)
+                                            route.addPoint(
+                                                DifferentialPoint2D(
+                                                    x = logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
+                                                    dx = 10.0 * KVelocityHandle,
+                                                    y = logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),
+                                                    dy = 0.0,
+                                                    // heading, dHeading, duration 将使用默认值
+                                                )
+                                            )
+                                            change.consume()
+                                        }
+                                    }
+                                }
                             }
                         }
                 ) {
@@ -203,6 +254,63 @@ fun App(route: RouteConnector = RouteConnector(20.0)) {
                     }
                 }
 
+                // 右键菜单锚点
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(contextMenuOffset.x.roundToInt(), contextMenuOffset.y.roundToInt())
+                        }
+                ) {
+                    DropdownMenu(
+                        expanded = showContextMenu,
+                        onDismissRequest = { showContextMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("导出路径") },
+                            onClick = {
+                                var currentTime = 0.0
+                                val exportList = route.waypoints.mapIndexed { index, pt ->
+                                    if (index > 0) currentTime += pt.duration
+                                    pt.copy(time = currentTime)
+                                }
+                                exportedJson = exportJsonConfig.encodeToString(exportList)
+                                showExportDialog = true
+                                showContextMenu = false
+                            }
+                        )
+                    }
+                }
+
+                // 导出 JSON 结果的弹窗
+                if (showExportDialog) {
+                    val clipboardManager = LocalClipboardManager.current
+                    AlertDialog(
+                        onDismissRequest = { showExportDialog = false },
+                        title = { Text("导出的路径 JSON") },
+                        text = {
+                            SelectionContainer {
+                                Text(
+                                    text = exportedJson,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    )
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            androidx.compose.foundation.layout.Row {
+                                TextButton(onClick = {
+                                    clipboardManager.setText(AnnotatedString(exportedJson))
+                                }) {
+                                    Text("一键复制")
+                                }
+                                TextButton(onClick = { showExportDialog = false }) {
+                                    Text("关闭")
+                                }
+                            }
+                        }
+                    )
+                }
             }
         }
     }

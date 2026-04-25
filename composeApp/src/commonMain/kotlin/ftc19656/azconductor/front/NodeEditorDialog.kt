@@ -13,6 +13,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import ftc19656.azconductor.NODE_EDITOR_FIELD_ORDER
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.descriptors.elementNames
@@ -80,14 +81,18 @@ fun NodeEditorDialog(
 
     var errorMessage by remember { mutableStateOf<String?>(null) }  // 错误信息
 
+    // 定义字段的显示顺序
+    val allFieldNames = descriptor.elementNames.toSet()
+    val orderedFieldNames = NODE_EDITOR_FIELD_ORDER.filter { it in allFieldNames } +
+            (allFieldNames - NODE_EDITOR_FIELD_ORDER.toSet())
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("编辑节点属性") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                // UI 根据Json字段全自动生成
-                for (i in 0 until descriptor.elementsCount) {
-                    val fieldName = descriptor.getElementName(i)
+                // UI 根据定义的顺序和Json字段全自动生成
+                orderedFieldNames.forEach { fieldName ->
                     OutlinedTextField(
                         value = editValues[fieldName] ?: "",
                         onValueChange = { editValues[fieldName] = it },

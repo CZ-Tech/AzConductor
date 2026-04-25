@@ -6,10 +6,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 
-class RouteConnector(totalTime: Double) : ViewModel() {
+class RouteConnector() : ViewModel() {
 
     // 底层纯逻辑实例
-    private val routeLogic = RouteCore(totalTime)
+    private val routeLogic = RouteCore()
 
     // UI 专用的版本号
     var pathVersion by mutableStateOf(0)

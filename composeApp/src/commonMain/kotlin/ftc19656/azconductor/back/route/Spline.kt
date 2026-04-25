@@ -41,12 +41,12 @@ class CubicHermiteSpline1D(
 open class TrajectoryGenerator2D(
     var startX: Double, var startY: Double, var startDx: Double, var startDy: Double, // 起点状态
     var endX: Double, var endY: Double, var endDx: Double, var endDy: Double,         // 终点状态
-    var startTime: Double, var endTime: Double        // 时间区间
+    var duration: Double        // 时间区间
 ) {
-    constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, startTime: Double, endTime: Double) : this(
+    constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, duration: Double) : this(
         start.x, start.y, start.dx, start.dy,
         end.x, end.y, end.dx, end.dy,
-        startTime, endTime
+        duration
     )
 
     // 分别为 X 轴和 Y 轴生成独立的一维样条
@@ -56,10 +56,6 @@ open class TrajectoryGenerator2D(
 
 
     val length: Double get() = calculateArcLength(100)
-
-    val duration: Double get() = endTime - startTime
-
-
 
     /**
      * 使用辛普森积分法计算弧长
@@ -91,18 +87,17 @@ open class TrajectoryGenerator2D(
 
 
     // 计算 u 的逻辑提取出来，方便子类复用
-    protected fun getU(currentTime: Double): Double {
-        val duration = endTime - startTime
+    protected fun getU(localTime: Double): Double {
         return if (duration > 0) {
-            ((currentTime - startTime) / duration).coerceIn(0.0, 1.0)
+            (localTime / duration).coerceIn(0.0, 1.0)
         } else 1.0
     }
 
     /**
-     * 根据当前绝对时间，计算机器人在该时刻的期望位置 (gotoX, gotoY)
+     * 根据当前在路段内的局部时间，计算机器人在该时刻的期望位置 (gotoX, gotoY)
      */
-    open fun getPointAtTime(currentTime: Double): Point2D {
-        val u = getU(currentTime)
+    open fun getPointAtTime(localTime: Double): Point2D {
+        val u = getU(localTime)
         return Point2D(splineX.getPosition(u), splineY.getPosition(u))
     }
 
@@ -133,18 +128,18 @@ class OrientedTrajectoryGenerator2D(
     var startHeading: Double, var startDHeading: Double, // 新增朝向属性
     endX: Double, endY: Double, endDx: Double, endDy: Double,
     var endHeading: Double, var endDHeading: Double,     // 新增朝向属性
-    startTime: Double, endTime: Double
+    duration: Double
 ) : TrajectoryGenerator2D(
     startX, startY, startDx, startDy,
     endX, endY, endDx, endDy,
-    startTime, endTime
+    duration
 ) {
 
     // 方便的次级构造函数，直接传入 DifferentialPoint2D
-    constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, startTime: Double, endTime: Double) : this(
+    constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, duration: Double) : this(
         start.x, start.y, start.dx, start.dy, start.heading, start.dHeading,
         end.x, end.y, end.dx, end.dy, end.heading, end.dHeading,
-        startTime, endTime
+        duration
     )
 
     // 专属于朝向的样条
@@ -157,10 +152,10 @@ class OrientedTrajectoryGenerator2D(
     /**
      * 复写获取点的方法，填充 heading 字段
      */
-    override fun getPointAtTime(currentTime: Double): Point2D {
-        val u = getU(currentTime)
+    override fun getPointAtTime(localTime: Double): Point2D {
+        val u = getU(localTime)
         // 调用 super 获取基础的 x, y，然后注入新的 heading
-        val basePoint = super.getPointAtTime(currentTime)
+        val basePoint = super.getPointAtTime(localTime)
         return basePoint.copy(
             heading = splineHeading.getPosition(u)
         )
@@ -194,7 +189,9 @@ data class DifferentialPoint2D(val x: Double,
                                val y: Double,
                                val dy: Double,
                                val heading: Double = 0.0,
-                               val dHeading: Double = 0.0) {
+                               val dHeading: Double = 0.0,
+                               val duration: Double = 1.0,
+                               val time: Double = 0.0) { // Added time with a default value
     infix fun isCloseTo(other: DifferentialPoint2D): Boolean {
         val epsilon = 1e-7
         return abs(x - other.x) < epsilon &&
@@ -202,7 +199,9 @@ data class DifferentialPoint2D(val x: Double,
                 abs(dx - other.dx) < epsilon &&
                 abs(dy - other.dy) < epsilon &&
                 abs(heading - other.heading) < epsilon &&
-                abs(dHeading - other.dHeading) < epsilon
+                abs(dHeading - other.dHeading) < epsilon &&
+                abs(duration - other.duration) < epsilon &&
+                abs(time - other.time) < epsilon
     }
 }
 
