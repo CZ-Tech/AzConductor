@@ -178,7 +178,6 @@ fun App(route: RouteConnector = RouteConnector()) {
                         translate(mapper.centerX, mapper.centerY)
                         rotate(rotationDegrees, pivot = Offset.Zero)
                         scale(mapper.scale, mapper.scale, pivot = Offset.Zero)
-                        translate(canvasLogicalWidth * (originRatioX - 0.5f), canvasLogicalHeight * (originRatioY - 0.5f))
                     }) {
                         val path = Path()
                         val totalTime = route.getTotalTime()
@@ -186,8 +185,9 @@ fun App(route: RouteConnector = RouteConnector()) {
                             for (i in 0..curveDrawStep) {
                                 val time = (i.toDouble() / curveDrawStep) * totalTime
                                 val point = route.getPointAtTime(time) ?: break
-                                if (i == 0) path.moveTo(point.x.toFloat(), point.y.toFloat())  // 移动画笔到起点
-                                else path.lineTo(point.x.toFloat(), point.y.toFloat())  // 划线到下一个点
+                                val mapped = mapper.logicalToBase(point.x.toFloat(), point.y.toFloat())
+                                if (i == 0) path.moveTo(mapped.x, mapped.y)
+                                else path.lineTo(mapped.x, mapped.y)
                             }
                             drawPath(
                                 path = path,
@@ -319,7 +319,8 @@ fun App(route: RouteConnector = RouteConnector()) {
 // 简单的边界数据类
 data class RectBounds(val minX: Double, val maxX: Double, val minY: Double, val maxY: Double)
 
-// --- Mapper 工具类 (保持不变) ---
+
+// --- Mapper 工具类 ---
 class CoordinateMapper(
     physicalWidth: Float, physicalHeight: Float,
     logicalWidth: Float, logicalHeight: Float,
@@ -329,27 +330,57 @@ class CoordinateMapper(
     val centerX = physicalWidth / 2f
     val centerY = physicalHeight / 2f
     val scale = minOf(physicalWidth / logicalWidth, physicalHeight / logicalHeight)
-    private val offsetX = logicalWidth * (originRatioX - 0.5f)
-    private val offsetY = logicalHeight * (originRatioY - 0.5f)
+
+    // 逻辑原点偏移（逻辑单位）
+    private val logicalOffsetX = logicalWidth * (originRatioX - 0.5f)
+    private val logicalOffsetY = logicalHeight * (originRatioY - 0.5f)
+
+    // 基础屏幕偏移（在缩放和旋转之前）
+    private val baseOffsetX = logicalOffsetX * logicalXMapToScreenX + logicalOffsetY * logicalYMapToScreenX
+    private val baseOffsetY = logicalOffsetX * logicalXMapToScreenY + logicalOffsetY * logicalYMapToScreenY
+
     private val angleRad = (rotationDegrees.toDouble()).toRadians().toFloat()
     private val cosA = cos(angleRad)
     private val sinA = sin(angleRad)
 
+    // 逆矩阵计算，用于 screenToLogical
+    private val det = logicalXMapToScreenX * logicalYMapToScreenY - logicalXMapToScreenY * logicalYMapToScreenX
+    private val invXMapX = logicalYMapToScreenY / det
+    private val invXMapY = -logicalYMapToScreenX / det
+    private val invYMapX = -logicalXMapToScreenY / det
+    private val invYMapY = logicalXMapToScreenX / det
+
+    // 将逻辑坐标映射到基础物理坐标（变换前）
+    fun logicalToBase(lx: Float, ly: Float): Offset {
+        val sxBase = lx * logicalXMapToScreenX + ly * logicalYMapToScreenX + baseOffsetX
+        val syBase = lx * logicalXMapToScreenY + ly * logicalYMapToScreenY + baseOffsetY
+        return Offset(sxBase, syBase)
+    }
+
     fun logicalToScreen(lx: Float, ly: Float): Offset {
-        val sx = (lx + offsetX) * scale
-        val sy = (ly + offsetY) * scale
+        val base = logicalToBase(lx, ly)
+        val sx = base.x * scale
+        val sy = base.y * scale
         return Offset(sx * cosA - sy * sinA + centerX, sx * sinA + sy * cosA + centerY)
     }
 
     fun screenToLogical(px: Float, py: Float): Offset {
         val rx = px - centerX
         val ry = py - centerY
-        val clx = (rx * cosA + ry * sinA) / scale
-        val cly = (-rx * sinA + ry * cosA) / scale
-        return Offset(clx - offsetX, cly - offsetY)
+        val sxBase = (rx * cosA + ry * sinA) / scale - baseOffsetX
+        val syBase = (-rx * sinA + ry * cosA) / scale - baseOffsetY
+
+        val lx = sxBase * invXMapX + syBase * invXMapY
+        val ly = sxBase * invYMapX + syBase * invYMapY
+        return Offset(lx, ly)
     }
 
     fun screenDeltaToLogicalDelta(dx: Float, dy: Float): Offset {
-        return Offset((dx * cosA + dy * sinA) / scale, (-dx * sinA + dy * cosA) / scale)
+        val sxBase = (dx * cosA + dy * sinA) / scale
+        val syBase = (-dx * sinA + dy * cosA) / scale
+
+        val lx = sxBase * invXMapX + syBase * invXMapY
+        val ly = sxBase * invYMapX + syBase * invYMapY
+        return Offset(lx, ly)
     }
 }

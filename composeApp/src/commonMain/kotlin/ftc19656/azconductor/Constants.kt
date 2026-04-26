@@ -74,6 +74,17 @@ private val MyDarkColors = darkColorScheme(
 
 
 
+// 逻辑坐标系 X 轴正方向在屏幕上的映射:
+// 用单位向量表示
+// 1f -> 屏幕右侧, -1f -> 屏幕左侧, 0f -> 无水平分量
+const val logicalXMapToScreenX = 0f
+// 1f -> 屏幕下方, -1f -> 屏幕上方, 0f -> 无垂直分量
+const val logicalXMapToScreenY = 1f
+
+// 逻辑坐标系 Y 轴正方向在屏幕上的映射:
+const val logicalYMapToScreenX = 1f
+const val logicalYMapToScreenY = 0f
+
 // ---------------- 临时区域 ------------------
 
 // 逻辑上的画布大小
