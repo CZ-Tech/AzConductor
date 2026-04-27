@@ -2,10 +2,14 @@ package ftc19656.azconductor.front
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
@@ -101,6 +105,11 @@ fun App(route: RouteConnector = RouteConnector()) {
             maxY = (canvasLogicalHeight * (1f - originRatioY)).toDouble()
         )
     }
+
+    // 示例机器人状态
+    var robot1Heading by remember { mutableStateOf(0f) }
+    var robot2Heading by remember { mutableStateOf(45f) }
+    var robot3Heading by remember { mutableStateOf(-90f) }
 
     MaterialTheme(
         colorScheme = colorScheme,
@@ -231,6 +240,36 @@ fun App(route: RouteConnector = RouteConnector()) {
                     }
                 }
 
+                // 展示多个机器人组件实例
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    Text("机器人组件示例 (长按圆点旋转):", style = MaterialTheme.typography.labelSmall)
+                    RobotComponent(
+                        width = 80.dp,
+                        height = 60.dp,
+                        headingDegrees = robot1Heading,
+                        onHeadingChange = { robot1Heading = it }
+                    )
+                    RobotComponent(
+                        width = 40.dp,
+                        height = 100.dp,
+                        headingDegrees = robot2Heading,
+                        onHeadingChange = { robot2Heading = it },
+                        color = Color.Red
+                    )
+                    RobotComponent(
+                        width = 60.dp,
+                        height = 60.dp,
+                        headingDegrees = robot3Heading,
+                        onHeadingChange = { robot3Heading = it },
+                        color = Color.Green
+                    )
+                }
+
                 editingNodeIndex?.let { indexToEdit ->
                     val targetNode = route.waypoints.getOrNull(indexToEdit)
                     if (targetNode != null) {
@@ -298,7 +337,7 @@ fun App(route: RouteConnector = RouteConnector()) {
                             }
                         },
                         confirmButton = {
-                            androidx.compose.foundation.layout.Row {
+                            Row {
                                 TextButton(onClick = {
                                     clipboardManager.setText(AnnotatedString(exportedJson))
                                 }) {
