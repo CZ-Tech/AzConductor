@@ -210,7 +210,8 @@ data class DifferentialPoint2D(val x: Double,
  * 例如：从 350° 到 10°，会把 10° 转换为 370°，样条插值就会顺时针走 20°
  */
 fun normalizeRelative(start: Double, end: Double): Double {
-    val diff = (end - start + PI) % (2 * PI) - PI
-    val adjustedDiff = if (diff < -PI) diff + 2 * PI else diff
-    return start + adjustedDiff
+    var diff = (end - start) % 360.0
+    if (diff > 180.0) diff -= 360.0
+    if (diff < -180.0) diff += 360.0
+    return start + diff
 }

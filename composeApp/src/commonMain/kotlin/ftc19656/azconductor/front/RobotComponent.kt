@@ -28,12 +28,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import ftc19656.azconductor.fieldXAngleDeg
 import ftc19656.azconductor.robotComponentTouchThresholdRatio
 import kotlin.math.PI
 import kotlin.math.atan2
 
 /**
  * 机器人组件：圆角空心方框
+ * @param index 节点索引，用于区分不同的组件实例，防止 pointerInput 复用导致的更新错误
  * @param logicalWidth 逻辑宽度 (英寸)
  * @param logicalHeight 逻辑高度 (英寸)
  * @param scale 像素/英寸 比例
@@ -42,6 +44,7 @@ import kotlin.math.atan2
  */
 @Composable
 fun RobotComponent(
+    index: Int,
     logicalWidth: Float,
     logicalHeight: Float,
     scale: Float,
@@ -72,11 +75,13 @@ fun RobotComponent(
     var isDraggingHeading by remember { mutableStateOf(false) }
 
     val currentHeading by rememberUpdatedState(headingDegrees)
+    val currentOnHeadingChange by rememberUpdatedState(onHeadingChange)
 
     Box(
         modifier = modifier
             .onSizeChanged { componentSizePx = it }
-            .pointerInput(logicalWidth, logicalHeight, scale) {
+            // 增加 index 作为 key，确保切换节点时重置手势监听
+            .pointerInput(logicalWidth, logicalHeight, scale, index) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         val bufferPx = with(density) { touchBufferDp.toPx() }
@@ -88,14 +93,15 @@ fun RobotComponent(
                         val dist = physicalWidthPx / 2f
                         
                         // 计算当前旋转后的圆点物理位置
-                        val angleRad = currentHeading * (PI.toFloat() / 180f)
+                        // heading 为 0 时应指向场地 X 轴 (fieldXAngleDeg)
+                        val angleRad = (currentHeading + ftc19656.azconductor.fieldXAngleDeg) * (PI.toFloat() / 180f)
                         val headDotCenter = Offset(
                             centerX + dist * kotlin.math.cos(angleRad),
                             centerY + dist * kotlin.math.sin(angleRad)
                         )
                         
                         val distance = (offset - headDotCenter).getDistance()
-                        val touchThreshold = headDotSizePx * robotComponentTouchThresholdRatio
+                        val touchThreshold = headDotSizePx * ftc19656.azconductor.robotComponentTouchThresholdRatio
                         isDraggingHeading = distance <= touchThreshold
                     },
                     onDrag = { change, _ ->
@@ -112,7 +118,15 @@ fun RobotComponent(
                             val diff = touchPos - center
                             val angleRad = atan2(diff.y, diff.x)
                             val angleDeg = (angleRad * 180f / PI).toFloat()
-                            onHeadingChange(angleDeg)
+                            
+                            // 减去偏移量，使得指向场地 X 轴时 heading 为 0
+                            var newHeading = angleDeg - ftc19656.azconductor.fieldXAngleDeg
+                            
+                            // 规格化到 [-180, 180] 避免数值跳变
+                            while (newHeading <= -180f) newHeading += 360f
+                            while (newHeading > 180f) newHeading -= 360f
+                            
+                            currentOnHeadingChange(newHeading)
                         }
                     },
                     onDragEnd = { isDraggingHeading = false },
@@ -126,7 +140,8 @@ fun RobotComponent(
         Box(
             modifier = Modifier
                 .size(widthDp, heightDp)
-                .rotate(headingDegrees)
+                // 旋转角度增加偏移量，使 0 度指向场地 X 轴
+                .rotate(headingDegrees + ftc19656.azconductor.fieldXAngleDeg)
                 .border(strokeWidth, color, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.CenterEnd
         ) {

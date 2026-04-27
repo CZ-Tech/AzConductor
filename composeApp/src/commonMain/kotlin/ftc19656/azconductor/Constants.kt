@@ -84,6 +84,16 @@ const val logicalXMapToScreenY = 1f
 const val logicalYMapToScreenX = 1f
 const val logicalYMapToScreenY = 0f
 
+/**
+ * 逻辑 X 轴在屏幕坐标系中的角度 (单位：度)
+ * 用于同步机器人组件的视觉朝向与逻辑朝向
+ */
+val fieldXAngleDeg: Float 
+    get() = kotlin.math.atan2(logicalXMapToScreenY, logicalXMapToScreenX)
+        .toDouble()
+        .toDegrees()
+        .toFloat()
+
 
 // 逻辑上的画布大小
 // 无论屏幕多大，路径算法都基于这个尺寸进行计算
@@ -91,8 +101,8 @@ const val canvasLogicalWidth = 144f
 const val canvasLogicalHeight = 144f
 
 // 机器人逻辑尺寸 (英寸)
-const val robotLogicalWidth = 9f
-const val robotLogicalHeight = 18f
+const val robotLogicalWidth = 18f
+const val robotLogicalHeight = 9f
 
 const val KVelocityHandle = 5.0  // 这个数字越大，那么每单位长度速度向量手柄代表的dx、dy越大，也就是说更短的手柄可以代表更大的速度
 

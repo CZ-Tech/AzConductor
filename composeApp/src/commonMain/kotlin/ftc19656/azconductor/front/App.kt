@@ -211,9 +211,13 @@ fun App(route: RouteConnector = RouteConnector()) {
                 selectedNodeIndex.value?.let { index ->
                     route.waypoints.getOrNull(index)?.let { node ->
                         val screenPos = mapper.logicalToScreen(node.x.toFloat(), node.y.toFloat())
-                        // 机器人中心偏移量：(18/2 + 2.5*2) = 14 英寸 * scale
-                        val centerOffsetPx = 14f * mapper.scale
+                        // 机器人中心偏移量（包含 5 英寸触控缓冲区）：
+                        // offsetX = (robotLogicalWidth + 10) / 2
+                        // offsetY = (robotLogicalHeight + 10) / 2
+                        val centerOffsetX = (robotLogicalWidth + 10f) / 2f * mapper.scale
+                        val centerOffsetY = (robotLogicalHeight + 10f) / 2f * mapper.scale
                         RobotComponent(
+                            index = index,
                             logicalWidth = robotLogicalWidth,
                             logicalHeight = robotLogicalHeight,
                             scale = mapper.scale,
@@ -225,8 +229,8 @@ fun App(route: RouteConnector = RouteConnector()) {
                             modifier = Modifier
                                 .offset {
                                     IntOffset(
-                                        (screenPos.x - centerOffsetPx).roundToInt(),
-                                        (screenPos.y - centerOffsetPx).roundToInt()
+                                        (screenPos.x - centerOffsetX).roundToInt(),
+                                        (screenPos.y - centerOffsetY).roundToInt()
                                     )
                                 }
                         )
