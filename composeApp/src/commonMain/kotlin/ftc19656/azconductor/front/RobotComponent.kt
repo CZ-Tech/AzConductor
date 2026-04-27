@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,15 +34,17 @@ import kotlin.math.atan2
 
 /**
  * 机器人组件：圆角空心方框
- * @param width 宽度 (Dp)
- * @param height 高度 (Dp)
- * @param headingDegrees 当前朝向角度 (单位：度，0度指向正右方/X轴正向)
+ * @param logicalWidth 逻辑宽度 (英寸)
+ * @param logicalHeight 逻辑高度 (英寸)
+ * @param scale 像素/英寸 比例
+ * @param headingDegrees 当前朝向角度 (单位：度)
  * @param onHeadingChange 角度变化回调
  */
 @Composable
 fun RobotComponent(
-    width: Dp,
-    height: Dp,
+    logicalWidth: Float,
+    logicalHeight: Float,
+    scale: Float,
     headingDegrees: Float,
     onHeadingChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
@@ -49,40 +52,61 @@ fun RobotComponent(
     strokeWidth: Dp = 2.dp
 ) {
     val density = LocalDensity.current
-    val headDotSizeDp = 12.dp
-    // 增加一个触摸缓冲区，大小至少要能覆盖容差范围内的方框外区域
-    val touchBufferDp = headDotSizeDp * 2
+    
+    // 物理像素尺寸
+    val physicalWidthPx = logicalWidth * scale
+    val physicalHeightPx = logicalHeight * scale
+    
+    // 转换为 Dp 供 Compose 布局使用
+    val widthDp = with(density) { physicalWidthPx.toDp() }
+    val heightDp = with(density) { physicalHeightPx.toDp() }
+
+    // 车头圆点：逻辑上约 2.5 英寸
+    val headDotLogicalSize = 2.5f 
+    val headDotSizePx = headDotLogicalSize * scale
+    val headDotSizeDp = with(density) { headDotSizePx.toDp() }
+    
+    // 触摸缓冲区：确保判定范围超出视觉方框
+    val touchBufferDp = headDotSizeDp * 2f
     var componentSizePx by remember { mutableStateOf(IntSize.Zero) }
     var isDraggingHeading by remember { mutableStateOf(false) }
+
+    val currentHeading by rememberUpdatedState(headingDegrees)
 
     Box(
         modifier = modifier
             .onSizeChanged { componentSizePx = it }
-            // 在最外层扩展触摸区域
-            .pointerInput(width, height) {
+            .pointerInput(logicalWidth, logicalHeight, scale) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         val bufferPx = with(density) { touchBufferDp.toPx() }
-                        val visualWidthPx = with(density) { width.toPx() }
-                        val visualHeightPx = with(density) { height.toPx() }
+                        // 旋转中心
+                        val centerX = bufferPx + physicalWidthPx / 2f
+                        val centerY = bufferPx + physicalHeightPx / 2f
                         
-                        // 判定中心：相对于外层 Box，圆点中心在 (buffer + width, buffer + height/2)
+                        // 车头圆点在 0 度时相对于中心的偏移距离
+                        val dist = physicalWidthPx / 2f
+                        
+                        // 计算当前旋转后的圆点物理位置
+                        val angleRad = currentHeading * (PI.toFloat() / 180f)
                         val headDotCenter = Offset(
-                            bufferPx + visualWidthPx, 
-                            bufferPx + visualHeightPx / 2f
+                            centerX + dist * kotlin.math.cos(angleRad),
+                            centerY + dist * kotlin.math.sin(angleRad)
                         )
                         
                         val distance = (offset - headDotCenter).getDistance()
-                        val touchThreshold = with(density) { headDotSizeDp.toPx() * robotComponentTouchThresholdRatio }
+                        val touchThreshold = headDotSizePx * robotComponentTouchThresholdRatio
                         isDraggingHeading = distance <= touchThreshold
                     },
                     onDrag = { change, _ ->
                         if (isDraggingHeading) {
                             change.consume()
                             val bufferPx = with(density) { touchBufferDp.toPx() }
-                            val visualWidthPx = with(density) { width.toPx() }
-                            val visualHeightPx = with(density) { height.toPx() }
-                            val center = Offset(bufferPx + visualWidthPx / 2f, bufferPx + visualHeightPx / 2f)
+                            // 旋转中心位于视觉组件的中心
+                            val center = Offset(
+                                bufferPx + physicalWidthPx / 2f, 
+                                bufferPx + physicalHeightPx / 2f
+                            )
                             
                             val touchPos = change.position
                             val diff = touchPos - center
@@ -95,20 +119,21 @@ fun RobotComponent(
                     onDragCancel = { isDraggingHeading = false }
                 )
             }
-            .padding(touchBufferDp), // 内部视觉部分留出 buffer
+            .padding(touchBufferDp),
         contentAlignment = Alignment.Center
     ) {
+        // 视觉组件
         Box(
             modifier = Modifier
-                .size(width, height)
+                .size(widthDp, heightDp)
                 .rotate(headingDegrees)
                 .border(strokeWidth, color, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.CenterEnd
         ) {
-            // 车头指示小圆点 (位于方框右侧边缘)
+            // 车头指示小圆点
             Box(
                 modifier = Modifier
-                    .offset(x = headDotSizeDp / 2) // 让圆点中心对齐边框
+                    .offset(x = headDotSizeDp / 2) // 中心对齐边框
                     .size(headDotSizeDp)
                     .clip(CircleShape)
                     .drawBehind {

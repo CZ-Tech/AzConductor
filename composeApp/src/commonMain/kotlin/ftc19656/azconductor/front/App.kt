@@ -207,6 +207,32 @@ fun App(route: RouteConnector = RouteConnector()) {
                     }
                 }
 
+                // 绘制机器人组件（如果选中了节点）
+                selectedNodeIndex.value?.let { index ->
+                    route.waypoints.getOrNull(index)?.let { node ->
+                        val screenPos = mapper.logicalToScreen(node.x.toFloat(), node.y.toFloat())
+                        // 机器人中心偏移量：(18/2 + 2.5*2) = 14 英寸 * scale
+                        val centerOffsetPx = 14f * mapper.scale
+                        RobotComponent(
+                            logicalWidth = robotLogicalWidth,
+                            logicalHeight = robotLogicalHeight,
+                            scale = mapper.scale,
+                            headingDegrees = node.heading.toFloat(),
+                            onHeadingChange = { newHeading ->
+                                val updatedNode = route.getNodeAt(index).copy(heading = newHeading.toDouble())
+                                route.moveNode(index, updatedNode)
+                            },
+                            modifier = Modifier
+                                .offset {
+                                    IntOffset(
+                                        (screenPos.x - centerOffsetPx).roundToInt(),
+                                        (screenPos.y - centerOffsetPx).roundToInt()
+                                    )
+                                }
+                        )
+                    }
+                }
+
                 // 绘制节点
                 // 使用 key 确保在点数量变化时，组件能被正确复用或重置
                 route.waypoints.forEachIndexed { index, node ->
@@ -238,36 +264,6 @@ fun App(route: RouteConnector = RouteConnector()) {
                             )
                         }
                     }
-                }
-
-                // 展示多个机器人组件实例
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
-                ) {
-                    Text("机器人组件示例 (长按圆点旋转):", style = MaterialTheme.typography.labelSmall)
-                    RobotComponent(
-                        width = 80.dp,
-                        height = 60.dp,
-                        headingDegrees = robot1Heading,
-                        onHeadingChange = { robot1Heading = it }
-                    )
-                    RobotComponent(
-                        width = 40.dp,
-                        height = 100.dp,
-                        headingDegrees = robot2Heading,
-                        onHeadingChange = { robot2Heading = it },
-                        color = Color.Red
-                    )
-                    RobotComponent(
-                        width = 60.dp,
-                        height = 60.dp,
-                        headingDegrees = robot3Heading,
-                        onHeadingChange = { robot3Heading = it },
-                        color = Color.Green
-                    )
                 }
 
                 editingNodeIndex?.let { indexToEdit ->

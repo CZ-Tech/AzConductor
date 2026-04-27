@@ -90,6 +90,10 @@ const val logicalYMapToScreenY = 0f
 const val canvasLogicalWidth = 144f
 const val canvasLogicalHeight = 144f
 
+// 机器人逻辑尺寸 (英寸)
+const val robotLogicalWidth = 9f
+const val robotLogicalHeight = 18f
+
 const val KVelocityHandle = 5.0  // 这个数字越大，那么每单位长度速度向量手柄代表的dx、dy越大，也就是说更短的手柄可以代表更大的速度
 
 // NodeEditorDialog 中 DifferentialPoint2D 属性的显示顺序
