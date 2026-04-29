@@ -107,7 +107,7 @@ const val robotLogicalHeight = 9f
 const val KVelocityHandle = 5.0  // 这个数字越大，那么每单位长度速度向量手柄代表的dx、dy越大，也就是说更短的手柄可以代表更大的速度
 
 // NodeEditorDialog 中 DifferentialPoint2D 属性的显示顺序
-val NODE_EDITOR_FIELD_ORDER = listOf("time", "heading", "dHeading", "duration", "x", "dx", "y", "dy")
+val NODE_EDITOR_FIELD_ORDER = listOf("heading", "dHeading", "duration", "x", "dx", "y", "dy")
 
 /**
  * 机器人组件触控容差系数

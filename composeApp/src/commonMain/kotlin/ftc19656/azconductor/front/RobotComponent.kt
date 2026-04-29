@@ -94,7 +94,7 @@ fun RobotComponent(
                         
                         // 计算当前旋转后的圆点物理位置
                         // heading 为 0 时应指向场地 X 轴 (fieldXAngleDeg)
-                        val angleRad = (currentHeading + ftc19656.azconductor.fieldXAngleDeg) * (PI.toFloat() / 180f)
+                        val angleRad = (currentHeading + fieldXAngleDeg) * (PI.toFloat() / 180f)
                         val headDotCenter = Offset(
                             centerX + dist * kotlin.math.cos(angleRad),
                             centerY + dist * kotlin.math.sin(angleRad)

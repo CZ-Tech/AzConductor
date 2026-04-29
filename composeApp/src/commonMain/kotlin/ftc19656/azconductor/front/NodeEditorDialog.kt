@@ -27,6 +27,12 @@ import kotlinx.serialization.serializer
 val serializer = serializer<DifferentialPoint2D>()
 val descriptor = serializer.descriptor
 
+// 配置 Json 实例，强制包含默认值，确保 UI 能够显示 duration, heading 等默认字段
+val editorJson = Json {
+    encodeDefaults = true
+    ignoreUnknownKeys = true
+}
+
 @OptIn(ExperimentalSerializationApi::class)
 fun preloadSerializer(): DifferentialPoint2D {
     // 强制预热序列化器引擎
@@ -47,8 +53,8 @@ fun preloadSerializer(): DifferentialPoint2D {
             ?: JsonPrimitive(stringValue)
     }
     // 预热反序列化
-    val newNode = Json.decodeFromJsonElement(ftc19656.azconductor.front.serializer, JsonObject(jsonContent))
-    val jsonElement = Json.encodeToJsonElement(ftc19656.azconductor.front.serializer, newNode) as JsonObject
+    val newNode = editorJson.decodeFromJsonElement(ftc19656.azconductor.front.serializer, JsonObject(jsonContent))
+    val jsonElement = editorJson.encodeToJsonElement(ftc19656.azconductor.front.serializer, newNode) as JsonObject
 
     println("Serializer preloaded! Got $count fields")
     return newNode
@@ -71,7 +77,8 @@ fun NodeEditorDialog(
     // 先把 node 转成 JsonObject，然后遍历它所有的键值对存入 Map，实现增加字段时自动识别
     val editValues = remember(node) {
         val mutableMap = mutableStateMapOf<String, String>()
-        val jsonElement = Json.encodeToJsonElement(serializer, node) as JsonObject
+        // 使用配置好的 editorJson，确保默认值也会被转成字符串填充到输入框
+        val jsonElement = editorJson.encodeToJsonElement(serializer, node) as JsonObject
         jsonElement.forEach { (key, value) ->
             // .jsonPrimitive.content 能把 20.0 或者 "hello" 都变成字符串 "20.0" 或 "hello"
             mutableMap[key] = value.jsonPrimitive.content
@@ -123,7 +130,7 @@ fun NodeEditorDialog(
                     }
 
                     // 反序列化成类，实现改变节点字段时无需修改此处代码
-                    val newNode = Json.decodeFromJsonElement(serializer, JsonObject(jsonContent))
+                    val newNode = editorJson.decodeFromJsonElement(serializer, JsonObject(jsonContent))
                     onConfirm(newNode)
                     onDismiss()
 

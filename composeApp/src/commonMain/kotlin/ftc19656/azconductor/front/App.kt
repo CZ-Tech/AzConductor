@@ -2,24 +2,34 @@ package ftc19656.azconductor.front
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.PointerButton
@@ -48,6 +58,7 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @Preview
 fun App(route: RouteConnector = RouteConnector()) {
@@ -61,6 +72,9 @@ fun App(route: RouteConnector = RouteConnector()) {
     // 右键菜单状态
     var showContextMenu by remember { mutableStateOf(false) }
     var contextMenuOffset by remember { mutableStateOf(Offset.Zero) }
+
+    // 进度条状态
+    var currentTime by remember { mutableStateOf(0f) }
 
     // 导出 JSON 对话框状态
     var showExportDialog by remember { mutableStateOf(false) }
@@ -106,248 +120,338 @@ fun App(route: RouteConnector = RouteConnector()) {
         )
     }
 
-    // 示例机器人状态
-    var robot1Heading by remember { mutableStateOf(0f) }
-    var robot2Heading by remember { mutableStateOf(45f) }
-    var robot3Heading by remember { mutableStateOf(-90f) }
-
     MaterialTheme(
         colorScheme = colorScheme,
         typography = MyTypography
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .wrapContentSize(Alignment.Center)
-                .aspectRatio(canvasLogicalWidth / canvasLogicalHeight)
-                .onSizeChanged { canvasPhysicalSize = it }
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
-                                val isConsumed = event.changes.any { it.isConsumed }
-                                if (!isConsumed) {
-                                    contextMenuOffset = event.changes.first().position
-                                    showContextMenu = true
-                                }
-                            }
-                        }
-                    }
-                }
-        ) {
-            if (canvasPhysicalSize != IntSize.Zero) {
-                val mapper = remember(canvasPhysicalSize, rotationDegrees) {
-                    CoordinateMapper(
-                        physicalWidth = canvasPhysicalSize.width.toFloat(),
-                        physicalHeight = canvasPhysicalSize.height.toFloat(),
-                        logicalWidth = canvasLogicalWidth,
-                        logicalHeight = canvasLogicalHeight,
-                        originRatioX = originRatioX,
-                        originRatioY = originRatioY,
-                        rotationDegrees = rotationDegrees
-                    )
-                }
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val isLandscape = maxWidth > maxHeight
 
-                // --- 第一层：Canvas 绘制地图背景和路径 ---
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .drawBehind { with(painter) { draw(size = size) } }
-                        .pointerInput(mapper) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    if (event.type == PointerEventType.Press) {
-                                        val change = event.changes.first()
-                                        if (change.pressed && event.buttons.isPrimaryPressed) {
-                                            // 左键点击（添加点）
-                                            val logicPos = mapper.screenToLogical(change.position.x, change.position.y)
-                                            route.addPoint(
-                                                DifferentialPoint2D(
-                                                    x = logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
-                                                    dx = 10.0 * KVelocityHandle,
-                                                    y = logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),
-                                                    dy = 0.0,
-                                                    // heading, dHeading, duration 将使用默认值
-                                                )
-                                            )
-                                            change.consume()
-                                        }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .wrapContentSize(Alignment.Center)
+                    .aspectRatio(canvasLogicalWidth / canvasLogicalHeight)
+                    .onSizeChanged { canvasPhysicalSize = it }
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                    val isConsumed = event.changes.any { it.isConsumed }
+                                    if (!isConsumed) {
+                                        contextMenuOffset = event.changes.first().position
+                                        showContextMenu = true
                                     }
                                 }
                             }
                         }
-                ) {
-                    // 在此处读取 pathVersion。向 Compose 注册了依赖关系
-                    // 只要 route.pathVersion 发生变化，这个 Canvas 就会触发重绘阶段
-                    val currentVersion = route.pathVersion
-                    // 路径绘制：由于 route.waypoints 是 StateList，此处会自动重绘
-                    withTransform({
-                        translate(mapper.centerX, mapper.centerY)
-                        rotate(rotationDegrees, pivot = Offset.Zero)
-                        scale(mapper.scale, mapper.scale, pivot = Offset.Zero)
-                    }) {
-                        val path = Path()
-                        val totalTime = route.getTotalTime()
-                        if (totalTime > 0) {
-                            for (i in 0..curveDrawStep) {
-                                val time = (i.toDouble() / curveDrawStep) * totalTime
-                                val point = route.getPointAtTime(time) ?: break
-                                val mapped = mapper.logicalToBase(point.x.toFloat(), point.y.toFloat())
-                                if (i == 0) path.moveTo(mapped.x, mapped.y)
-                                else path.lineTo(mapped.x, mapped.y)
-                            }
-                            drawPath(
-                                path = path,
-                                color = pathLineColor,
-                                style = Stroke(width = canvasLineWidth / mapper.scale)
-                            )
-                        }
                     }
-                }
-
-                // 绘制机器人组件（如果选中了节点）
-                selectedNodeIndex.value?.let { index ->
-                    route.waypoints.getOrNull(index)?.let { node ->
-                        val screenPos = mapper.logicalToScreen(node.x.toFloat(), node.y.toFloat())
-                        // 机器人中心偏移量（包含 5 英寸触控缓冲区）：
-                        // offsetX = (robotLogicalWidth + 10) / 2
-                        // offsetY = (robotLogicalHeight + 10) / 2
-                        val centerOffsetX = (robotLogicalWidth + 10f) / 2f * mapper.scale
-                        val centerOffsetY = (robotLogicalHeight + 10f) / 2f * mapper.scale
-                        RobotComponent(
-                            index = index,
-                            logicalWidth = robotLogicalWidth,
-                            logicalHeight = robotLogicalHeight,
-                            scale = mapper.scale,
-                            headingDegrees = node.heading.toFloat(),
-                            onHeadingChange = { newHeading ->
-                                val updatedNode = route.getNodeAt(index).copy(heading = newHeading.toDouble())
-                                route.moveNode(index, updatedNode)
-                            },
-                            modifier = Modifier
-                                .offset {
-                                    IntOffset(
-                                        (screenPos.x - centerOffsetX).roundToInt(),
-                                        (screenPos.y - centerOffsetY).roundToInt()
-                                    )
-                                }
+            ) {
+                if (canvasPhysicalSize != IntSize.Zero) {
+                    val mapper = remember(canvasPhysicalSize, rotationDegrees) {
+                        CoordinateMapper(
+                            physicalWidth = canvasPhysicalSize.width.toFloat(),
+                            physicalHeight = canvasPhysicalSize.height.toFloat(),
+                            logicalWidth = canvasLogicalWidth,
+                            logicalHeight = canvasLogicalHeight,
+                            originRatioX = originRatioX,
+                            originRatioY = originRatioY,
+                            rotationDegrees = rotationDegrees
                         )
                     }
-                }
 
-                // 绘制节点
-                // 使用 key 确保在点数量变化时，组件能被正确复用或重置
-                route.waypoints.forEachIndexed { index, node ->
-                    key(index) {
-                        DraggableNode(
-                            index = index,
-                            node = node,
-                            mapper = mapper,
-                            bounds = bounds,
-                            onMove = { idx, newNode -> route.moveNode(idx, newNode) },
-                            onClick = {
-                                println("Clicked node: $it")
-                                selectedNodeIndex.value = if (selectedNodeIndex.value != index) index else null
-                            },
-                            onRightClick = { idx ->
-                                editingNodeIndex = idx // 触发弹窗显示
-                            }
-                        )
-                        // 如果该节点被选中，则显示向量调节手柄
-                        if (selectedNodeIndex.value == index) {
-                            VectorHandle(
-                                node = node,
-                                mapper = mapper,
-                                onVectorChanged = { newDx, newDy ->
-                                    // 更新该节点的向量属性，保持 x, y 不变（从表中重新获取最新状态避免暂存状态过期导致瞬移）
-                                    val updatedNode = route.getNodeAt(index).copy(dx = newDx, dy = newDy)
-                                    route.moveNode(index, updatedNode)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                editingNodeIndex?.let { indexToEdit ->
-                    val targetNode = route.waypoints.getOrNull(indexToEdit)
-                    if (targetNode != null) {
-                        NodeEditorDialog(
-                            node = targetNode,
-                            onDismiss = { editingNodeIndex = null },
-                            onConfirm = { updatedNode ->
-                                route.moveNode(indexToEdit, updatedNode)
-                            },
-                            onDelete = {
-                                route.removeNode(indexToEdit)
-                                // 如果删除的是当前选中的节点，重置选中状态
-                                if (selectedNodeIndex.value == indexToEdit) {
-                                    selectedNodeIndex.value = -1
+                    // --- 第一层：Canvas 绘制地图背景和路径 ---
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .drawBehind { with(painter) { draw(size = size) } }
+                            .pointerInput(mapper) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        if (event.type == PointerEventType.Press) {
+                                            val change = event.changes.first()
+                                            // 只有当事件未被上层组件（如路点）消费，且是左键点击时才添加点
+                                            if (change.pressed && event.buttons.isPrimaryPressed && !change.isConsumed) {
+                                                // 左键点击（添加点）
+                                                val logicPos = mapper.screenToLogical(change.position.x, change.position.y)
+                                                route.addPoint(
+                                                    DifferentialPoint2D(
+                                                        x = logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
+                                                        dx = 10.0 * KVelocityHandle,
+                                                        y = logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),
+                                                        dy = 0.0,
+                                                        // heading, dHeading, duration 将使用默认值
+                                                    )
+                                                )
+                                                change.consume()
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                        )
-                    } else {
-                        // 防御性编程：如果因为外部原因越界，关闭弹窗
-                        editingNodeIndex = null
-                    }
-                }
-
-                // 右键菜单锚点
-                Box(
-                    modifier = Modifier
-                        .offset {
-                            IntOffset(contextMenuOffset.x.roundToInt(), contextMenuOffset.y.roundToInt())
-                        }
-                ) {
-                    DropdownMenu(
-                        expanded = showContextMenu,
-                        onDismissRequest = { showContextMenu = false },
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("导出路径") },
-                            onClick = {
-                                var currentTime = 0.0
-                                val exportList = route.waypoints.mapIndexed { index, pt ->
-                                    if (index > 0) currentTime += pt.duration
-                                    pt.copy(time = currentTime)
+                        // 在此处读取 pathVersion。向 Compose 注册了依赖关系
+                        // 只要 route.pathVersion 发生变化，这个 Canvas 就会触发重绘阶段
+                        val currentVersion = route.pathVersion
+                        // 路径绘制：由于 route.waypoints 是 StateList，此处会自动重绘
+                        withTransform({
+                            translate(mapper.centerX, mapper.centerY)
+                            rotate(rotationDegrees, pivot = Offset.Zero)
+                            scale(mapper.scale, mapper.scale, pivot = Offset.Zero)
+                        }) {
+                            val path = Path()
+                            val totalTime = route.getTotalTime()
+                            if (totalTime > 0) {
+                                for (i in 0..curveDrawStep) {
+                                    val time = (i.toDouble() / curveDrawStep) * totalTime
+                                    val point = route.getPointAtTime(time) ?: break
+                                    val mapped = mapper.logicalToBase(point.x.toFloat(), point.y.toFloat())
+                                    if (i == 0) path.moveTo(mapped.x, mapped.y)
+                                    else path.lineTo(mapped.x, mapped.y)
                                 }
-                                exportedJson = exportJsonConfig.encodeToString(exportList)
-                                showExportDialog = true
-                                showContextMenu = false
-                            }
-                        )
-                    }
-                }
-
-                // 导出 JSON 结果的弹窗
-                if (showExportDialog) {
-                    val clipboardManager = LocalClipboardManager.current
-                    AlertDialog(
-                        onDismissRequest = { showExportDialog = false },
-                        title = { Text("导出的路径 JSON") },
-                        text = {
-                            SelectionContainer {
-                                Text(
-                                    text = exportedJson,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                    )
+                                drawPath(
+                                    path = path,
+                                    color = pathLineColor,
+                                    style = Stroke(width = canvasLineWidth / mapper.scale)
                                 )
                             }
-                        },
-                        confirmButton = {
-                            Row {
-                                TextButton(onClick = {
-                                    clipboardManager.setText(AnnotatedString(exportedJson))
-                                }) {
-                                    Text("一键复制")
+                        }
+                    }
+
+                    // 绘制预览机器人（基于进度条）
+                    route.getPointAtTime(currentTime.toDouble())?.let { ghostNode ->
+                        val screenPos = mapper.logicalToScreen(ghostNode.x.toFloat(), ghostNode.y.toFloat())
+                        val centerOffsetX = (robotLogicalWidth + 10f) / 2f * mapper.scale
+                        val centerOffsetY = (robotLogicalHeight + 10f) / 2f * mapper.scale
+                        // 使用已有的 RobotComponent，但设置透明度
+                        Box(modifier = Modifier.alpha(0.5f)) {
+                            RobotComponent(
+                                index = -2, // 特殊索引表示预览机器人
+                                logicalWidth = robotLogicalWidth,
+                                logicalHeight = robotLogicalHeight,
+                                scale = mapper.scale,
+                                headingDegrees = ghostNode.heading.toFloat(),
+                                onHeadingChange = {},
+                                modifier = Modifier
+                                    .offset {
+                                        IntOffset(
+                                            (screenPos.x - centerOffsetX).roundToInt(),
+                                            (screenPos.y - centerOffsetY).roundToInt()
+                                        )
+                                    }
+                            )
+                        }
+                    }
+
+                    // 绘制机器人组件（如果选中了节点）
+                    selectedNodeIndex.value?.let { index ->
+                        route.waypoints.getOrNull(index)?.let { node ->
+                            val screenPos = mapper.logicalToScreen(node.x.toFloat(), node.y.toFloat())
+                            // 机器人中心偏移量（包含 5 英寸触控缓冲区）：
+                            // offsetX = (robotLogicalWidth + 10) / 2
+                            // offsetY = (robotLogicalHeight + 10) / 2
+                            val centerOffsetX = (robotLogicalWidth + 10f) / 2f * mapper.scale
+                            val centerOffsetY = (robotLogicalHeight + 10f) / 2f * mapper.scale
+                            RobotComponent(
+                                index = index,
+                                logicalWidth = robotLogicalWidth,
+                                logicalHeight = robotLogicalHeight,
+                                scale = mapper.scale,
+                                headingDegrees = node.heading.toFloat(),
+                                onHeadingChange = { newHeading ->
+                                    val updatedNode = route.getNodeAt(index).copy(heading = newHeading.toDouble())
+                                    route.moveNode(index, updatedNode)
+                                },
+                                modifier = Modifier
+                                    .offset {
+                                        IntOffset(
+                                            (screenPos.x - centerOffsetX).roundToInt(),
+                                            (screenPos.y - centerOffsetY).roundToInt()
+                                        )
+                                    }
+                            )
+                        }
+                    }
+
+                    // 绘制节点
+                    // 使用 key 确保在点数量变化时，组件能被正确复用或重置
+                    route.waypoints.forEachIndexed { index, node ->
+                        key(index) {
+                            DraggableNode(
+                                index = index,
+                                node = node,
+                                mapper = mapper,
+                                bounds = bounds,
+                                onMove = { idx, newNode -> route.moveNode(idx, newNode) },
+                                onClick = {
+                                    println("Clicked node: $it")
+                                    selectedNodeIndex.value = if (selectedNodeIndex.value != index) index else null
+                                },
+                                onRightClick = { idx ->
+                                    editingNodeIndex = idx // 触发弹窗显示
                                 }
-                                TextButton(onClick = { showExportDialog = false }) {
-                                    Text("关闭")
-                                }
+                            )
+                            // 如果该节点被选中，则显示向量调节手柄
+                            if (selectedNodeIndex.value == index) {
+                                VectorHandle(
+                                    node = node,
+                                    mapper = mapper,
+                                    onVectorChanged = { newDx, newDy ->
+                                        // 更新该节点的向量属性，保持 x, y 不变（从表中重新获取最新状态避免暂存状态过期导致瞬移）
+                                        val updatedNode = route.getNodeAt(index).copy(dx = newDx, dy = newDy)
+                                        route.moveNode(index, updatedNode)
+                                    }
+                                )
                             }
                         }
+                    }
+
+                    editingNodeIndex?.let { indexToEdit ->
+                        val targetNode = route.waypoints.getOrNull(indexToEdit)
+                        if (targetNode != null) {
+                            NodeEditorDialog(
+                                node = targetNode,
+                                onDismiss = { editingNodeIndex = null },
+                                onConfirm = { updatedNode ->
+                                    route.moveNode(indexToEdit, updatedNode)
+                                },
+                                onDelete = {
+                                    route.removeNode(indexToEdit)
+                                    // 如果删除的是当前选中的节点，重置选中状态
+                                    if (selectedNodeIndex.value == indexToEdit) {
+                                        selectedNodeIndex.value = null
+                                    }
+                                }
+                            )
+                        } else {
+                            // 防御性编程：如果因为外部原因越界，关闭弹窗
+                            editingNodeIndex = null
+                        }
+                    }
+
+                    // 右键菜单锚点
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(contextMenuOffset.x.roundToInt(), contextMenuOffset.y.roundToInt())
+                            }
+                    ) {
+                        DropdownMenu(
+                            expanded = showContextMenu,
+                            onDismissRequest = { showContextMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("导出路径") },
+                                onClick = {
+                                    exportedJson = exportJsonConfig.encodeToString(route.waypoints)
+                                    showExportDialog = true
+                                    showContextMenu = false
+                                }
+                            )
+                        }
+                    }
+
+                    // 导出 JSON 结果的弹窗
+                    if (showExportDialog) {
+                        val clipboardManager = LocalClipboardManager.current
+                        AlertDialog(
+                            onDismissRequest = { showExportDialog = false },
+                            title = { Text("导出的路径 JSON") },
+                            text = {
+                                SelectionContainer {
+                                    Text(
+                                        text = exportedJson,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                        )
+                                    )
+                                }
+                            },
+                            confirmButton = {
+                                Row {
+                                    TextButton(onClick = {
+                                        clipboardManager.setText(AnnotatedString(exportedJson))
+                                    }) {
+                                        Text("一键复制")
+                                    }
+                                    TextButton(onClick = { showExportDialog = false }) {
+                                        Text("关闭")
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 浮窗进度条 (Win11 风格)
+            val totalTime = route.getTotalTime().toFloat()
+            val win11Accent = Color(0xFF0067C0)
+            val win11Inactive = Color.LightGray.copy(alpha = 0.5f)
+
+            Box(
+                modifier = Modifier
+                    .padding(8.dp)
+                    .then(
+                        if (isLandscape) {
+                            Modifier
+                                .width(40.dp)
+                                .fillMaxHeight(0.95f)
+                                .align(Alignment.CenterStart)
+                        } else {
+                            Modifier
+                                .height(40.dp)
+                                .fillMaxWidth(0.95f)
+                                .align(Alignment.BottomCenter)
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isLandscape) {
+                    Slider(
+                        value = currentTime.coerceIn(0f, maxOf(totalTime, 0.001f)),
+                        onValueChange = { currentTime = it },
+                        valueRange = 0f..maxOf(totalTime, 0.001f),
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = win11Accent,
+                            inactiveTrackColor = win11Inactive,
+                            thumbColor = win11Accent
+                        ),
+                        thumb = {
+                            SliderDefaults.Thumb(
+                                interactionSource = remember { MutableInteractionSource() },
+                                colors = SliderDefaults.colors(thumbColor = win11Accent),
+                                thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
+                            )
+                        },
+                        modifier = Modifier
+                            .graphicsLayer {
+                                rotationZ = -90f
+                            }
+                            .requiredWidth(this@BoxWithConstraints.maxHeight * 0.9f)
+                    )
+                } else {
+                    Slider(
+                        value = currentTime.coerceIn(0f, maxOf(totalTime, 0.001f)),
+                        onValueChange = { currentTime = it },
+                        valueRange = 0f..maxOf(totalTime, 0.001f),
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = win11Accent,
+                            inactiveTrackColor = win11Inactive,
+                            thumbColor = win11Accent
+                        ),
+                        thumb = {
+                            SliderDefaults.Thumb(
+                                interactionSource = remember { MutableInteractionSource() },
+                                colors = SliderDefaults.colors(thumbColor = win11Accent),
+                                thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
                     )
                 }
             }
