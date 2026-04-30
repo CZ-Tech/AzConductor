@@ -167,28 +167,17 @@ fun App(route: RouteConnector = RouteConnector()) {
                             .fillMaxSize()
                             .drawBehind { with(painter) { draw(size = size) } }
                             .pointerInput(mapper) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        if (event.type == PointerEventType.Press) {
-                                            val change = event.changes.first()
-                                            // 只有当事件未被上层组件（如路点）消费，且是左键点击时才添加点
-                                            if (change.pressed && event.buttons.isPrimaryPressed && !change.isConsumed) {
-                                                // 左键点击（添加点）
-                                                val logicPos = mapper.screenToLogical(change.position.x, change.position.y)
-                                                route.addPoint(
-                                                    DifferentialPoint2D(
-                                                        x = logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
-                                                        dx = 10.0 * KVelocityHandle,
-                                                        y = logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),
-                                                        dy = 0.0,
-                                                        // heading, dHeading, duration 将使用默认值
-                                                    )
-                                                )
-                                                change.consume()
-                                            }
-                                        }
-                                    }
+                                detectTapGestures { offset ->
+                                    val logicPos = mapper.screenToLogical(offset.x, offset.y)
+                                    route.addPoint(
+                                        DifferentialPoint2D(
+                                            x = logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
+                                            dx = 10.0 * KVelocityHandle,
+                                            y = logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),
+                                            dy = 0.0,
+                                            // heading, dHeading, duration 将使用默认值
+                                        )
+                                    )
                                 }
                             }
                     ) {
@@ -240,7 +229,8 @@ fun App(route: RouteConnector = RouteConnector()) {
                                             (screenPos.x - centerOffsetX).roundToInt(),
                                             (screenPos.y - centerOffsetY).roundToInt()
                                         )
-                                    }
+                                    },
+                                enabled = false // 预览机器人不接收交互，防止遮挡背景点击
                             )
                         }
                     }

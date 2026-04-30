@@ -52,7 +52,8 @@ fun RobotComponent(
     onHeadingChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    strokeWidth: Dp = 2.dp
+    strokeWidth: Dp = 2.dp,
+    enabled: Boolean = true
 ) {
     val density = LocalDensity.current
     
@@ -81,58 +82,62 @@ fun RobotComponent(
         modifier = modifier
             .onSizeChanged { componentSizePx = it }
             // 增加 index 作为 key，确保切换节点时重置手势监听
-            .pointerInput(logicalWidth, logicalHeight, scale, index) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        val bufferPx = with(density) { touchBufferDp.toPx() }
-                        // 旋转中心
-                        val centerX = bufferPx + physicalWidthPx / 2f
-                        val centerY = bufferPx + physicalHeightPx / 2f
-                        
-                        // 车头圆点在 0 度时相对于中心的偏移距离
-                        val dist = physicalWidthPx / 2f
-                        
-                        // 计算当前旋转后的圆点物理位置
-                        // heading 为 0 时应指向场地 X 轴 (fieldXAngleDeg)
-                        val angleRad = (currentHeading + fieldXAngleDeg) * (PI.toFloat() / 180f)
-                        val headDotCenter = Offset(
-                            centerX + dist * kotlin.math.cos(angleRad),
-                            centerY + dist * kotlin.math.sin(angleRad)
+            .then(
+                if (enabled) {
+                    Modifier.pointerInput(logicalWidth, logicalHeight, scale, index) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val bufferPx = with(density) { touchBufferDp.toPx() }
+                                // 旋转中心
+                                val centerX = bufferPx + physicalWidthPx / 2f
+                                val centerY = bufferPx + physicalHeightPx / 2f
+                                
+                                // 车头圆点在 0 度时相对于中心的偏移距离
+                                val dist = physicalWidthPx / 2f
+                                
+                                // 计算当前旋转后的圆点物理位置
+                                // heading 为 0 时应指向场地 X 轴 (fieldXAngleDeg)
+                                val angleRad = (currentHeading + fieldXAngleDeg) * (PI.toFloat() / 180f)
+                                val headDotCenter = Offset(
+                                    centerX + dist * kotlin.math.cos(angleRad),
+                                    centerY + dist * kotlin.math.sin(angleRad)
+                                )
+                                
+                                val distance = (offset - headDotCenter).getDistance()
+                                val touchThreshold = headDotSizePx * ftc19656.azconductor.robotComponentTouchThresholdRatio
+                                isDraggingHeading = distance <= touchThreshold
+                            },
+                            onDrag = { change, _ ->
+                                if (isDraggingHeading) {
+                                    change.consume()
+                                    val bufferPx = with(density) { touchBufferDp.toPx() }
+                                    // 旋转中心位于视觉组件的中心
+                                    val center = Offset(
+                                        bufferPx + physicalWidthPx / 2f, 
+                                        bufferPx + physicalHeightPx / 2f
+                                    )
+                                    
+                                    val touchPos = change.position
+                                    val diff = touchPos - center
+                                    val angleRad = atan2(diff.y, diff.x)
+                                    val angleDeg = (angleRad * 180f / PI).toFloat()
+                                    
+                                    // 减去偏移量，使得指向场地 X 轴时 heading 为 0
+                                    var newHeading = angleDeg - ftc19656.azconductor.fieldXAngleDeg
+                                    
+                                    // 规格化到 [-180, 180] 避免数值跳变
+                                    while (newHeading <= -180f) newHeading += 360f
+                                    while (newHeading > 180f) newHeading -= 360f
+                                    
+                                    currentOnHeadingChange(newHeading)
+                                }
+                            },
+                            onDragEnd = { isDraggingHeading = false },
+                            onDragCancel = { isDraggingHeading = false }
                         )
-                        
-                        val distance = (offset - headDotCenter).getDistance()
-                        val touchThreshold = headDotSizePx * ftc19656.azconductor.robotComponentTouchThresholdRatio
-                        isDraggingHeading = distance <= touchThreshold
-                    },
-                    onDrag = { change, _ ->
-                        if (isDraggingHeading) {
-                            change.consume()
-                            val bufferPx = with(density) { touchBufferDp.toPx() }
-                            // 旋转中心位于视觉组件的中心
-                            val center = Offset(
-                                bufferPx + physicalWidthPx / 2f, 
-                                bufferPx + physicalHeightPx / 2f
-                            )
-                            
-                            val touchPos = change.position
-                            val diff = touchPos - center
-                            val angleRad = atan2(diff.y, diff.x)
-                            val angleDeg = (angleRad * 180f / PI).toFloat()
-                            
-                            // 减去偏移量，使得指向场地 X 轴时 heading 为 0
-                            var newHeading = angleDeg - ftc19656.azconductor.fieldXAngleDeg
-                            
-                            // 规格化到 [-180, 180] 避免数值跳变
-                            while (newHeading <= -180f) newHeading += 360f
-                            while (newHeading > 180f) newHeading -= 360f
-                            
-                            currentOnHeadingChange(newHeading)
-                        }
-                    },
-                    onDragEnd = { isDraggingHeading = false },
-                    onDragCancel = { isDraggingHeading = false }
-                )
-            }
+                    }
+                } else Modifier
+            )
             .padding(touchBufferDp),
         contentAlignment = Alignment.Center
     ) {
