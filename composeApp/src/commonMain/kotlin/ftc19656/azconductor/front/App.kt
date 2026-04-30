@@ -87,7 +87,7 @@ fun App(route: RouteConnector = RouteConnector()) {
     // 决定使用哪套配色，这里简单示例硬编码为浅色
     val colorScheme = MyLightColors
 
-    var isPreheated by remember { mutableStateOf(false) }
+    var isPreheated by remember { mutableStateOf(true) }  // 跳过预热避免firefox bug
 
     // 预热右键弹窗避免首次右键加载延迟
     // App 启动时，让这个 Dialog 渲染 100 毫秒然后消失
