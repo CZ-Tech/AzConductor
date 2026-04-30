@@ -29,14 +29,14 @@ jobs:
         run: chmod +x gradlew
         
       - name: Build with Gradle
-        # 优先使用 JS 目标进行构建
-        run: ./gradlew :composeApp:jsBrowserDistribution
+        # 使用 WasmJS 目标进行构建
+        run: ./gradlew :composeApp:wasmJsBrowserDistribution
         
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # JS 产物路径
-          path: composeApp/build/dist/js/productionExecutable
+          # WasmJS 产物路径
+          path: composeApp/build/dist/wasmJs/productionExecutable
 
   build-desktop:
     strategy:
