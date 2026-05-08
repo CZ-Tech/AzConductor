@@ -31,6 +31,12 @@ class RouteCore() {
         rebuildTrajectories()
     }
 
+    fun setWaypoints(points: List<DifferentialPoint2D>) {
+        _waypoints.clear()
+        _waypoints.addAll(points)
+        rebuildTrajectories()
+    }
+
     fun moveNode(index: Int, newPoint: DifferentialPoint2D) {
         if (index in _waypoints.indices) {
             _waypoints[index] = newPoint

@@ -36,6 +36,13 @@ class RouteConnector() : ViewModel() {
         pathVersion++
     }
 
+    fun setWaypoints(points: List<DifferentialPoint2D>) {
+        routeLogic.setWaypoints(points)
+        _waypoints.clear()
+        _waypoints.addAll(points)
+        pathVersion++
+    }
+
     fun moveNode(index: Int, newPoint: DifferentialPoint2D) {
         routeLogic.moveNode(index, newPoint)
         if (index in _waypoints.indices) {

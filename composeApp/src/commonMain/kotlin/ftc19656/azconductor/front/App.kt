@@ -51,6 +51,7 @@ import ftc19656.azconductor.*
 import ftc19656.azconductor.back.route.DifferentialPoint2D
 import ftc19656.azconductor.back.route.RouteConnector
 import kotlinx.coroutines.delay
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.compose.resources.painterResource
@@ -79,9 +80,15 @@ fun App(route: RouteConnector = RouteConnector()) {
     // 导出 JSON 对话框状态
     var showExportDialog by remember { mutableStateOf(false) }
     var exportedJson by remember { mutableStateOf("") }
+    
+    // 导入 JSON 对话框状态
+    var showImportDialog by remember { mutableStateOf(false) }
+    var importJsonText by remember { mutableStateOf("") }
+
     val exportJsonConfig = remember { Json { 
         prettyPrint = true 
         encodeDefaults = true
+        ignoreUnknownKeys = true // 导入时允许存在未知键
     } }
 
     // 决定使用哪套配色，这里简单示例硬编码为浅色
@@ -340,6 +347,14 @@ fun App(route: RouteConnector = RouteConnector()) {
                                     showContextMenu = false
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { Text("导入路径") },
+                                onClick = {
+                                    importJsonText = ""
+                                    showImportDialog = true
+                                    showContextMenu = false
+                                }
+                            )
                         }
                     }
 
@@ -369,6 +384,44 @@ fun App(route: RouteConnector = RouteConnector()) {
                                     TextButton(onClick = { showExportDialog = false }) {
                                         Text("关闭")
                                     }
+                                }
+                            }
+                        )
+                    }
+
+                    // 导入 JSON 的弹窗
+                    if (showImportDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showImportDialog = false },
+                            title = { Text("导入路径 JSON") },
+                            text = {
+                                OutlinedTextField(
+                                    value = importJsonText,
+                                    onValueChange = { importJsonText = it },
+                                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                                    placeholder = { Text("请在此粘贴导出的路径 JSON") },
+                                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    )
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    try {
+                                        val importedWaypoints = exportJsonConfig.decodeFromString<List<DifferentialPoint2D>>(importJsonText)
+                                        route.setWaypoints(importedWaypoints)
+                                        showImportDialog = false
+                                    } catch (e: Exception) {
+                                        // 简单提示解析失败，实际项目中可以用 snackbar
+                                        println("Import failed: ${e.message}")
+                                    }
+                                }) {
+                                    Text("导入")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showImportDialog = false }) {
+                                    Text("取消")
                                 }
                             }
                         )
