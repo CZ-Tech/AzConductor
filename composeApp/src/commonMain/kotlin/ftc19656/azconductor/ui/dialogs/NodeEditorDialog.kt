@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.route.DifferentialPoint2D
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -42,15 +43,24 @@ fun preloadSerializer(): DifferentialPoint2D {
 
     val map: MutableMap<String, String> = hashMapOf()
     for (s in serializer.descriptor.elementNames) {
-        map[s] = "1.0"  // 填满数据
+        map[s] = if (s == "marker") "" else "1.0"  // 填满数据
     }
 
     // 保存一次数据以供预热
-    val jsonContent = map.mapValues { (_, stringValue) ->
-        // 智能尝试转换，确保 Json 能识别它是数字还是字符串
-        stringValue.toDoubleOrNull()?.let { JsonPrimitive(it) }
-            ?: stringValue.toBooleanStrictOrNull()?.let { JsonPrimitive(it) }
-            ?: JsonPrimitive(stringValue)
+    val jsonContent = map.mapValues { (key, stringValue) ->
+        val index = descriptor.getElementIndex(key)
+        if (index != -1) {
+            val elementDescriptor = descriptor.getElementDescriptor(index)
+            when (elementDescriptor.kind) {
+                PrimitiveKind.DOUBLE, PrimitiveKind.FLOAT, PrimitiveKind.INT, PrimitiveKind.LONG, PrimitiveKind.SHORT, PrimitiveKind.BYTE ->
+                    stringValue.toDoubleOrNull()?.let { JsonPrimitive(it) } ?: JsonPrimitive(stringValue)
+                PrimitiveKind.BOOLEAN ->
+                    stringValue.toBooleanStrictOrNull()?.let { JsonPrimitive(it) } ?: JsonPrimitive(stringValue)
+                else -> JsonPrimitive(stringValue)
+            }
+        } else {
+            JsonPrimitive(stringValue)
+        }
     }
     // 预热反序列化
     val newNode = editorJson.decodeFromJsonElement(serializer, JsonObject(jsonContent))
@@ -121,11 +131,22 @@ fun NodeEditorDialog(
             TextButton(onClick = {
                 try {
                     // 自动保存数据
-                    val jsonContent = editValues.mapValues { (_, stringValue) ->
-                        // 智能尝试转换，确保 Json 能识别它是数字还是字符串
-                        stringValue.toDoubleOrNull()?.let { JsonPrimitive(it) }
-                            ?: stringValue.toBooleanStrictOrNull()?.let { JsonPrimitive(it) }
-                            ?: JsonPrimitive(stringValue)
+                    val jsonContent = editValues.mapValues { (key, stringValue) ->
+                        val index = descriptor.getElementIndex(key)
+                        if (index != -1) {
+                            val elementDescriptor = descriptor.getElementDescriptor(index)
+                            when (elementDescriptor.kind) {
+                                PrimitiveKind.DOUBLE, PrimitiveKind.FLOAT, PrimitiveKind.INT, PrimitiveKind.LONG, PrimitiveKind.SHORT, PrimitiveKind.BYTE ->
+                                    stringValue.toDoubleOrNull()?.let { JsonPrimitive(it) }
+                                        ?: throw IllegalArgumentException("Field $key must be a number")
+                                PrimitiveKind.BOOLEAN ->
+                                    stringValue.toBooleanStrictOrNull()?.let { JsonPrimitive(it) }
+                                        ?: throw IllegalArgumentException("Field $key must be a boolean")
+                                else -> JsonPrimitive(stringValue)
+                            }
+                        } else {
+                            JsonPrimitive(stringValue)
+                        }
                     }
 
                     // 反序列化成类，实现改变节点字段时无需修改此处代码
@@ -137,7 +158,7 @@ fun NodeEditorDialog(
                     // 如果用户在 Double 字段填了 "abc"，这里会报错，可以提示用户
                     println("Save failed: ${e.message}")
                     // 直接在 catch 里捕获逻辑错误并反馈给 UI
-                    errorMessage = "格式错误：请确保数值字段都填入了有效的数字"
+                    errorMessage = "格式错误：${e.message ?: "请确保数值字段都填入了有效的数字"}"
                 }
             }) {
                 Text("保存")
