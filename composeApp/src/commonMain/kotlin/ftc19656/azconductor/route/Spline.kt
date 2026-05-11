@@ -1,4 +1,4 @@
-package ftc19656.azconductor.back.route
+package ftc19656.azconductor.route
 
 import kotlinx.serialization.Serializable
 import kotlin.math.PI
@@ -20,7 +20,7 @@ class CubicHermiteSpline1D(
 
     /**
      * 获取归一化参数 u 处的位置
-     * @param u 归一化进度，范围通常在 0.0 到 1.0 之间
+     * @param u 归一化进度，范围通常在 0.0 与 1.0 之间
      */
     fun getPosition(u: Double): Double {
         return a * u * u * u + b * u * u + c * u + d
@@ -36,12 +36,12 @@ class CubicHermiteSpline1D(
 }
 
 /**
- * 二维平面两点间的轨迹生成器（解耦 X 和 Y）
+ * 二维平面两点间的轨迹生成器（解析 X 与 Y）
  */
 open class TrajectoryGenerator2D(
     var startX: Double, var startY: Double, var startDx: Double, var startDy: Double, // 起点状态
     var endX: Double, var endY: Double, var endDx: Double, var endDy: Double,         // 终点状态
-    var duration: Double        // 时间区间
+    open var duration: Double        // 时间区间
 ) {
     constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, duration: Double) : this(
         start.x, start.y, start.dx, start.dy,
@@ -63,7 +63,6 @@ open class TrajectoryGenerator2D(
      */
     private fun calculateArcLength(n: Int): Double {
         if (n % 2 != 0) return calculateArcLength(n + 1) // 辛普森法要求步数为偶数
-
         val sx = splineX
         val sy = splineY
 
@@ -96,9 +95,14 @@ open class TrajectoryGenerator2D(
     /**
      * 根据当前在路段内的局部时间，计算机器人在该时刻的期望位置 (gotoX, gotoY)
      */
-    open fun getPointAtTime(localTime: Double): Point2D {
+    open fun getPointAtTime(localTime: Double): DifferentialPoint2D {
         val u = getU(localTime)
-        return Point2D(splineX.getPosition(u), splineY.getPosition(u))
+        return DifferentialPoint2D(
+            x = splineX.getPosition(u),
+            dx = splineX.getVelocity(u),
+            y = splineY.getPosition(u),
+            dy = splineY.getVelocity(u)
+        )
     }
 
     open fun getStartPoint(): DifferentialPoint2D {
@@ -128,12 +132,13 @@ class OrientedTrajectoryGenerator2D(
     var startHeading: Double, var startDHeading: Double, // 新增朝向属性
     endX: Double, endY: Double, endDx: Double, endDy: Double,
     var endHeading: Double, var endDHeading: Double,     // 新增朝向属性
-    duration: Double
+    override var duration: Double
 ) : TrajectoryGenerator2D(
     startX, startY, startDx, startDy,
     endX, endY, endDx, endDy,
     duration
 ) {
+
 
     // 方便的次级构造函数，直接传入 DifferentialPoint2D
     constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, duration: Double) : this(
@@ -152,12 +157,13 @@ class OrientedTrajectoryGenerator2D(
     /**
      * 复写获取点的方法，填充 heading 字段
      */
-    override fun getPointAtTime(localTime: Double): Point2D {
+    override fun getPointAtTime(localTime: Double): DifferentialPoint2D {
         val u = getU(localTime)
-        // 调用 super 获取基础的 x, y，然后注入新的 heading
+        // 调用 super 获取基础的 x, y, dx, dy，然后注入新 heading 和 dHeading
         val basePoint = super.getPointAtTime(localTime)
         return basePoint.copy(
-            heading = splineHeading.getPosition(u)
+            heading = splineHeading.getPosition(u),
+            dHeading = splineHeading.getVelocity(u)
         )
     }
 
@@ -170,16 +176,6 @@ class OrientedTrajectoryGenerator2D(
 
     override fun getEndPoint(): DifferentialPoint2D {
         return DifferentialPoint2D(endX, endDx, endY, endDy, endHeading, endDHeading)
-    }
-}
-
-// 简单的数据类用于存储坐标
-data class Point2D(val x: Double, val y: Double, val heading: Double = 0.0) {
-    infix fun isCloseTo(other: DifferentialPoint2D): Boolean {
-        val epsilon = 1e-7
-        return abs(x - other.x) < epsilon &&
-                abs(y - other.y) < epsilon &&
-                abs(heading - other.heading) < epsilon
     }
 }
 
@@ -205,7 +201,7 @@ data class DifferentialPoint2D(val x: Double,
 
 /**
  * 将目标角度调整为相对于起始角度的最短路径对应值
- * 例如：从 350° 到 10°，会把 10° 转换为 370°，样条插值就会顺时针走 20°
+ * 例如：从 350° 到 10°，会将 10° 转换为 370°，样条插值就会顺时针转 20°
  */
 fun normalizeRelative(start: Double, end: Double): Double {
     var diff = (end - start) % 360.0

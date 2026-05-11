@@ -1,7 +1,7 @@
-package ftc19656.azconductor.back.route
+package ftc19656.azconductor.route
 
 class RouteCore() {
-    // 使用标准的 MutableList 存储点位
+    // 使用标准 MutableList 存储点位
     private val _waypoints = mutableListOf<DifferentialPoint2D>()
     val waypoints: List<DifferentialPoint2D> get() = _waypoints
 
@@ -17,7 +17,7 @@ class RouteCore() {
     private fun rebuildTrajectories() {
         trajectoryList.clear()
         if (waypoints.size < 2) return
-        // 顺序生成轨迹段
+        // 顺序生成轨迹
         for (i in 0 until waypoints.lastIndex) {
             val start = waypoints[i]
             val end = waypoints[i + 1]
@@ -76,14 +76,14 @@ class RouteCore() {
     fun getNodes(): List<DifferentialPoint2D> = waypoints.toList()
 
     /**
-     * 获取指定绝对时间点 t 的机器人坐标
-     * @return 若列表为空则返回null
+     * 获取指定绝对时间 t 的机器人坐标
+     * @return 若列表为空则返回 null
      * @throws IndexOutOfBoundsException 若超出时间范围
      */
-    fun getPointAtTime(time: Double): Point2D? {
-        if (trajectoryList.isEmpty()) {
-            return null
-        }
+    fun getPointAtTime(time: Double): DifferentialPoint2D? {
+        if (_waypoints.isEmpty()) return null
+        if (trajectoryList.isEmpty()) return _waypoints.first()
+
         val totalTime = this.totalTime
         val epsilon = 1e-7
         if (time < -epsilon || time > totalTime + epsilon) throw IndexOutOfBoundsException("Time out of range.")
@@ -104,16 +104,17 @@ class RouteCore() {
         return trajectoryList.last().getPointAtTime(trajectoryList.last().duration)
     }
 
-    // 移除了 updateTrajectoryDuration 方法，因为 duration 现在是 DifferentialPoint2D 的属性
+
+    // 移除 updateTrajectoryDuration 方法，因为 duration 现在是 DifferentialPoint2D 的属性
 
     override fun toString(): String {
         val stringBuilder = StringBuilder()
         var i = 0
         for (trajectory in trajectoryList) {
-            stringBuilder.append(i).append(": ").append("start: (x ", trajectory.startX, ", dx ", trajectory.startDx, ", ")
-                .append("y: ", trajectory.startY, ", dy: ", trajectory.startDy, "), ")
-                .append("end: (x ", trajectory.endX, ", dx ", trajectory.endDx, ", ")
-                .append("y: ", trajectory.endY, ", dy: ", trajectory.endDy, "), ")
+            stringBuilder.append(i).append(": ").append("start: (x ").append(trajectory.startX).append(", dx ").append(trajectory.startDx).append(", ")
+                .append("y: ").append(trajectory.startY).append(", dy: ").append(trajectory.startDy).append("), ")
+                .append("end: (x ").append(trajectory.endX).append(", dx ").append(trajectory.endDx).append(", ")
+                .append("y: ").append(trajectory.endY).append(", dy: ").append(trajectory.endDy).append("), ")
                 .append("\n")
             i++
         }

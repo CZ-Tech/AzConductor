@@ -2,7 +2,6 @@ package ftc19656.azconductor.io
 
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
-import ftc19656.azconductor.back.route.Point2D
 import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -12,7 +11,6 @@ class RobotConfig {
     private val config: ConfigManager
 
     var teamNumber: String
-//    var trajectory: MutableList<Point2D>
 
     constructor(robotName: String, teamNumber: String) {
         config = ConfigManager.getOrCreate(robotName)
@@ -66,7 +64,7 @@ class ConfigManager private constructor(
         // 异步序列化并持久化到 globalSettings
         scope.launch {
             val jsonPayload = Json.encodeToString(cache)
-            // 以 id 为键存入顶级变量
+            // 将 id 为键存入顶级变量
             configStorge[id] = jsonPayload
         }
     }

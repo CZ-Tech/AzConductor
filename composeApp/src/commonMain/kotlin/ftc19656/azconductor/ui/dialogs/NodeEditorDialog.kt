@@ -1,4 +1,4 @@
-package ftc19656.azconductor.front
+package ftc19656.azconductor.ui.dialogs
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,8 +13,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import ftc19656.azconductor.NODE_EDITOR_FIELD_ORDER
-import ftc19656.azconductor.back.route.DifferentialPoint2D
+import ftc19656.azconductor.UIConfig
+import ftc19656.azconductor.route.DifferentialPoint2D
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.Json
@@ -53,8 +53,7 @@ fun preloadSerializer(): DifferentialPoint2D {
             ?: JsonPrimitive(stringValue)
     }
     // 预热反序列化
-    val newNode = editorJson.decodeFromJsonElement(ftc19656.azconductor.front.serializer, JsonObject(jsonContent))
-    val jsonElement = editorJson.encodeToJsonElement(ftc19656.azconductor.front.serializer, newNode) as JsonObject
+    val newNode = editorJson.decodeFromJsonElement(serializer, JsonObject(jsonContent))
 
     println("Serializer preloaded! Got $count fields")
     return newNode
@@ -90,8 +89,8 @@ fun NodeEditorDialog(
 
     // 定义字段的显示顺序
     val allFieldNames = descriptor.elementNames.toSet()
-    val orderedFieldNames = NODE_EDITOR_FIELD_ORDER.filter { it in allFieldNames } +
-            (allFieldNames - NODE_EDITOR_FIELD_ORDER.toSet())
+    val orderedFieldNames = UIConfig.NODE_EDITOR_FIELD_ORDER.filter { it in allFieldNames } +
+            (allFieldNames - UIConfig.NODE_EDITOR_FIELD_ORDER.toSet())
 
     AlertDialog(
         onDismissRequest = onDismiss,

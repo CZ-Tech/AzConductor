@@ -1,15 +1,28 @@
-package ftc19656.azconductor.back.route
+package ftc19656.azconductor.route.viewmodel
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import ftc19656.azconductor.route.DifferentialPoint2D
+import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
+import ftc19656.azconductor.route.RouteCore
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 class RouteConnector() : ViewModel() {
 
     // 底层纯逻辑实例
     private val routeLogic = RouteCore()
+
+    // JSON 序列化配置
+    private val jsonConfig = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
 
     // UI 专用的版本号
     var pathVersion by mutableStateOf(0)
@@ -74,9 +87,30 @@ class RouteConnector() : ViewModel() {
 
     fun getNodes(): List<DifferentialPoint2D> = routeLogic.getNodes()
 
-    fun getPointAtTime(time: Double): Point2D? = routeLogic.getPointAtTime(time)
+    fun getPointAtTime(time: Double): DifferentialPoint2D? = routeLogic.getPointAtTime(time)
 
     override fun toString(): String = routeLogic.toString()
 
     fun getNodeAt(index: Int): DifferentialPoint2D = routeLogic.getNodeAt(index)
+
+    /**
+     * 将当前路径导出为 JSON 字符串
+     */
+    fun exportToJson(): String {
+        return jsonConfig.encodeToString(_waypoints.toList())
+    }
+
+    /**
+     * 从 JSON 字符串导入路径
+     */
+    fun importFromJson(jsonText: String): Boolean {
+        return try {
+            val importedWaypoints = jsonConfig.decodeFromString<List<DifferentialPoint2D>>(jsonText)
+            setWaypoints(importedWaypoints)
+            true
+        } catch (e: Exception) {
+            println("Import failed: ${e.message}")
+            false
+        }
+    }
 }

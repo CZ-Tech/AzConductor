@@ -19,3 +19,4 @@ val LocalImageLoader = staticCompositionLocalOf<PlatformImageLoader> {
 }
 
 expect fun getPlatform(): Platform
+

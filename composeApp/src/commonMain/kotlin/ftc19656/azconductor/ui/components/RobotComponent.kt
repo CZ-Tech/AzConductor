@@ -1,4 +1,4 @@
-package ftc19656.azconductor.front
+package ftc19656.azconductor.ui.components
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -28,8 +28,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import ftc19656.azconductor.fieldXAngleDeg
-import ftc19656.azconductor.robotComponentTouchThresholdRatio
+import ftc19656.azconductor.FieldConfig
+import ftc19656.azconductor.UIConfig
 import kotlin.math.PI
 import kotlin.math.atan2
 
@@ -61,7 +61,7 @@ fun RobotComponent(
     val physicalWidthPx = logicalWidth * scale
     val physicalHeightPx = logicalHeight * scale
     
-    // 转换为 Dp 供 Compose 布局使用
+    // 转换成 Dp 供 Compose 布局使用
     val widthDp = with(density) { physicalWidthPx.toDp() }
     val heightDp = with(density) { physicalHeightPx.toDp() }
 
@@ -96,15 +96,15 @@ fun RobotComponent(
                                 val dist = physicalWidthPx / 2f
                                 
                                 // 计算当前旋转后的圆点物理位置
-                                // heading 为 0 时应指向场地 X 轴 (fieldXAngleDeg)
-                                val angleRad = (currentHeading + fieldXAngleDeg) * (PI.toFloat() / 180f)
+                                // heading 为 0 时应指向场地 X 轴 (FieldConfig.fieldXAngleDeg)
+                                val angleRad = (currentHeading + FieldConfig.fieldXAngleDeg) * (PI.toFloat() / 180f)
                                 val headDotCenter = Offset(
                                     centerX + dist * kotlin.math.cos(angleRad),
                                     centerY + dist * kotlin.math.sin(angleRad)
                                 )
                                 
                                 val distance = (offset - headDotCenter).getDistance()
-                                val touchThreshold = headDotSizePx * ftc19656.azconductor.robotComponentTouchThresholdRatio
+                                val touchThreshold = headDotSizePx * UIConfig.ROBOT_COMPONENT_TOUCH_THRESHOLD_RATIO
                                 isDraggingHeading = distance <= touchThreshold
                             },
                             onDrag = { change, _ ->
@@ -112,18 +112,18 @@ fun RobotComponent(
                                     change.consume()
                                     val bufferPx = with(density) { touchBufferDp.toPx() }
                                     // 旋转中心位于视觉组件的中心
-                                    val center = Offset(
+                                    val rotationCenter = Offset(
                                         bufferPx + physicalWidthPx / 2f, 
                                         bufferPx + physicalHeightPx / 2f
                                     )
                                     
                                     val touchPos = change.position
-                                    val diff = touchPos - center
+                                    val diff = touchPos - rotationCenter
                                     val angleRad = atan2(diff.y, diff.x)
                                     val angleDeg = (angleRad * 180f / PI).toFloat()
                                     
                                     // 减去偏移量，使得指向场地 X 轴时 heading 为 0
-                                    var newHeading = angleDeg - ftc19656.azconductor.fieldXAngleDeg
+                                    var newHeading = angleDeg - FieldConfig.fieldXAngleDeg
                                     
                                     // 规格化到 [-180, 180] 避免数值跳变
                                     while (newHeading <= -180f) newHeading += 360f
@@ -146,7 +146,7 @@ fun RobotComponent(
             modifier = Modifier
                 .size(widthDp, heightDp)
                 // 旋转角度增加偏移量，使 0 度指向场地 X 轴
-                .rotate(headingDegrees + ftc19656.azconductor.fieldXAngleDeg)
+                .rotate(headingDegrees + FieldConfig.fieldXAngleDeg)
                 .border(strokeWidth, color, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.CenterEnd
         ) {
