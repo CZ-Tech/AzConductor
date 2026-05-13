@@ -97,7 +97,8 @@ fun RobotComponent(
                                 
                                 // 计算当前旋转后的圆点物理位置
                                 // heading 为 0 时应指向场地 X 轴 (FieldConfig.fieldXAngleDeg)
-                                val angleRad = (currentHeading + FieldConfig.fieldXAngleDeg) * (PI.toFloat() / 180f)
+                                // 逆时针为正：屏幕角度 = fieldXAngleDeg - currentHeading
+                                val angleRad = (FieldConfig.fieldXAngleDeg - currentHeading) * (PI.toFloat() / 180f)
                                 val headDotCenter = Offset(
                                     centerX + dist * kotlin.math.cos(angleRad),
                                     centerY + dist * kotlin.math.sin(angleRad)
@@ -123,7 +124,8 @@ fun RobotComponent(
                                     val angleDeg = (angleRad * 180f / PI).toFloat()
                                     
                                     // 减去偏移量，使得指向场地 X 轴时 heading 为 0
-                                    var newHeading = angleDeg - FieldConfig.fieldXAngleDeg
+                                    // 逆时针为正：newHeading = fieldXAngleDeg - angleDeg
+                                    var newHeading = FieldConfig.fieldXAngleDeg - angleDeg
                                     
                                     // 规格化到 [-180, 180] 避免数值跳变
                                     while (newHeading <= -180f) newHeading += 360f
@@ -146,7 +148,8 @@ fun RobotComponent(
             modifier = Modifier
                 .size(widthDp, heightDp)
                 // 旋转角度增加偏移量，使 0 度指向场地 X 轴
-                .rotate(headingDegrees + FieldConfig.fieldXAngleDeg)
+                // 逆时针为正：屏幕角度 = fieldXAngleDeg - headingDegrees
+                .rotate(FieldConfig.fieldXAngleDeg - headingDegrees)
                 .border(strokeWidth, color, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.CenterEnd
         ) {
