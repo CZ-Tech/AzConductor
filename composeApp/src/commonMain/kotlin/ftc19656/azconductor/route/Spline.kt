@@ -187,7 +187,9 @@ data class DifferentialPoint2D(val x: Double,
                                val heading: Double = 0.0,
                                val dHeading: Double = 0.0,
                                val duration: Double = 1.0,
-                               val marker: String = "") {
+                               val marker: String = "",
+                               val delayAfterArrive: Double = 0.0
+                              ) {
     infix fun isCloseTo(other: DifferentialPoint2D): Boolean {
         val epsilon = 1e-7
         return abs(x - other.x) < epsilon &&
@@ -197,7 +199,8 @@ data class DifferentialPoint2D(val x: Double,
                 abs(heading - other.heading) < epsilon &&
                 abs(dHeading - other.dHeading) < epsilon &&
                 abs(duration - other.duration) < epsilon &&
-                marker == other.marker
+                marker == other.marker &&
+                abs(delayAfterArrive - other.delayAfterArrive) < epsilon
     }
 }
 
