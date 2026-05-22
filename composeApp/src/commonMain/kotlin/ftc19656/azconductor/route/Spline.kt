@@ -95,9 +95,9 @@ open class TrajectoryGenerator2D(
     /**
      * 根据当前在路段内的局部时间，计算机器人在该时刻的期望位置 (gotoX, gotoY)
      */
-    open fun getPointAtTime(localTime: Double): DifferentialPoint2D {
+    open fun getPointAtTime(localTime: Double): ControlNode {
         val u = getU(localTime)
-        return DifferentialPoint2D(
+        return ControlNode(
             x = splineX.getPosition(u),
             dx = splineX.getVelocity(u),
             y = splineY.getPosition(u),
@@ -105,16 +105,16 @@ open class TrajectoryGenerator2D(
         )
     }
 
-    open fun getStartPoint(): DifferentialPoint2D {
-        return DifferentialPoint2D(
+    open fun getStartPoint(): ControlNode {
+        return ControlNode(
             startX,
             startDx,
             startY,
             startDy)
     }
 
-    open fun getEndPoint(): DifferentialPoint2D {
-        return DifferentialPoint2D(
+    open fun getEndPoint(): ControlNode {
+        return ControlNode(
             endX,
             endDx,
             endY,
@@ -140,7 +140,7 @@ class OrientedTrajectoryGenerator2D(
 ) {
 
 
-    // 方便的次级构造函数，直接传入 DifferentialPoint2D
+    // 方便的次级构造函数，直接传入 ControlNode
     constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, duration: Double) : this(
         start.x, start.y, start.dx, start.dy, start.heading, start.dHeading,
         end.x, end.y, end.dx, end.dy, end.heading, end.dHeading,
@@ -157,7 +157,7 @@ class OrientedTrajectoryGenerator2D(
     /**
      * 复写获取点的方法，填充 heading 字段
      */
-    override fun getPointAtTime(localTime: Double): DifferentialPoint2D {
+    override fun getPointAtTime(localTime: Double): ControlNode {
         val u = getU(localTime)
         // 调用 super 获取基础的 x, y, dx, dy，然后注入新 heading 和 dHeading
         val basePoint = super.getPointAtTime(localTime)
@@ -168,28 +168,26 @@ class OrientedTrajectoryGenerator2D(
     }
 
     /**
-     * 覆盖获取起始点的方法，返回包含完整信息的 DifferentialPoint2D
+     * 覆盖获取起始点的方法，返回包含完整信息的 ControlNode
      */
-    override fun getStartPoint(): DifferentialPoint2D {
-        return DifferentialPoint2D(startX, startDx, startY, startDy, startHeading, startDHeading)
+    override fun getStartPoint(): ControlNode {
+        return ControlNode(startX, startDx, startY, startDy, startHeading, startDHeading)
     }
 
-    override fun getEndPoint(): DifferentialPoint2D {
-        return DifferentialPoint2D(endX, endDx, endY, endDy, endHeading, endDHeading)
+    override fun getEndPoint(): ControlNode {
+        return ControlNode(endX, endDx, endY, endDy, endHeading, endDHeading)
     }
 }
 
-@Serializable
-data class DifferentialPoint2D(val x: Double,
-                               val dx: Double,
-                               val y: Double,
-                               val dy: Double,
-                               val heading: Double = 0.0,
-                               val dHeading: Double = 0.0,
-                               val duration: Double = 1.0,
-                               val marker: String = "",
-                               val delayAfterArrive: Double = 0.0
-                              ) {
+
+data class DifferentialPoint2D(
+    val x: Double,
+    val dx: Double,
+    val y: Double,
+    val dy: Double,
+    val heading: Double = 0.0,
+    val dHeading: Double = 0.0
+) {
     infix fun isCloseTo(other: DifferentialPoint2D): Boolean {
         val epsilon = 1e-7
         return abs(x - other.x) < epsilon &&
@@ -197,10 +195,7 @@ data class DifferentialPoint2D(val x: Double,
                 abs(dx - other.dx) < epsilon &&
                 abs(dy - other.dy) < epsilon &&
                 abs(heading - other.heading) < epsilon &&
-                abs(dHeading - other.dHeading) < epsilon &&
-                abs(duration - other.duration) < epsilon &&
-                marker == other.marker &&
-                abs(delayAfterArrive - other.delayAfterArrive) < epsilon
+                abs(dHeading - other.dHeading) < epsilon
     }
 }
 

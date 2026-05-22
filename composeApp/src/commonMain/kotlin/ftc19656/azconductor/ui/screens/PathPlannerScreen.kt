@@ -8,8 +8,11 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,12 +28,13 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import azconductor.composeapp.generated.resources.FTC_MAP26
 import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.FieldConfig
 import ftc19656.azconductor.RobotConfig
 import ftc19656.azconductor.UIConfig
-import ftc19656.azconductor.route.DifferentialPoint2D
+import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.core.math.CoordinateMapper
 import ftc19656.azconductor.core.math.RectBounds
@@ -191,6 +195,16 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                 // 节点
                 route.waypoints.forEachIndexed { index, node ->
                     key(index) {
+                        if (selectedNodeIndex.value == index) {
+                            VectorHandle(
+                                node = node,
+                                mapper = mapper,
+                                onVectorChanged = { newDx, newDy ->
+                                    val updatedNode = route.getNodeAt(index).copy(dx = newDx, dy = newDy)
+                                    route.moveNode(index, updatedNode)
+                                }
+                            )
+                        }
                         DraggableNode(
                             index = index,
                             node = node,
@@ -204,16 +218,6 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                 editingNodeIndex = idx
                             }
                         )
-                        if (selectedNodeIndex.value == index) {
-                            VectorHandle(
-                                node = node,
-                                mapper = mapper,
-                                onVectorChanged = { newDx, newDy ->
-                                    val updatedNode = route.getNodeAt(index).copy(dx = newDx, dy = newDy)
-                                    route.moveNode(index, updatedNode)
-                                }
-                            )
-                        }
                     }
                 }
 
@@ -294,16 +298,14 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                 .fillMaxWidth(0.4f)
                 .align(Alignment.CenterEnd)
         ) {
-            // 切换按钮 (在边栏左侧边缘)
+            // 切换按钮：侧边栏收起后仍显示在右上角
             IconButton(
                 onClick = { isSidebarVisible = !isSidebarVisible },
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .offset(x = (-24).dp) // 将按钮向左偏移，使其悬浮在边栏边缘
-                    .size(48.dp)
-                    .graphicsLayer {
-                        translationX = if (isSidebarVisible) 0f else (this@BoxWithConstraints.maxWidth.toPx() * 0.4f)
-                    },
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(40.dp)
+                    .zIndex(1f),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -346,18 +348,89 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                         
                         HorizontalDivider(modifier = Modifier.padding(bottom = 16.dp))
                         
-                        // 此处可以放置其他组件
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Text(
+                            text = "控制点",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        if (route.waypoints.isEmpty()) {
                             Text(
-                                text = "在此处添加组件",
+                                text = "暂无控制点（在画布上右键添加）",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                itemsIndexed(route.waypoints) { index, node ->
+                                    val isSelected = selectedNodeIndex.value == index
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { selectedNodeIndex.value = index },
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isSelected) {
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                            }
+                                        )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "点 ${index + 1}",
+                                                    style = MaterialTheme.typography.titleSmall
+                                                )
+                                                Text(
+                                                    text = "x=${"%.2f".format(node.x)}, y=${"%.2f".format(node.y)}, heading=${"%.1f".format(node.heading)}°",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+
+                                            IconButton(onClick = { editingNodeIndex = index }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Edit,
+                                                    contentDescription = "编辑控制点"
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    route.removeNode(index)
+
+                                                    val selected = selectedNodeIndex.value
+                                                    selectedNodeIndex.value = when {
+                                                        selected == null -> null
+                                                        selected == index -> null
+                                                        selected > index -> selected - 1
+                                                        else -> selected
+                                                    }
+
+                                                    if (editingNodeIndex == index) {
+                                                        editingNodeIndex = null
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "删除控制点"
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

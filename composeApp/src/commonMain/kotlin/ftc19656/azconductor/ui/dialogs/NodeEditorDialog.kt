@@ -14,7 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.UIConfig
-import ftc19656.azconductor.route.DifferentialPoint2D
+import ftc19656.azconductor.route.ControlNode
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.elementNames
@@ -25,7 +25,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
 // 获取序列化器（静态以便提前预热避免点击延迟）
-val serializer = serializer<DifferentialPoint2D>()
+val serializer = serializer<ControlNode>()
 val descriptor = serializer.descriptor
 
 // 配置 Json 实例，强制包含默认值，确保 UI 能够显示 duration, heading 等默认字段
@@ -35,9 +35,9 @@ val editorJson = Json {
 }
 
 @OptIn(ExperimentalSerializationApi::class)
-fun preloadSerializer(): DifferentialPoint2D {
+fun preloadSerializer(): ControlNode {
     // 强制预热序列化器引擎
-    val serializer = DifferentialPoint2D.serializer()
+    val serializer = ControlNode.serializer()
     // 读取 descriptor，触发底层结构解析
     val count = serializer.descriptor.elementsCount
 
@@ -71,15 +71,15 @@ fun preloadSerializer(): DifferentialPoint2D {
 
 
 /**
- * 此函数能够为DifferentialPoint2D的每个字段生成一个输入框，并在保存时反序列化为一个对应实例
+ * 此函数能够为ControlNode的每个字段生成一个输入框，并在保存时反序列化为一个对应实例
  * 也就是说添加字段时无需修改此类，弹窗ui会自动适配
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Composable
 fun NodeEditorDialog(
-    node: DifferentialPoint2D,
+    node: ControlNode,
     onDismiss: () -> Unit,
-    onConfirm: (DifferentialPoint2D) -> Unit,
+    onConfirm: (ControlNode) -> Unit,
     onDelete: () -> Unit
 ) {
 

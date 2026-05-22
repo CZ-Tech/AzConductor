@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.pointer.pointerInput
 import ftc19656.azconductor.UIConfig
-import ftc19656.azconductor.route.DifferentialPoint2D
+import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.core.math.CoordinateMapper
 import ftc19656.azconductor.core.math.RectBounds
@@ -35,7 +35,7 @@ fun RouteCanvas(
                 detectTapGestures { offset ->
                     val logicPos = mapper.screenToLogical(offset.x, offset.y)
                     route.addPoint(
-                        DifferentialPoint2D(
+                        ControlNode(
                             x = logicPos.x.toDouble().coerceIn(bounds.minX, bounds.maxX),
                             dx = 10.0 * UIConfig.K_VELOCITY_HANDLE,
                             y = logicPos.y.toDouble().coerceIn(bounds.minY, bounds.maxY),

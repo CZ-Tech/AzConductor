@@ -23,13 +23,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.UIConfig
-import ftc19656.azconductor.route.DifferentialPoint2D
+import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.core.math.CoordinateMapper
 import kotlin.math.roundToInt
 
 @Composable
 fun VectorHandle(
-    node: DifferentialPoint2D,       // 父节点数据
+    node: ControlNode,       // 父节点数据
     mapper: CoordinateMapper,        // 坐标转换器
     color: Color = MaterialTheme.colorScheme.secondary,
     onVectorChanged: (Double, Double) -> Unit // 回调新的 dx, dy

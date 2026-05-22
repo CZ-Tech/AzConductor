@@ -2,14 +2,14 @@ package ftc19656.azconductor.route
 
 class RouteCore() {
     // 使用标准 MutableList 存储点位
-    private val _waypoints = mutableListOf<DifferentialPoint2D>()
-    val waypoints: List<DifferentialPoint2D> get() = _waypoints
+    private val _waypoints = mutableListOf<ControlNode>()
+    val waypoints: List<ControlNode> get() = _waypoints
 
     // 轨迹列表
     val trajectoryList = mutableListOf<OrientedTrajectoryGenerator2D>()
 
     // 获取最后一个点
-    val lastPoint: DifferentialPoint2D? get() = waypoints.lastOrNull()
+    val lastPoint: ControlNode? get() = waypoints.lastOrNull()
     val totalLength: Double get() = trajectoryList.sumOf { it.length }
     val totalTime: Double get() = trajectoryList.sumOf { it.duration }
 
@@ -22,22 +22,42 @@ class RouteCore() {
             val start = waypoints[i]
             val end = waypoints[i + 1]
             // 使用 end 点的 duration 作为轨迹段的持续时间
-            trajectoryList.add(OrientedTrajectoryGenerator2D(start, end, end.duration))
+            trajectoryList.add(
+                OrientedTrajectoryGenerator2D(
+                    start = DifferentialPoint2D(
+                        x = start.x,
+                        dx = start.dx,
+                        y = start.y,
+                        dy = start.dy,
+                        heading = start.heading,
+                        dHeading = start.dHeading
+                    ),
+                    end = DifferentialPoint2D(
+                        x = end.x,
+                        dx = end.dx,
+                        y = end.y,
+                        dy = end.dy,
+                        heading = end.heading,
+                        dHeading = end.dHeading
+                    ),
+                    duration = end.duration
+                )
+            )
         }
     }
 
-    fun addPoint(point: DifferentialPoint2D) {
+    fun addPoint(point: ControlNode) {
         _waypoints.add(point)
         rebuildTrajectories()
     }
 
-    fun setWaypoints(points: List<DifferentialPoint2D>) {
+    fun setWaypoints(points: List<ControlNode>) {
         _waypoints.clear()
         _waypoints.addAll(points)
         rebuildTrajectories()
     }
 
-    fun moveNode(index: Int, newPoint: DifferentialPoint2D) {
+    fun moveNode(index: Int, newPoint: ControlNode) {
         if (index in _waypoints.indices) {
             _waypoints[index] = newPoint
             rebuildTrajectories()
@@ -59,7 +79,7 @@ class RouteCore() {
      * 移动目标位置的节点（如果目标位置有两个点则只移动第一个）
      * 如果未找到则不会改变点集
      */
-    fun moveNode(sourceNode: DifferentialPoint2D, destinationNode: DifferentialPoint2D) {
+    fun moveNode(sourceNode: ControlNode, destinationNode: ControlNode) {
         val index = waypoints.indexOfFirst { it isCloseTo sourceNode }
         if (index != -1) moveNode(index, destinationNode)
     }
@@ -68,19 +88,19 @@ class RouteCore() {
      * 删除目标点（如果目标位置有两个点则只删除第一个）
      * 如果没找到则不会改变点集，也不会异常
      */
-    fun removeNode(point2D: DifferentialPoint2D) {
+    fun removeNode(point2D: ControlNode) {
         val index = waypoints.indexOfFirst { it isCloseTo point2D }
         if (index != -1) removeNode(index)
     }
 
-    fun getNodes(): List<DifferentialPoint2D> = waypoints.toList()
+    fun getNodes(): List<ControlNode> = waypoints.toList()
 
     /**
      * 获取指定绝对时间 t 的机器人坐标
      * @return 若列表为空则返回 null
      * @throws IndexOutOfBoundsException 若超出时间范围
      */
-    fun getPointAtTime(time: Double): DifferentialPoint2D? {
+    fun getPointAtTime(time: Double): ControlNode? {
         if (_waypoints.isEmpty()) return null
         if (trajectoryList.isEmpty()) return _waypoints.first()
 
@@ -105,7 +125,7 @@ class RouteCore() {
     }
 
 
-    // 移除 updateTrajectoryDuration 方法，因为 duration 现在是 DifferentialPoint2D 的属性
+    // 移除 updateTrajectoryDuration 方法，因为 duration 现在是 ControlNode 的属性
 
     override fun toString(): String {
         val stringBuilder = StringBuilder()
@@ -121,7 +141,7 @@ class RouteCore() {
         return stringBuilder.toString()
     }
 
-    fun getNodeAt(index: Int): DifferentialPoint2D {
+    fun getNodeAt(index: Int): ControlNode {
         return _waypoints[index]
     }
 }

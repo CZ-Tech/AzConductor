@@ -22,7 +22,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import ftc19656.azconductor.route.DifferentialPoint2D
+import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.core.math.CoordinateMapper
 import ftc19656.azconductor.core.math.RectBounds
 import kotlinx.coroutines.coroutineScope
@@ -35,10 +35,10 @@ import kotlin.math.roundToInt
 @Composable
 fun DraggableNode(
     index: Int,
-    node: DifferentialPoint2D,
+    node: ControlNode,
     mapper: CoordinateMapper,
     bounds: RectBounds,
-    onMove: (Int, DifferentialPoint2D) -> Unit,
+    onMove: (Int, ControlNode) -> Unit,
     onClick: (Int) -> Unit,
     onRightClick: (Int) -> Unit
 ) {
@@ -54,7 +54,7 @@ fun DraggableNode(
 
     // 内部状态：仅用于处理拖拽过程中的累加偏移，避免舍入误差
     var totalDragOffset by remember { mutableStateOf(Offset.Zero) }
-    var initialNodeBeforeDrag by remember { mutableStateOf<DifferentialPoint2D?>(null) }
+    var initialNodeBeforeDrag by remember { mutableStateOf<ControlNode?>(null) }
 
     Surface(
         shape = CircleShape,
