@@ -34,6 +34,7 @@ import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.FieldConfig
 import ftc19656.azconductor.RobotConfig
 import ftc19656.azconductor.UIConfig
+import ftc19656.azconductor.toFixed
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.core.math.CoordinateMapper
@@ -393,7 +394,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                                     style = MaterialTheme.typography.titleSmall
                                                 )
                                                 Text(
-                                                    text = "x=${"%.2f".format(node.x)}, y=${"%.2f".format(node.y)}, heading=${"%.1f".format(node.heading)}°",
+                                                    text = "x=${node.x.toFixed(2)}, y=${node.y.toFixed(2)}, heading=${node.heading.toFixed(1)}°",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
