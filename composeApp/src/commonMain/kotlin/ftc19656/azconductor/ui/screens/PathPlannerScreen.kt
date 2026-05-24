@@ -67,6 +67,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
 
     var currentTime by remember { mutableStateOf(0f) }
     var isPlaying by remember { mutableStateOf(false) }
+    var showGhostRobot by remember { mutableStateOf(true) }
 
     var showExportDialog by remember { mutableStateOf(false) }
     var exportedJson by remember { mutableStateOf("") }
@@ -188,11 +189,11 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                 )
 
                 // 棰勮鏈哄櫒浜?
-                route.getPointAtTime(currentTime.toDouble())?.let { ghostNode ->
-                    val screenPos = mapper.logicalToScreen(ghostNode.x.toFloat(), ghostNode.y.toFloat())
-                    val centerOffsetX = (RobotConfig.ROBOT_LOGICAL_WIDTH + ROBOT_RENDER_PADDING) / 2f * mapper.scale
-                    val centerOffsetY = (RobotConfig.ROBOT_LOGICAL_HEIGHT + ROBOT_RENDER_PADDING) / 2f * mapper.scale
-                    Box(modifier = Modifier.alpha(0.5f)) {
+                if (showGhostRobot) {
+                    route.getPointAtTime(currentTime.toDouble())?.let { ghostNode ->
+                        val screenPos = mapper.logicalToScreen(ghostNode.x.toFloat(), ghostNode.y.toFloat())
+                        val centerOffsetX = (RobotConfig.ROBOT_LOGICAL_WIDTH + ROBOT_RENDER_PADDING) / 2f * mapper.scale
+                        val centerOffsetY = (RobotConfig.ROBOT_LOGICAL_HEIGHT + ROBOT_RENDER_PADDING) / 2f * mapper.scale
                         RobotComponent(
                             index = -2,
                             logicalWidth = RobotConfig.ROBOT_LOGICAL_WIDTH,
@@ -206,7 +207,8 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                         (screenPos.x - centerOffsetX).roundToInt(),
                                         (screenPos.y - centerOffsetY).roundToInt()
                                     )
-                                },
+                                }
+                                .alpha(0.5f),
                             enabled = false
                         )
                     }
@@ -424,6 +426,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                     )
                                 }
                             }
+                            Spacer(modifier = Modifier.weight(1f))
                         } else {
                             LazyColumn(
                                 modifier = Modifier
@@ -558,6 +561,22 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                 }
                             }
                         }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "显示幽灵机器人",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Switch(
+                                checked = showGhostRobot,
+                                onCheckedChange = { showGhostRobot = it }
+                            )
+                        }
                     }
                 }
             }
@@ -615,31 +634,33 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                             .fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Slider(
-                            value = currentTime.coerceIn(0f, maxTime),
-                            onValueChange = {
-                                currentTime = it
-                                isPlaying = false
-                            },
-                            valueRange = 0f..maxTime,
-                            colors = SliderDefaults.colors(
-                                activeTrackColor = UIConfig.WIN11_ACCENT,
-                                inactiveTrackColor = UIConfig.WIN11_INACTIVE,
-                                thumbColor = UIConfig.WIN11_ACCENT
-                            ),
-                            thumb = {
-                                SliderDefaults.Thumb(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
-                                    thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
-                                )
-                            },
-                            modifier = Modifier
-                                .graphicsLayer {
-                                    rotationZ = -90f
-                                }
-                                .requiredWidth(this@BoxWithConstraints.maxHeight * 0.82f)
-                        )
+                        BoxWithConstraints(contentAlignment = Alignment.Center) {
+                            Slider(
+                                value = currentTime.coerceIn(0f, maxTime),
+                                onValueChange = {
+                                    currentTime = it
+                                    isPlaying = false
+                                },
+                                valueRange = 0f..maxTime,
+                                colors = SliderDefaults.colors(
+                                    activeTrackColor = UIConfig.WIN11_ACCENT,
+                                    inactiveTrackColor = UIConfig.WIN11_INACTIVE,
+                                    thumbColor = UIConfig.WIN11_ACCENT
+                                ),
+                                thumb = {
+                                    SliderDefaults.Thumb(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
+                                        thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
+                                    )
+                                },
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        rotationZ = -90f
+                                    }
+                                    .requiredWidth(maxHeight)
+                            )
+                        }
                     }
                     IconButton(
                         onClick = {
