@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
@@ -25,6 +26,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -56,11 +58,15 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
 
     val selectedNodeIndex = remember { mutableStateOf<Int?>(null) }
     var editingNodeIndex by remember { mutableStateOf<Int?>(null) }
+    var draggingNodeIndex by remember { mutableStateOf<Int?>(null) }
+    var draggedNodeOffsetY by remember { mutableStateOf(0f) }
+    val reorderThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
 
     var showContextMenu by remember { mutableStateOf(false) }
     var contextMenuOffset by remember { mutableStateOf(Offset.Zero) }
 
     var currentTime by remember { mutableStateOf(0f) }
+    var isPlaying by remember { mutableStateOf(false) }
 
     var showExportDialog by remember { mutableStateOf(false) }
     var exportedJson by remember { mutableStateOf("") }
@@ -71,6 +77,24 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
     var isSidebarVisible by remember { mutableStateOf(true) }
 
     var isPreheated by remember { mutableStateOf(true) }
+
+    fun remapIndexAfterMove(index: Int?, fromIndex: Int, toIndex: Int): Int? {
+        if (index == null) return null
+
+        return when {
+            index == fromIndex -> toIndex
+            fromIndex < toIndex && index in (fromIndex + 1)..toIndex -> index - 1
+            toIndex < fromIndex && index in toIndex until fromIndex -> index + 1
+            else -> index
+        }
+    }
+
+    fun moveSidebarNode(fromIndex: Int, toIndex: Int) {
+        selectedNodeIndex.value = remapIndexAfterMove(selectedNodeIndex.value, fromIndex, toIndex)
+        editingNodeIndex = remapIndexAfterMove(editingNodeIndex, fromIndex, toIndex)
+        route.moveNodeOrder(fromIndex, toIndex)
+        draggingNodeIndex = toIndex
+    }
 
     if (!isPreheated) {
         CompositionLocalProvider(LocalContentColor provides Color.Transparent) {
@@ -94,6 +118,28 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
             minY = (-FieldConfig.CANVAS_LOGICAL_HEIGHT * FieldConfig.ORIGIN_RATIO_Y).toDouble(),
             maxY = (FieldConfig.CANVAS_LOGICAL_HEIGHT * (1f - FieldConfig.ORIGIN_RATIO_Y)).toDouble()
         )
+    }
+    val addNodeFromSidebar = {
+        val lastPoint = route.lastPoint
+        val newNode = if (lastPoint == null) {
+            ControlNode(
+                x = 0.0.coerceIn(bounds.minX, bounds.maxX),
+                dx = 10.0 * UIConfig.K_VELOCITY_HANDLE,
+                y = 0.0.coerceIn(bounds.minY, bounds.maxY),
+                dy = 0.0,
+            )
+        } else {
+            val nextX = (lastPoint.x + 10.0).coerceIn(bounds.minX, bounds.maxX)
+            val nextY = if (nextX == lastPoint.x) {
+                (lastPoint.y + 10.0).coerceIn(bounds.minY, bounds.maxY)
+            } else {
+                lastPoint.y.coerceIn(bounds.minY, bounds.maxY)
+            }
+            lastPoint.copy(x = nextX, y = nextY)
+        }
+
+        route.addPoint(newNode)
+        selectedNodeIndex.value = route.waypoints.lastIndex
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -141,7 +187,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     rotationDegrees = rotationDegrees
                 )
 
-                // 预览机器人
+                // 棰勮鏈哄櫒浜?
                 route.getPointAtTime(currentTime.toDouble())?.let { ghostNode ->
                     val screenPos = mapper.logicalToScreen(ghostNode.x.toFloat(), ghostNode.y.toFloat())
                     val centerOffsetX = (RobotConfig.ROBOT_LOGICAL_WIDTH + ROBOT_RENDER_PADDING) / 2f * mapper.scale
@@ -166,7 +212,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     }
                 }
 
-                // 选中节点的机器人组件
+                // 閫変腑鑺傜偣鐨勬満鍣ㄤ汉缁勪欢
                 selectedNodeIndex.value?.let { index ->
                     route.waypoints.getOrNull(index)?.let { node ->
                         val screenPos = mapper.logicalToScreen(node.x.toFloat(), node.y.toFloat())
@@ -193,7 +239,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     }
                 }
 
-                // 节点
+                // 鑺傜偣
                 route.waypoints.forEachIndexed { index, node ->
                     key(index) {
                         if (selectedNodeIndex.value == index) {
@@ -240,7 +286,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     } ?: run { editingNodeIndex = null }
                 }
 
-                // 右键菜单
+                // 鍙抽敭鑿滃崟
                 Box(
                     modifier = Modifier
                         .offset {
@@ -252,7 +298,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                         onDismissRequest = { showContextMenu = false },
                     ) {
                         DropdownMenuItem(
-                            text = { Text("导出路径") },
+                            text = { Text("导出Json") },
                             onClick = {
                                 exportedJson = route.exportToJson()
                                 showExportDialog = true
@@ -260,7 +306,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("导入路径") },
+                            text = { Text("导入Json") },
                             onClick = {
                                 importJsonText = ""
                                 showImportDialog = true
@@ -292,14 +338,14 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
             }
         }
 
-        // 右侧边栏与切换按钮
+        // 鍙充晶杈规爮涓庡垏鎹㈡寜閽?
         Box(
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(0.4f)
                 .align(Alignment.CenterEnd)
         ) {
-            // 切换按钮：侧边栏收起后仍显示在右上角
+            // 鍒囨崲鎸夐挳锛氫晶杈规爮鏀惰捣鍚庝粛鏄剧ず鍦ㄥ彸涓婅
             IconButton(
                 onClick = { isSidebarVisible = !isSidebarVisible },
                 modifier = Modifier
@@ -342,7 +388,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                             .padding(16.dp)
                     ) {
                         Text(
-                            text = "属性与设置",
+                            text = "节点列表",
                             style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.padding(bottom = 16.dp)
                         )
@@ -357,10 +403,27 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
 
                         if (route.waypoints.isEmpty()) {
                             Text(
-                                text = "暂无控制点（在画布上右键添加）",
+                                text = "暂无控制点",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                IconButton(
+                                    onClick = addNodeFromSidebar,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "New control point",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         } else {
                             LazyColumn(
                                 modifier = Modifier
@@ -373,6 +436,49 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                     Card(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .zIndex(if (draggingNodeIndex == index) 1f else 0f)
+                                            .graphicsLayer {
+                                                if (draggingNodeIndex == index) {
+                                                    translationY = draggedNodeOffsetY
+                                                    shadowElevation = 8f
+                                                }
+                                            }
+                                            .pointerInput(route.waypoints.size) {
+                                                detectDragGestures(
+                                                    onDragStart = {
+                                                        draggingNodeIndex = index
+                                                        draggedNodeOffsetY = 0f
+                                                    },
+                                                    onDragCancel = {
+                                                        draggingNodeIndex = null
+                                                        draggedNodeOffsetY = 0f
+                                                    },
+                                                    onDragEnd = {
+                                                        draggingNodeIndex = null
+                                                        draggedNodeOffsetY = 0f
+                                                    },
+                                                    onDrag = { change, dragAmount ->
+                                                        change.consume()
+                                                        var currentIndex = draggingNodeIndex ?: return@detectDragGestures
+                                                        draggedNodeOffsetY += dragAmount.y
+
+                                                        while (
+                                                            draggedNodeOffsetY > reorderThresholdPx &&
+                                                            currentIndex < route.waypoints.lastIndex
+                                                        ) {
+                                                            moveSidebarNode(currentIndex, currentIndex + 1)
+                                                            currentIndex += 1
+                                                            draggedNodeOffsetY -= reorderThresholdPx
+                                                        }
+
+                                                        while (draggedNodeOffsetY < -reorderThresholdPx && currentIndex > 0) {
+                                                            moveSidebarNode(currentIndex, currentIndex - 1)
+                                                            currentIndex -= 1
+                                                            draggedNodeOffsetY += reorderThresholdPx
+                                                        }
+                                                    }
+                                                )
+                                            }
                                             .clickable { selectedNodeIndex.value = index },
                                         colors = CardDefaults.cardColors(
                                             containerColor = if (isSelected) {
@@ -390,11 +496,11 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = "点 ${index + 1}",
+                                                    text = node.marker.ifBlank { "点 ${index + 1}" },
                                                     style = MaterialTheme.typography.titleSmall
                                                 )
                                                 Text(
-                                                    text = "x=${node.x.toFixed(2)}, y=${node.y.toFixed(2)}, heading=${node.heading.toFixed(1)}°",
+                                                    text = "x=${node.x.toFixed(2)}, y=${node.y.toFixed(2)}, heading=${node.heading.toFixed(1)}度",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
@@ -431,6 +537,25 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                         }
                                     }
                                 }
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        IconButton(
+                                            onClick = addNodeFromSidebar,
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = "New control point",
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -438,8 +563,26 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
             }
         }
 
-        // 进度条
+        // 杩涘害鏉?
         val totalTime = route.getTotalTime().toFloat()
+        val maxTime = maxOf(totalTime, 0.001f)
+
+        LaunchedEffect(totalTime) {
+            currentTime = currentTime.coerceIn(0f, maxTime)
+            if (totalTime <= 0f) {
+                isPlaying = false
+            }
+        }
+
+        LaunchedEffect(isPlaying, totalTime) {
+            while (isPlaying && totalTime > 0f) {
+                delay(16)
+                currentTime = (currentTime + 0.016f).coerceAtMost(totalTime)
+                if (currentTime >= totalTime) {
+                    isPlaying = false
+                }
+            }
+        }
 
         Box(
             modifier = Modifier
@@ -460,49 +603,105 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
             contentAlignment = Alignment.Center
         ) {
             if (isLandscape) {
-                Slider(
-                    value = currentTime.coerceIn(0f, maxOf(totalTime, 0.001f)),
-                    onValueChange = { currentTime = it },
-                    valueRange = 0f..maxOf(totalTime, 0.001f),
-                    colors = SliderDefaults.colors(
-                        activeTrackColor = UIConfig.WIN11_ACCENT,
-                        inactiveTrackColor = UIConfig.WIN11_INACTIVE,
-                        thumbColor = UIConfig.WIN11_ACCENT
-                    ),
-                    thumb = {
-                        SliderDefaults.Thumb(
-                            interactionSource = remember { MutableInteractionSource() },
-                            colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
-                            thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
-                        )
-                    },
+                Column(
                     modifier = Modifier
-                        .graphicsLayer {
-                            rotationZ = -90f
-                        }
-                        .requiredWidth(this@BoxWithConstraints.maxHeight * 0.9f)
-                )
-            } else {
-                Slider(
-                    value = currentTime.coerceIn(0f, maxOf(totalTime, 0.001f)),
-                    onValueChange = { currentTime = it },
-                    valueRange = 0f..maxOf(totalTime, 0.001f),
-                    colors = SliderDefaults.colors(
-                        activeTrackColor = UIConfig.WIN11_ACCENT,
-                        inactiveTrackColor = UIConfig.WIN11_INACTIVE,
-                        thumbColor = UIConfig.WIN11_ACCENT
-                    ),
-                    thumb = {
-                        SliderDefaults.Thumb(
-                            interactionSource = remember { MutableInteractionSource() },
-                            colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
-                            thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
+                        .fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Slider(
+                            value = currentTime.coerceIn(0f, maxTime),
+                            onValueChange = {
+                                currentTime = it
+                                isPlaying = false
+                            },
+                            valueRange = 0f..maxTime,
+                            colors = SliderDefaults.colors(
+                                activeTrackColor = UIConfig.WIN11_ACCENT,
+                                inactiveTrackColor = UIConfig.WIN11_INACTIVE,
+                                thumbColor = UIConfig.WIN11_ACCENT
+                            ),
+                            thumb = {
+                                SliderDefaults.Thumb(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
+                                    thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
+                                )
+                            },
+                            modifier = Modifier
+                                .graphicsLayer {
+                                    rotationZ = -90f
+                                }
+                                .requiredWidth(this@BoxWithConstraints.maxHeight * 0.82f)
                         )
-                    },
+                    }
+                    IconButton(
+                        onClick = {
+                            if (!isPlaying && currentTime >= totalTime) {
+                                currentTime = 0f
+                            }
+                            isPlaying = !isPlaying
+                        },
+                        enabled = totalTime > 0f,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "暂停" else "开始"
+                        )
+                    }
+                }
+            } else {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
-                )
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Slider(
+                        value = currentTime.coerceIn(0f, maxTime),
+                        onValueChange = {
+                            currentTime = it
+                            isPlaying = false
+                        },
+                        valueRange = 0f..maxTime,
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = UIConfig.WIN11_ACCENT,
+                            inactiveTrackColor = UIConfig.WIN11_INACTIVE,
+                            thumbColor = UIConfig.WIN11_ACCENT
+                        ),
+                        thumb = {
+                            SliderDefaults.Thumb(
+                                interactionSource = remember { MutableInteractionSource() },
+                                colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
+                                thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            if (!isPlaying && currentTime >= totalTime) {
+                                currentTime = 0f
+                            }
+                            isPlaying = !isPlaying
+                        },
+                        enabled = totalTime > 0f,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "暂停" else "开始"
+                        )
+                    }
+                }
             }
         }
     }

@@ -65,6 +65,15 @@ class RouteConnector() : ViewModel() {
         }
     }
 
+    fun moveNodeOrder(fromIndex: Int, toIndex: Int) {
+        if (fromIndex !in _waypoints.indices || toIndex !in _waypoints.indices || fromIndex == toIndex) return
+
+        routeLogic.moveNodeOrder(fromIndex, toIndex)
+        val node = _waypoints.removeAt(fromIndex)
+        _waypoints.add(toIndex, node)
+        pathVersion++
+    }
+
     fun removeNode(index: Int) {
         routeLogic.removeNode(index)
         if (index in _waypoints.indices) {

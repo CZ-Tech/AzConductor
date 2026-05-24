@@ -64,6 +64,14 @@ class RouteCore() {
         }
     }
 
+    fun moveNodeOrder(fromIndex: Int, toIndex: Int) {
+        if (fromIndex !in _waypoints.indices || toIndex !in _waypoints.indices || fromIndex == toIndex) return
+
+        val node = _waypoints.removeAt(fromIndex)
+        _waypoints.add(toIndex, node)
+        rebuildTrajectories()
+    }
+
     /**
      * 按索引删除节点
      * @throws IndexOutOfBoundsException 如果索引越界则抛出
