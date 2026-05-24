@@ -389,11 +389,23 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                             .fillMaxSize()
                             .padding(16.dp)
                     ) {
-                        Text(
-                            text = "节点列表",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(end = 40.dp, bottom = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "节点列表",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            Text(
+                                text = "总时长: ${route.pathVersion.let { route.getTotalTime().toFixed(2) }}s",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         
                         HorizontalDivider(modifier = Modifier.padding(bottom = 16.dp))
                         
@@ -503,7 +515,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                                                     style = MaterialTheme.typography.titleSmall
                                                 )
                                                 Text(
-                                                    text = "x=${node.x.toFixed(2)}, y=${node.y.toFixed(2)}, heading=${node.heading.toFixed(1)}度",
+                                                    text = "x=${node.x.toFixed(2)}, y=${node.y.toFixed(2)}, heading=${node.heading.toFixed(1)}度, duration=${node.duration.toFixed(1)}s",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )

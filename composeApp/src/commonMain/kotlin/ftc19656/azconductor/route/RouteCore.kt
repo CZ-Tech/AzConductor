@@ -113,16 +113,16 @@ class RouteCore() {
     /**
      * 获取指定绝对时间 t 的机器人坐标
      * @return 若列表为空则返回 null
-     * @throws IndexOutOfBoundsException 若超出时间范围
      */
     fun getPointAtTime(time: Double): ControlNode? {
         if (_waypoints.isEmpty()) return null
         if (trajectoryList.isEmpty()) return _waypoints.first()
 
         val totalTime = this.totalTime
-        val epsilon = 1e-7
-        if (time < -epsilon || time > totalTime + epsilon) throw IndexOutOfBoundsException("Time out of range.")
-
+        if (time > totalTime) {
+            println("Time out of range! $time in $totalTime")
+        }
+        // 容错处理：直接限制在有效范围内，避免 UI 状态同步延迟导致的崩溃
         val coercedTime = time.coerceIn(0.0, totalTime)
 
         var accumulatedTime = 0.0
