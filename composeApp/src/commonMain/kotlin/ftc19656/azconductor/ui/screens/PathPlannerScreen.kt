@@ -143,7 +143,8 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
         selectedNodeIndex.value = route.waypoints.lastIndex
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(bottom = 24.dp)) {
         val isLandscape = maxWidth > maxHeight
 
         Box(
@@ -736,6 +737,19 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     }
                 }
             }
+        }
+        }
+
+        // 底部状态栏
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(24.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = 2.dp
+        ) {
+            // 目前什么都不显示
         }
     }
 }
