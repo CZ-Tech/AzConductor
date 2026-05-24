@@ -11,7 +11,14 @@ class RouteCore() {
     // 获取最后一个点
     val lastPoint: ControlNode? get() = waypoints.lastOrNull()
     val totalLength: Double get() = trajectoryList.sumOf { it.length }
-    val totalTime: Double get() = trajectoryList.sumOf { it.duration }
+    val totalTime: Double
+        get() = trajectoryList.indices.sumOf { index ->
+            trajectoryList[index].duration.coerceAtLeast(0.0) + arrivalDelayForTrajectory(index)
+        }
+
+    private fun arrivalDelayForTrajectory(index: Int): Double {
+        return _waypoints.getOrNull(index + 1)?.delayAfterArrive?.coerceAtLeast(0.0) ?: 0.0
+    }
 
     // 根据 waypoints 重新构建整条轨迹
     private fun rebuildTrajectories() {
@@ -119,13 +126,20 @@ class RouteCore() {
         val coercedTime = time.coerceIn(0.0, totalTime)
 
         var accumulatedTime = 0.0
-        for (traj in trajectoryList) {
-            val nextAccumulatedTime = accumulatedTime + traj.duration
-            if (coercedTime <= nextAccumulatedTime) {
+        for ((index, traj) in trajectoryList.withIndex()) {
+            val trajectoryDuration = traj.duration.coerceAtLeast(0.0)
+            val trajectoryEndTime = accumulatedTime + trajectoryDuration
+            if (coercedTime <= trajectoryEndTime) {
                 val localTime = coercedTime - accumulatedTime
                 return traj.getPointAtTime(localTime)
             }
-            accumulatedTime = nextAccumulatedTime
+
+            val delayEndTime = trajectoryEndTime + arrivalDelayForTrajectory(index)
+            if (coercedTime <= delayEndTime) {
+                return traj.getPointAtTime(traj.duration)
+            }
+
+            accumulatedTime = delayEndTime
         }
         // 理论上循环一定能命中，但为了防止极限情况下的浮点精度微小误差导致跳出循环
         // 直接返回最后一段轨迹的终点状态
