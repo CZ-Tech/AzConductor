@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import com.russhwolf.settings.Settings
 import ftc19656.azconductor.io.ConfigManager
+import ftc19656.azconductor.io.RemoteSave
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RouteCore
@@ -37,8 +38,40 @@ class RouteConnector(
         ignoreUnknownKeys = true
     }
 
+    // ---- Remote save to robot ----
+
+    /**
+     * The robot's IP address for remote persistence.
+     * Stored in ConfigManager so it survives app restarts.
+     * Defaults to "" (empty → remote save is disabled).
+     */
+    var robotIp: String
+        get() = configManager["robot_ip"] ?: ""
+        set(value) {
+            configManager["robot_ip"] = value
+            // rebuild RemoteSave with new IP
+            remoteSave = if (value.isNotBlank()) {
+                RemoteSave(value) { status -> connectionStatus = status }
+            } else {
+                null
+            }
+        }
+
+    private var remoteSave: RemoteSave? = null
+
+    init {
+        // initialise from stored config
+        val stored = configManager["robot_ip"] ?: ""
+        if (stored.isNotBlank()) {
+            remoteSave = RemoteSave(stored) { status -> connectionStatus = status }
+        }
+    }
+
     // UI-dedicated version stamp
     var pathVersion by mutableStateOf(0)
+
+    /** Remote save connection status, displayed in the bottom status bar. */
+    var connectionStatus by mutableStateOf("")
         private set
 
     // Observable state list for Compose
@@ -117,6 +150,9 @@ class RouteConnector(
         // directly to the underlying key-value store (Settings) for immediate durability.
         configManager[autoSaveKey] = json
         settingsStorage.putString(autoSaveKey, json)
+
+        // Also send to the robot's HTTP service if an IP is configured
+        remoteSave?.send(json)
     }
 
     /** Replace waypoints internally without side-effects (used by watcher). */
@@ -205,3 +241,5 @@ class RouteConnector(
         }
     }
 }
+
+

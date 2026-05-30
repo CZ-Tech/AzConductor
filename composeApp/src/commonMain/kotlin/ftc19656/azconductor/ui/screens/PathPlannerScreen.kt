@@ -73,6 +73,8 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
     var currentTime by remember { mutableStateOf(0f) }
     var isPlaying by remember { mutableStateOf(false) }
     var showGhostRobot by remember { mutableStateOf(true) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var dialogIpInput by remember { mutableStateOf(route.robotIp) }
 
     var showExportDialog by remember { mutableStateOf(false) }
     var exportedJson by remember { mutableStateOf("") }
@@ -646,6 +648,16 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    IconButton(
+                        onClick = { showSettingsDialog = true },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "设置",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -688,11 +700,12 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                             isPlaying = !isPlaying
                         },
                         enabled = totalTime > 0f,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "暂停" else "开始"
+                            contentDescription = if (isPlaying) "暂停" else "开始",
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
@@ -704,6 +717,16 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    IconButton(
+                        onClick = { showSettingsDialog = true },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "设置",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                     Slider(
                         value = currentTime.coerceIn(0f, maxTime),
                         onValueChange = {
@@ -733,15 +756,17 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                             isPlaying = !isPlaying
                         },
                         enabled = totalTime > 0f,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "暂停" else "开始"
+                            contentDescription = if (isPlaying) "暂停" else "开始",
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
             }
+
         }
         }
 
@@ -754,7 +779,49 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
             color = MaterialTheme.colorScheme.surfaceVariant,
             tonalElevation = 2.dp
         ) {
-            // 目前什么都不显示
+            Text(
+                    text = route.connectionStatus,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+        }
+
+        // 设置对话框
+        if (showSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = { Text("设置") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "机器人 IP 地址",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        OutlinedTextField(
+                            value = dialogIpInput,
+                            onValueChange = { dialogIpInput = it },
+                            singleLine = true,
+                            placeholder = { Text("192.168.1.100") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        route.robotIp = dialogIpInput
+                        showSettingsDialog = false
+                    }) {
+                        Text("保存")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSettingsDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            )
         }
     }
 }
+
