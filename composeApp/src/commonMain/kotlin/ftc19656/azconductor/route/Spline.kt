@@ -39,9 +39,9 @@ class CubicHermiteSpline1D(
  * 二维平面两点间的轨迹生成器（解析 X 与 Y）
  */
 open class TrajectoryGenerator2D(
-    var startX: Double, var startY: Double, var startDx: Double, var startDy: Double, // 起点状态
-    var endX: Double, var endY: Double, var endDx: Double, var endDy: Double,         // 终点状态
-    open var duration: Double        // 时间区间
+    val startX: Double, val startY: Double, val startDx: Double, val startDy: Double, // 起点状态
+    val endX: Double, val endY: Double, val endDx: Double, val endDy: Double,         // 终点状态
+    open val duration: Double        // 时间区间
 ) {
     constructor(start: DifferentialPoint2D, end: DifferentialPoint2D, duration: Double) : this(
         start.x, start.y, start.dx, start.dy,
@@ -50,12 +50,11 @@ open class TrajectoryGenerator2D(
     )
 
     // 分别为 X 轴和 Y 轴生成独立的一维样条
-    // 样条对象：每次访问 get() 都会根据当前坐标生成新的样条逻辑
-    protected open val splineX get() = CubicHermiteSpline1D(startX, startDx, endX, endDx)
-    protected open val splineY get() = CubicHermiteSpline1D(startY, startDy, endY, endDy)
+    protected open val splineX = CubicHermiteSpline1D(startX, startDx, endX, endDx)
+    protected open val splineY = CubicHermiteSpline1D(startY, startDy, endY, endDy)
 
 
-    val length: Double get() = calculateArcLength(100)
+    val length: Double by lazy { calculateArcLength(100) }
 
     /**
      * 使用辛普森积分法计算弧长
@@ -63,12 +62,10 @@ open class TrajectoryGenerator2D(
      */
     private fun calculateArcLength(n: Int): Double {
         if (n % 2 != 0) return calculateArcLength(n + 1) // 辛普森法要求步数为偶数
-        val sx = splineX
-        val sy = splineY
 
         val speedAtU: (Double) -> Double = { u ->
-            val vx = sx.getVelocity(u)
-            val vy = sy.getVelocity(u)
+            val vx = splineX.getVelocity(u)
+            val vy = splineY.getVelocity(u)
             hypot(vx, vy)
         }
 
@@ -129,10 +126,10 @@ open class TrajectoryGenerator2D(
  */
 class OrientedTrajectoryGenerator2D(
     startX: Double, startY: Double, startDx: Double, startDy: Double,
-    var startHeading: Double, var startDHeading: Double, // 新增朝向属性
+    val startHeading: Double, val startDHeading: Double, // 朝向属性
     endX: Double, endY: Double, endDx: Double, endDy: Double,
-    var endHeading: Double, var endDHeading: Double,     // 新增朝向属性
-    override var duration: Double
+    val endHeading: Double, val endDHeading: Double,     // 朝向属性
+    override val duration: Double
 ) : TrajectoryGenerator2D(
     startX, startY, startDx, startDy,
     endX, endY, endDx, endDy,
@@ -148,7 +145,7 @@ class OrientedTrajectoryGenerator2D(
     )
 
     // 专属于朝向的样条
-    private val splineHeading get() = CubicHermiteSpline1D(
+    private val splineHeading = CubicHermiteSpline1D(
         startHeading,
         startDHeading,
         normalizeRelative(startHeading, endHeading),
