@@ -56,11 +56,10 @@ class ConfigManager private constructor(
 
     operator fun set(key: String, value: String) {
         cache[key] = value
-
-        scope.launch {
-            val jsonPayload = Json.encodeToString(cache)
-            configStorge[id] = jsonPayload
-        }
+        // Write synchronously so the change is immediately durable ? critical for
+        // web/JS where the process may be torn down before an async launch completes.
+        val jsonPayload = Json.encodeToString(cache)
+        configStorge[id] = jsonPayload
     }
 
     operator fun get(key: String): String? {

@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import com.russhwolf.settings.Settings
 import ftc19656.azconductor.io.ConfigManager
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
@@ -24,6 +25,7 @@ class RouteConnector(
 ) : ViewModel() {
 
     private val configManager = ConfigManager.getOrCreate("route")
+    private val settingsStorage = Settings()  // direct access for immediate read/write
 
     // underlying pure-logic instance
     private val routeLogic = RouteCore()
@@ -73,9 +75,11 @@ class RouteConnector(
     fun startAutoSaveWatcher() {
         stopAutoSaveWatcher()
 
-        // Restore previously saved waypoints before starting the watcher.
-        val savedJson = configManager[autoSaveKey]
-        if (!savedJson.isNullOrBlank()) {
+        // Read directly from the underlying Settings (e.g. localStorage on JS)
+        // rather than from ConfigManager.cache, which may not be populated yet
+        // because loadFromSettings() runs asynchronously.
+        val savedJson = settingsStorage.getString(autoSaveKey, "")
+        if (savedJson.isNotBlank()) {
             try {
                 val restored = jsonConfig.decodeFromString<List<ControlNode>>(savedJson)
                 if (restored.isNotEmpty()) {
@@ -109,7 +113,10 @@ class RouteConnector(
     /** Persist current waypoints without bumping pathVersion unnecessarily. */
     private fun saveToConfig() {
         val json = jsonConfig.encodeToString(_waypoints.toList())
+        // Write to both: ConfigManager cache (for watchPath polling) AND
+        // directly to the underlying key-value store (Settings) for immediate durability.
         configManager[autoSaveKey] = json
+        settingsStorage.putString(autoSaveKey, json)
     }
 
     /** Replace waypoints internally without side-effects (used by watcher). */
