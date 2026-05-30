@@ -1,38 +1,48 @@
-package ftc19656.azconductor.route.viewmodel
+﻿package ftc19656.azconductor.route.viewmodel
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import ftc19656.azconductor.io.ConfigManager
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RouteCore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
-class RouteConnector() : ViewModel() {
+class RouteConnector(
+    private val autoSaveKey: String = "auto_save_waypoints",
+    private val autoSaveIntervalMs: Long = 50L
+) : ViewModel() {
 
-    // 底层纯逻辑实例
+    private val configManager = ConfigManager.getOrCreate("route")
+
+    // underlying pure-logic instance
     private val routeLogic = RouteCore()
 
-    // JSON 序列化配置
+    // JSON serialisation config
     private val jsonConfig = Json {
         prettyPrint = true
         encodeDefaults = true
         ignoreUnknownKeys = true
     }
 
-    // UI 专用的版本号
+    // UI-dedicated version stamp
     var pathVersion by mutableStateOf(0)
         private set
 
-    // 维护一个 Compose 专用的 StateList 供 UI 观察
+    // Observable state list for Compose
     private val _waypoints = mutableStateListOf<ControlNode>()
     val waypoints: List<ControlNode> get() = _waypoints
 
-    // 派生数据直接从逻辑层获取（如果 UI 需要监听 trajectoryList 的变化，通常依靠 pathVersion 驱动即可）
     val trajectoryList: List<OrientedTrajectoryGenerator2D>
         get() = routeLogic.trajectoryList
 
@@ -41,12 +51,82 @@ class RouteConnector() : ViewModel() {
 
     fun getTotalTime() = routeLogic.totalTime
 
-    // --- 增删改查代理逻辑 ---
+    // ---- auto-save watcher ----
+
+    private val watcherScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var autoSaveJob: Job? = null
+
+    /**
+     * Start (or restart) the async polling watcher.
+     * Every [autoSaveIntervalMs] the watcher checks whether the stored
+     * serialized waypoints have changed.  When a change is detected the
+     * new value is automatically written to the cross-platform
+     * [ConfigManager] (and therefore to [com.russhwolf.settings.Settings]).
+     *
+     * Because the watcher only *reads* the serialized payload from
+     * [configManager] and never writes it from the watcher coroutine,
+     * the actual persistence happens synchronously in the mutation
+     * methods below (see [saveToConfig]), and the watcher is there to
+     * catch external modifications that should be reflected back into
+     * the live UI list.
+     */
+    fun startAutoSaveWatcher() {
+        stopAutoSaveWatcher()
+
+        // Restore previously saved waypoints before starting the watcher.
+        val savedJson = configManager[autoSaveKey]
+        if (!savedJson.isNullOrBlank()) {
+            try {
+                val restored = jsonConfig.decodeFromString<List<ControlNode>>(savedJson)
+                if (restored.isNotEmpty()) {
+                    setWaypointsSilent(restored)
+                }
+            } catch (_: Exception) {
+                // corrupted data ? ignore and start fresh
+            }
+        }
+
+        autoSaveJob = configManager.watchPath(
+            pathKey = autoSaveKey,
+            intervalMs = autoSaveIntervalMs
+        ) { newValue ->
+            val parsed = try {
+                jsonConfig.decodeFromString<List<ControlNode>>(newValue)
+            } catch (_: Exception) {
+                return@watchPath
+            }
+            if (parsed != _waypoints.toList()) {
+                setWaypointsSilent(parsed)
+            }
+        }
+    }
+
+    fun stopAutoSaveWatcher() {
+        autoSaveJob?.cancel()
+        autoSaveJob = null
+    }
+
+    /** Persist current waypoints without bumping pathVersion unnecessarily. */
+    private fun saveToConfig() {
+        val json = jsonConfig.encodeToString(_waypoints.toList())
+        configManager[autoSaveKey] = json
+    }
+
+    /** Replace waypoints internally without side-effects (used by watcher). */
+    private fun setWaypointsSilent(points: List<ControlNode>) {
+        routeLogic.setWaypoints(points)
+        _waypoints.clear()
+        _waypoints.addAll(points)
+        pathVersion++
+    }
+
+    // ---- CRUD with auto-persist ----
 
     fun addPoint(point: ControlNode) {
         routeLogic.addPoint(point)
         _waypoints.add(point)
         pathVersion++
+        saveToConfig()
     }
 
     fun setWaypoints(points: List<ControlNode>) {
@@ -54,24 +134,25 @@ class RouteConnector() : ViewModel() {
         _waypoints.clear()
         _waypoints.addAll(points)
         pathVersion++
+        saveToConfig()
     }
 
     fun moveNode(index: Int, newPoint: ControlNode) {
         routeLogic.moveNode(index, newPoint)
         if (index in _waypoints.indices) {
-            // 赋值触发 Compose 列表该元素的重组
             _waypoints[index] = newPoint
             pathVersion++
+            saveToConfig()
         }
     }
 
     fun moveNodeOrder(fromIndex: Int, toIndex: Int) {
         if (fromIndex !in _waypoints.indices || toIndex !in _waypoints.indices || fromIndex == toIndex) return
-
         routeLogic.moveNodeOrder(fromIndex, toIndex)
         val node = _waypoints.removeAt(fromIndex)
         _waypoints.add(toIndex, node)
         pathVersion++
+        saveToConfig()
     }
 
     fun removeNode(index: Int) {
@@ -79,39 +160,33 @@ class RouteConnector() : ViewModel() {
         if (index in _waypoints.indices) {
             _waypoints.removeAt(index)
             pathVersion++
+            saveToConfig()
         }
     }
 
     fun moveNode(sourceNode: ControlNode, destinationNode: ControlNode) {
         val index = _waypoints.indexOfFirst { it isCloseTo sourceNode }
-        if (index != -1) moveNode(index, destinationNode) // 复用重载方法同步状态
+        if (index != -1) moveNode(index, destinationNode)
     }
 
     fun removeNode(point2D: ControlNode) {
         val index = _waypoints.indexOfFirst { it isCloseTo point2D }
-        if (index != -1) removeNode(index) // 复用重载方法同步状态
+        if (index != -1) removeNode(index)
     }
 
-    // --- 查询与只读方法直接代理给逻辑层 ---
+    // ---- read-only delegation ----
 
     fun getNodes(): List<ControlNode> = routeLogic.getNodes()
-
     fun getPointAtTime(time: Double): ControlNode? = routeLogic.getPointAtTime(time)
-
     override fun toString(): String = routeLogic.toString()
-
     fun getNodeAt(index: Int): ControlNode = routeLogic.getNodeAt(index)
 
-    /**
-     * 将当前路径导出为 JSON 字符串
-     */
+    // ---- explicit import / export (still available) ----
+
     fun exportToJson(): String {
         return jsonConfig.encodeToString(_waypoints.toList())
     }
 
-    /**
-     * 从 JSON 字符串导入路径
-     */
     fun importFromJson(jsonText: String): Boolean {
         return try {
             val importedWaypoints = jsonConfig.decodeFromString<List<ControlNode>>(jsonText)

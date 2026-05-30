@@ -1,4 +1,4 @@
-package ftc19656.azconductor.ui.screens
+﻿package ftc19656.azconductor.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -52,6 +52,11 @@ private const val ROBOT_RENDER_PADDING = 10f
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
+    DisposableEffect(route) {
+        route.startAutoSaveWatcher()
+        onDispose { route.stopAutoSaveWatcher() }
+    }
+
     val painter = painterResource(Res.drawable.FTC_MAP26)
     var canvasPhysicalSize by remember { mutableStateOf(IntSize.Zero) }
     val rotationDegrees = UIConfig.CANVAS_ROTATE_DEG
