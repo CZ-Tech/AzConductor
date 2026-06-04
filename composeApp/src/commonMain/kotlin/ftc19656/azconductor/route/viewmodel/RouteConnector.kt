@@ -13,10 +13,7 @@ import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -36,6 +33,8 @@ class RouteConnector : ViewModel() {
         private const val LEGACY_KEY = "auto_save_waypoints"
     }
 
+    private val configManager = ConfigManager.getOrCreate("route")
+
     // ---- Remote save to robot ----
 
     var robotIp: String
@@ -49,7 +48,6 @@ class RouteConnector : ViewModel() {
             }
         }
 
-    private val configManager = ConfigManager.getOrCreate("route")
     private var remoteSave: RemoteSave? = null
 
     init {
@@ -73,6 +71,19 @@ class RouteConnector : ViewModel() {
     val waypoints: List<ControlNode> get() = _waypoints
 
     private var allRoutes by mutableStateOf(listOf(RouteData(name = "默认路径")))
+    private var lastPersistedHash = 0
+
+    init {
+        val loadedRoutes = loadFromStorage()
+        if (loadedRoutes.isNotEmpty()) {
+            allRoutes = loadedRoutes
+            val first = loadedRoutes.first()
+            currentRouteName = first.name
+            _waypoints.addAll(first.points)
+            routeLogic.setWaypoints(first.points)
+            lastPersistedHash = loadedRoutes.hashCode()
+        }
+    }
 
     val trajectoryList: List<OrientedTrajectoryGenerator2D>
         get() = routeLogic.trajectoryList
@@ -90,6 +101,7 @@ class RouteConnector : ViewModel() {
         if (allRoutes.any { it.name == name }) return
         allRoutes = allRoutes + RouteData(name = name)
         switchRoute(name)
+        persist()
     }
 
     fun switchRoute(name: String) {
@@ -134,6 +146,7 @@ class RouteConnector : ViewModel() {
     private fun persist() {
         val robots = listOf(RobotRoutes(routes = allRoutes))
         val json = jsonConfig.encodeToString(robots)
+        lastPersistedHash = allRoutes.hashCode()
         configManager[STORAGE_KEY] = json
         settingsStorage.putString(STORAGE_KEY, json)
         remoteSave?.send(jsonConfig.encodeToString(_waypoints.toList()))
@@ -161,24 +174,10 @@ class RouteConnector : ViewModel() {
 
     // ---- Auto-save watcher ----
 
-    private val watcherScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var autoSaveJob: Job? = null
-    private var lastPersistedHash by mutableStateOf(0)
 
     fun startAutoSaveWatcher() {
         stopAutoSaveWatcher()
-
-        val loadedRoutes = loadFromStorage()
-        if (loadedRoutes.isNotEmpty()) {
-            allRoutes = loadedRoutes
-            val first = loadedRoutes.first()
-            currentRouteName = first.name
-            _waypoints.clear()
-            _waypoints.addAll(first.points)
-            routeLogic.setWaypoints(first.points)
-            pathVersion++
-            lastPersistedHash = loadedRoutes.hashCode()
-        }
 
         autoSaveJob = configManager.watchPath(
             pathKey = STORAGE_KEY,
@@ -207,13 +206,6 @@ class RouteConnector : ViewModel() {
     fun stopAutoSaveWatcher() {
         autoSaveJob?.cancel()
         autoSaveJob = null
-    }
-
-    private fun setWaypointsSilent(points: List<ControlNode>) {
-        routeLogic.setWaypoints(points)
-        _waypoints.clear()
-        _waypoints.addAll(points)
-        pathVersion++
     }
 
     // ---- CRUD with auto-persist ----
