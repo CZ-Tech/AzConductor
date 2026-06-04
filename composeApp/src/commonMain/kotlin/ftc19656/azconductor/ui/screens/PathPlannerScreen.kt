@@ -1,4 +1,4 @@
-﻿package ftc19656.azconductor.ui.screens
+package ftc19656.azconductor.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -7,6 +7,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.clickable
@@ -51,7 +52,7 @@ private const val ROBOT_RENDER_PADDING = 10f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
+fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onNavigateBack: () -> Unit = {}) {
     DisposableEffect(route) {
         route.startAutoSaveWatcher()
         onDispose { route.stopAutoSaveWatcher() }
@@ -623,6 +624,21 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
             }
         }
 
+        // 杩斿洖鎸夐挳 鈥?濮嬬粓淇濇寔鍦ㄥ乏涓婅锛屼笉闅忚繘搴︽潯绉诲姩
+        IconButton(
+            onClick = onNavigateBack,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+                .size(40.dp)
+                .zIndex(2f)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "杩斿洖",
+                modifier = Modifier.size(24.dp)
+            )
+        }
         Box(
             modifier = Modifier
                 .padding(8.dp)
@@ -630,12 +646,12 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     if (isLandscape) {
                         Modifier
                             .width(40.dp)
-                            .fillMaxHeight(0.95f)
+                            .fillMaxHeight(0.8f)
                             .align(Alignment.CenterStart)
                     } else {
                         Modifier
                             .height(40.dp)
-                            .fillMaxWidth(0.95f)
+                            .fillMaxWidth(0.8f)
                             .align(Alignment.BottomCenter)
                     }
                 ),
@@ -648,16 +664,6 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    IconButton(
-                        onClick = { showSettingsDialog = true },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "设置",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -717,16 +723,6 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    IconButton(
-                        onClick = { showSettingsDialog = true },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "设置",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
                     Slider(
                         value = currentTime.coerceIn(0f, maxTime),
                         onValueChange = {

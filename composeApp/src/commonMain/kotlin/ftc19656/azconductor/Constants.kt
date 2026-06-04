@@ -60,6 +60,8 @@ object UIConfig {
     val WIN11_ACCENT = Color(0xFF0067C0)
     val WIN11_INACTIVE = Color.LightGray.copy(alpha = 0.5f)
 
+    const val PATH_CARD_SIZE_DIP = 120
+
     const val K_VELOCITY_HANDLE = 5.0  // 速度向量手柄缩放系数
 
     // NodeEditorDialog 中 ControlNode 属性的显示顺序

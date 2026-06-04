@@ -10,46 +10,38 @@ import ftc19656.azconductor.io.ConfigManager
 import ftc19656.azconductor.io.RemoteSave
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
+import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteCore
+import ftc19656.azconductor.route.RouteData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
-class RouteConnector(
-    private val autoSaveKey: String = "auto_save_waypoints",
-    private val autoSaveIntervalMs: Long = 50L
-) : ViewModel() {
+class RouteConnector : ViewModel() {
 
-    private val configManager = ConfigManager.getOrCreate("route")
-    private val settingsStorage = Settings()  // direct access for immediate read/write
-
-    // underlying pure-logic instance
-    private val routeLogic = RouteCore()
-
-    // JSON serialisation config
+    private val settingsStorage = Settings()
     private val jsonConfig = Json {
         prettyPrint = true
         encodeDefaults = true
         ignoreUnknownKeys = true
     }
 
+    // ---- Storage keys ----
+    companion object {
+        private const val STORAGE_KEY = "robot_routes"
+        private const val LEGACY_KEY = "auto_save_waypoints"
+    }
+
     // ---- Remote save to robot ----
 
-    /**
-     * The robot's IP address for remote persistence.
-     * Stored in ConfigManager so it survives app restarts.
-     * Defaults to "" (empty → remote save is disabled).
-     */
     var robotIp: String
         get() = configManager["robot_ip"] ?: ""
         set(value) {
             configManager["robot_ip"] = value
-            // rebuild RemoteSave with new IP
             remoteSave = if (value.isNotBlank()) {
                 RemoteSave(value) { status -> connectionStatus = status }
             } else {
@@ -57,26 +49,30 @@ class RouteConnector(
             }
         }
 
+    private val configManager = ConfigManager.getOrCreate("route")
     private var remoteSave: RemoteSave? = null
 
     init {
-        // initialise from stored config
         val stored = configManager["robot_ip"] ?: ""
         if (stored.isNotBlank()) {
             remoteSave = RemoteSave(stored) { status -> connectionStatus = status }
         }
     }
 
-    // UI-dedicated version stamp
-    var pathVersion by mutableStateOf(0)
+    // ---- UI state ----
 
-    /** Remote save connection status, displayed in the bottom status bar. */
+    var pathVersion by mutableStateOf(0)
     var connectionStatus by mutableStateOf("")
         private set
+    var currentRouteName by mutableStateOf("默认路径")
 
-    // Observable state list for Compose
+    // ---- Internal model ----
+
+    private val routeLogic = RouteCore()
     private val _waypoints = mutableStateListOf<ControlNode>()
     val waypoints: List<ControlNode> get() = _waypoints
+
+    private var allRoutes by mutableStateOf(listOf(RouteData(name = "默认路径")))
 
     val trajectoryList: List<OrientedTrajectoryGenerator2D>
         get() = routeLogic.trajectoryList
@@ -86,54 +82,124 @@ class RouteConnector(
 
     fun getTotalTime() = routeLogic.totalTime
 
-    // ---- auto-save watcher ----
+    // ---- Route management ----
+
+    fun getRouteNames(): List<String> = allRoutes.map { it.name }
+
+    fun createRoute(name: String) {
+        if (allRoutes.any { it.name == name }) return
+        allRoutes = allRoutes + RouteData(name = name)
+        switchRoute(name)
+    }
+
+    fun switchRoute(name: String) {
+        val route = allRoutes.find { it.name == name } ?: return
+        currentRouteName = name
+        _waypoints.clear()
+        _waypoints.addAll(route.points)
+        routeLogic.setWaypoints(route.points)
+        pathVersion++
+    }
+
+    fun deleteRoute(name: String) {
+        if (allRoutes.size <= 1) return
+        allRoutes = allRoutes.filter { it.name != name }
+        if (currentRouteName == name) {
+            val next = allRoutes.first()
+            switchRoute(next.name)
+        }
+        persist()
+    }
+
+    fun renameRoute(oldName: String, newName: String) {
+        if (oldName == newName || allRoutes.any { it.name == newName }) return
+        allRoutes = allRoutes.map { if (it.name == oldName) it.copy(name = newName) else it }
+        if (currentRouteName == oldName) {
+            currentRouteName = newName
+        }
+        persist()
+    }
+
+    // ---- Persistence ----
+
+    private fun syncAndSave() {
+        val updated = allRoutes.map { route ->
+            if (route.name == currentRouteName) route.copy(points = _waypoints.toList())
+            else route
+        }
+        allRoutes = updated
+        persist()
+    }
+
+    private fun persist() {
+        val robots = listOf(RobotRoutes(routes = allRoutes))
+        val json = jsonConfig.encodeToString(robots)
+        configManager[STORAGE_KEY] = json
+        settingsStorage.putString(STORAGE_KEY, json)
+        remoteSave?.send(jsonConfig.encodeToString(_waypoints.toList()))
+    }
+
+    private fun loadFromStorage(): List<RouteData> {
+        // Try new format first
+        val json = settingsStorage.getString(STORAGE_KEY, "")
+        if (json.isNotBlank()) {
+            return try {
+                jsonConfig.decodeFromString<List<RobotRoutes>>(json)
+                    .flatMap { it.routes }
+            } catch (_: Exception) { emptyList() }
+        }
+        // Legacy fallback
+        val legacyJson = settingsStorage.getString(LEGACY_KEY, "")
+        if (legacyJson.isNotBlank()) {
+            return try {
+                val points = jsonConfig.decodeFromString<List<ControlNode>>(legacyJson)
+                listOf(RouteData(name = "默认路径", points = points))
+            } catch (_: Exception) { emptyList() }
+        }
+        return emptyList()
+    }
+
+    // ---- Auto-save watcher ----
 
     private val watcherScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var autoSaveJob: Job? = null
+    private var lastPersistedHash by mutableStateOf(0)
 
-    /**
-     * Start (or restart) the async polling watcher.
-     * Every [autoSaveIntervalMs] the watcher checks whether the stored
-     * serialized waypoints have changed.  When a change is detected the
-     * new value is automatically written to the cross-platform
-     * [ConfigManager] (and therefore to [com.russhwolf.settings.Settings]).
-     *
-     * Because the watcher only *reads* the serialized payload from
-     * [configManager] and never writes it from the watcher coroutine,
-     * the actual persistence happens synchronously in the mutation
-     * methods below (see [saveToConfig]), and the watcher is there to
-     * catch external modifications that should be reflected back into
-     * the live UI list.
-     */
     fun startAutoSaveWatcher() {
         stopAutoSaveWatcher()
 
-        // Read directly from the underlying Settings (e.g. localStorage on JS)
-        // rather than from ConfigManager.cache, which may not be populated yet
-        // because loadFromSettings() runs asynchronously.
-        val savedJson = settingsStorage.getString(autoSaveKey, "")
-        if (savedJson.isNotBlank()) {
-            try {
-                val restored = jsonConfig.decodeFromString<List<ControlNode>>(savedJson)
-                if (restored.isNotEmpty()) {
-                    setWaypointsSilent(restored)
-                }
-            } catch (_: Exception) {
-                // corrupted data ? ignore and start fresh
-            }
+        val loadedRoutes = loadFromStorage()
+        if (loadedRoutes.isNotEmpty()) {
+            allRoutes = loadedRoutes
+            val first = loadedRoutes.first()
+            currentRouteName = first.name
+            _waypoints.clear()
+            _waypoints.addAll(first.points)
+            routeLogic.setWaypoints(first.points)
+            pathVersion++
+            lastPersistedHash = loadedRoutes.hashCode()
         }
 
         autoSaveJob = configManager.watchPath(
-            pathKey = autoSaveKey,
-            intervalMs = autoSaveIntervalMs
+            pathKey = STORAGE_KEY,
+            intervalMs = 50L
         ) { newValue ->
             val parsed = try {
-                jsonConfig.decodeFromString<List<ControlNode>>(newValue)
+                jsonConfig.decodeFromString<List<RobotRoutes>>(newValue)
+                    .flatMap { it.routes }
             } catch (_: Exception) {
                 return@watchPath
             }
-            if (parsed != _waypoints.toList()) {
-                setWaypointsSilent(parsed)
+            if (parsed.hashCode() != lastPersistedHash) {
+                lastPersistedHash = parsed.hashCode()
+                val current = parsed.find { it.name == currentRouteName }
+                if (current != null) {
+                    _waypoints.clear()
+                    _waypoints.addAll(current.points)
+                    routeLogic.setWaypoints(current.points)
+                    pathVersion++
+                }
+                allRoutes = parsed
             }
         }
     }
@@ -143,19 +209,6 @@ class RouteConnector(
         autoSaveJob = null
     }
 
-    /** Persist current waypoints without bumping pathVersion unnecessarily. */
-    private fun saveToConfig() {
-        val json = jsonConfig.encodeToString(_waypoints.toList())
-        // Write to both: ConfigManager cache (for watchPath polling) AND
-        // directly to the underlying key-value store (Settings) for immediate durability.
-        configManager[autoSaveKey] = json
-        settingsStorage.putString(autoSaveKey, json)
-
-        // Also send to the robot's HTTP service if an IP is configured
-        remoteSave?.send(json)
-    }
-
-    /** Replace waypoints internally without side-effects (used by watcher). */
     private fun setWaypointsSilent(points: List<ControlNode>) {
         routeLogic.setWaypoints(points)
         _waypoints.clear()
@@ -169,7 +222,7 @@ class RouteConnector(
         routeLogic.addPoint(point)
         _waypoints.add(point)
         pathVersion++
-        saveToConfig()
+        syncAndSave()
     }
 
     fun setWaypoints(points: List<ControlNode>) {
@@ -177,7 +230,7 @@ class RouteConnector(
         _waypoints.clear()
         _waypoints.addAll(points)
         pathVersion++
-        saveToConfig()
+        syncAndSave()
     }
 
     fun moveNode(index: Int, newPoint: ControlNode) {
@@ -185,7 +238,7 @@ class RouteConnector(
         if (index in _waypoints.indices) {
             _waypoints[index] = newPoint
             pathVersion++
-            saveToConfig()
+            syncAndSave()
         }
     }
 
@@ -195,7 +248,7 @@ class RouteConnector(
         val node = _waypoints.removeAt(fromIndex)
         _waypoints.add(toIndex, node)
         pathVersion++
-        saveToConfig()
+        syncAndSave()
     }
 
     fun removeNode(index: Int) {
@@ -203,7 +256,7 @@ class RouteConnector(
         if (index in _waypoints.indices) {
             _waypoints.removeAt(index)
             pathVersion++
-            saveToConfig()
+            syncAndSave()
         }
     }
 
@@ -224,22 +277,40 @@ class RouteConnector(
     override fun toString(): String = routeLogic.toString()
     fun getNodeAt(index: Int): ControlNode = routeLogic.getNodeAt(index)
 
-    // ---- explicit import / export (still available) ----
+    // ---- export / import ----
 
     fun exportToJson(): String {
-        return jsonConfig.encodeToString(_waypoints.toList())
+        syncAndSave()
+        return jsonConfig.encodeToString(listOf(RobotRoutes(routes = allRoutes)))
     }
 
     fun importFromJson(jsonText: String): Boolean {
         return try {
-            val importedWaypoints = jsonConfig.decodeFromString<List<ControlNode>>(jsonText)
-            setWaypoints(importedWaypoints)
+            val robots = jsonConfig.decodeFromString<List<RobotRoutes>>(jsonText)
+            val routes = robots.flatMap { it.routes }
+            if (routes.isEmpty()) return false
+            allRoutes = routes
+            val first = routes.first()
+            currentRouteName = first.name
+            _waypoints.clear()
+            _waypoints.addAll(first.points)
+            routeLogic.setWaypoints(first.points)
+            pathVersion++
+            persist()
             true
-        } catch (e: Exception) {
-            println("Import failed: ${e.message}")
-            false
+        } catch (_: Exception) {
+            // Legacy format fallback
+            try {
+                val points = jsonConfig.decodeFromString<List<ControlNode>>(jsonText)
+                val route = RouteData(name = "导入路径", points = points)
+                allRoutes = allRoutes + route
+                switchRoute(route.name)
+                persist()
+                true
+            } catch (e2: Exception) {
+                println("Import failed: ${e2.message}")
+                false
+            }
         }
     }
 }
-
-

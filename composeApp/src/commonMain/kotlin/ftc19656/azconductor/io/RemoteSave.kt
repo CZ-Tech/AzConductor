@@ -1,4 +1,4 @@
-﻿package ftc19656.azconductor.io
+package ftc19656.azconductor.io
 
 import ftc19656.azconductor.httpPostJson
 import kotlinx.coroutines.CoroutineScope
@@ -8,14 +8,15 @@ import kotlinx.coroutines.launch
 
 /**
  * Sends waypoint JSON to the robot's onboard HTTP service (port 8888)
- * and persists it with POST /save.
+ * and persists it under a named path with POST /save/{pathName}.
  *
  * Usage:
- *   val remoteSave = RemoteSave("192.168.1.100") { status -> println(status) }
+ *   val remoteSave = RemoteSave("192.168.1.100", pathName = "autoRoute") { status -> println(status) }
  *   remoteSave.send(jsonPayload)
  */
 class RemoteSave(
     private val robotIp: String,
+    private val pathName: String = "default",
     private val port: Int = 8888,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
     private val onStatusChange: (String) -> Unit = {}
@@ -23,18 +24,18 @@ class RemoteSave(
     private val baseUrl: String = "http://$robotIp:$port"
 
     /**
-     * Fire-and-forget: POST the JSON payload to the robot, then trigger /save.
+     * Fire-and-forget: POST the JSON payload to the robot, then trigger /save/{pathName}.
      * Runs on a background coroutine so it never blocks the UI thread.
      *
-     * Follows the typical workflow from the API docs:
-     *   1. POST /  with JSON body -> stores in memory
-     *   2. POST /save -> persists to SharedPreferences
+     * Workflow:
+     *   1. POST / with JSON body -> stores in current memory
+     *   2. POST /save/{pathName} (empty body) -> persists current memory to named path
      *
      * @param jsonBody  The serialized waypoints JSON string.
      */
     fun send(jsonBody: String) {
         scope.launch {
-            // Step 1: send the JSON payload
+            // Step 1: send the JSON payload to current memory
             val uploadResult = httpPostJson("$baseUrl/", jsonBody)
             if (uploadResult == null) {
                 onStatusChange("连接失败")
@@ -42,14 +43,30 @@ class RemoteSave(
                 return@launch
             }
 
-            // Step 2: persist on the robot side
-            val saveResult = httpPostJson("$baseUrl/save", jsonBody)
+            // Step 2: persist under the named path (no body needed)
+            val saveResult = httpPostJson("$baseUrl/save/$pathName", "")
             if (saveResult == null) {
                 onStatusChange("已发送")
-                println("RemoteSave: failed to persist at $baseUrl/save")
+                println("RemoteSave: failed to persist at $baseUrl/save/$pathName")
             } else {
                 onStatusChange("已保存")
                 println("RemoteSave: successfully sent and saved to robot at $baseUrl")
+            }
+        }
+    }
+
+    /**
+     * Load a previously saved path from the robot.
+     */
+    fun load(onResult: (String?) -> Unit) {
+        scope.launch {
+            val result = httpPostJson("$baseUrl/load/$pathName", "")
+            if (result != null) {
+                onStatusChange("已加载")
+                onResult(result)
+            } else {
+                onStatusChange("加载失败")
+                onResult(null)
             }
         }
     }
