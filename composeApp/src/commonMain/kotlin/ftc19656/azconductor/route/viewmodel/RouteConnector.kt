@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModel
 import com.russhwolf.settings.Settings
 import ftc19656.azconductor.io.ConfigManager
 import ftc19656.azconductor.io.RemoteSave
+import ftc19656.azconductor.io.loadRouteData
+import ftc19656.azconductor.io.saveRouteData
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RobotRoutes
@@ -51,10 +53,14 @@ class RouteConnector : ViewModel() {
     private var remoteSave: RemoteSave? = null
 
     init {
-        val stored = configManager["robot_ip"] ?: ""
-        if (stored.isNotBlank()) {
-            remoteSave = RemoteSave(stored) { status -> connectionStatus = status }
+        val storedIp = configManager["robot_ip"] ?: ""
+        if (storedIp.isNotBlank()) {
+            remoteSave = RemoteSave(storedIp) { status -> connectionStatus = status }
         }
+
+        // Clean legacy large values from ConfigManager cache (Preferences has ~8KB per-key limit)
+        configManager[LEGACY_KEY] = ""
+        configManager[STORAGE_KEY] = "0"
     }
 
     // ---- UI state ----
@@ -132,6 +138,15 @@ class RouteConnector : ViewModel() {
         persist()
     }
 
+    fun moveRouteOrder(fromIndex: Int, toIndex: Int) {
+        if (fromIndex !in allRoutes.indices || toIndex !in allRoutes.indices || fromIndex == toIndex) return
+        allRoutes = allRoutes.toMutableList().apply {
+            val item = removeAt(fromIndex)
+            add(toIndex, item)
+        }
+        persist()
+    }
+
     // ---- Persistence ----
 
     private fun syncAndSave() {
@@ -147,21 +162,20 @@ class RouteConnector : ViewModel() {
         val robots = listOf(RobotRoutes(routes = allRoutes))
         val json = jsonConfig.encodeToString(robots)
         lastPersistedHash = allRoutes.hashCode()
-        configManager[STORAGE_KEY] = json
-        settingsStorage.putString(STORAGE_KEY, json)
+        saveRouteData(json)
+        configManager[STORAGE_KEY] = lastPersistedHash.toString()
         remoteSave?.send(jsonConfig.encodeToString(_waypoints.toList()))
     }
 
     private fun loadFromStorage(): List<RouteData> {
-        // Try new format first
-        val json = settingsStorage.getString(STORAGE_KEY, "")
-        if (json.isNotBlank()) {
+        val json = loadRouteData()
+        if (!json.isNullOrBlank()) {
             return try {
                 jsonConfig.decodeFromString<List<RobotRoutes>>(json)
                     .flatMap { it.routes }
             } catch (_: Exception) { emptyList() }
         }
-        // Legacy fallback
+        // Legacy fallback from old Settings-based storage
         val legacyJson = settingsStorage.getString(LEGACY_KEY, "")
         if (legacyJson.isNotBlank()) {
             return try {
@@ -183,14 +197,17 @@ class RouteConnector : ViewModel() {
             pathKey = STORAGE_KEY,
             intervalMs = 50L
         ) { newValue ->
-            val parsed = try {
-                jsonConfig.decodeFromString<List<RobotRoutes>>(newValue)
-                    .flatMap { it.routes }
-            } catch (_: Exception) {
-                return@watchPath
-            }
-            if (parsed.hashCode() != lastPersistedHash) {
-                lastPersistedHash = parsed.hashCode()
+            val remoteHash = newValue.toIntOrNull() ?: return@watchPath
+            if (remoteHash != lastPersistedHash) {
+                val json = loadRouteData()
+                if (json.isNullOrBlank()) return@watchPath
+                val parsed = try {
+                    jsonConfig.decodeFromString<List<RobotRoutes>>(json)
+                        .flatMap { it.routes }
+                } catch (_: Exception) {
+                    return@watchPath
+                }
+                lastPersistedHash = remoteHash
                 val current = parsed.find { it.name == currentRouteName }
                 if (current != null) {
                     _waypoints.clear()
