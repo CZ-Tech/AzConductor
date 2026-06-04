@@ -11,12 +11,11 @@ import kotlinx.coroutines.launch
  * and persists it under a named path with POST /save/{pathName}.
  *
  * Usage:
- *   val remoteSave = RemoteSave("192.168.1.100", pathName = "autoRoute") { status -> println(status) }
- *   remoteSave.send(jsonPayload)
+ *   val remoteSave = RemoteSave("192.168.1.100") { status -> println(status) }
+ *   remoteSave.send(jsonPayload, "autoRoute")
  */
 class RemoteSave(
     private val robotIp: String,
-    private val pathName: String = "default",
     private val port: Int = 8888,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
     private val onStatusChange: (String) -> Unit = {}
@@ -32,8 +31,9 @@ class RemoteSave(
      *   2. POST /save/{pathName} (empty body) -> persists current memory to named path
      *
      * @param jsonBody  The serialized waypoints JSON string.
+     * @param pathName  The path name to save under on the robot.
      */
-    fun send(jsonBody: String) {
+    fun send(jsonBody: String, pathName: String) {
         scope.launch {
             // Step 1: send the JSON payload to current memory
             val uploadResult = httpPostJson("$baseUrl/", jsonBody)
@@ -57,8 +57,9 @@ class RemoteSave(
 
     /**
      * Load a previously saved path from the robot.
+     * @param pathName  The path name to load from the robot.
      */
-    fun load(onResult: (String?) -> Unit) {
+    fun load(pathName: String, onResult: (String?) -> Unit) {
         scope.launch {
             val result = httpPostJson("$baseUrl/load/$pathName", "")
             if (result != null) {

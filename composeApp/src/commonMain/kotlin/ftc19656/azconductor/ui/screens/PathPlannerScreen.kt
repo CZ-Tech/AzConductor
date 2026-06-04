@@ -775,12 +775,28 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
             color = MaterialTheme.colorScheme.surfaceVariant,
             tonalElevation = 2.dp
         ) {
-            Text(
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth()) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "设置",
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 4.dp)
+                        .size(16.dp)
+                        .clickable { showSettingsDialog = true },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
                     text = route.connectionStatus,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.Center)
+                    color = when (route.connectionStatus) {
+                        "连接失败", "未配置IP", "加载失败" -> Color.Red
+                        "已保存", "已加载" -> Color(0xFF4CAF50)
+                        "已发送" -> Color(0xFFFFA000)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 )
+            }
         }
 
         // 设置对话框

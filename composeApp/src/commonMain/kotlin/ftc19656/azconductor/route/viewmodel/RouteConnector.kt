@@ -44,31 +44,34 @@ class RouteConnector : ViewModel() {
         set(value) {
             configManager["robot_ip"] = value
             remoteSave = if (value.isNotBlank()) {
+                connectionStatus = "就绪"
                 RemoteSave(value) { status -> connectionStatus = status }
             } else {
+                connectionStatus = "未配置IP"
                 null
             }
         }
 
     private var remoteSave: RemoteSave? = null
 
+    // ---- UI state ----
+
+    var pathVersion by mutableStateOf(0)
+    var connectionStatus by mutableStateOf("未配置IP")
+        private set
+    var currentRouteName by mutableStateOf("默认路径")
+
     init {
         val storedIp = configManager["robot_ip"] ?: ""
         if (storedIp.isNotBlank()) {
             remoteSave = RemoteSave(storedIp) { status -> connectionStatus = status }
+            connectionStatus = "就绪"
         }
 
         // Clean legacy large values from ConfigManager cache (Preferences has ~8KB per-key limit)
         configManager[LEGACY_KEY] = ""
         configManager[STORAGE_KEY] = "0"
     }
-
-    // ---- UI state ----
-
-    var pathVersion by mutableStateOf(0)
-    var connectionStatus by mutableStateOf("")
-        private set
-    var currentRouteName by mutableStateOf("默认路径")
 
     // ---- Internal model ----
 
@@ -164,7 +167,7 @@ class RouteConnector : ViewModel() {
         lastPersistedHash = allRoutes.hashCode()
         saveRouteData(json)
         configManager[STORAGE_KEY] = lastPersistedHash.toString()
-        remoteSave?.send(jsonConfig.encodeToString(_waypoints.toList()))
+        remoteSave?.send(jsonConfig.encodeToString(_waypoints.toList()), currentRouteName)
     }
 
     private fun loadFromStorage(): List<RouteData> {
