@@ -123,9 +123,13 @@ class RouteConnector : ViewModel() {
     }
 
     fun deleteRoute(name: String) {
-        if (allRoutes.size <= 1) return
         allRoutes = allRoutes.filter { it.name != name }
-        if (currentRouteName == name) {
+        if (allRoutes.isEmpty()) {
+            currentRouteName = ""
+            _waypoints.clear()
+            routeLogic.setWaypoints(emptyList())
+            pathVersion++
+        } else if (currentRouteName == name) {
             val next = allRoutes.first()
             switchRoute(next.name)
         }

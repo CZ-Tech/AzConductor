@@ -188,20 +188,18 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit) {
                                         style = MaterialTheme.typography.titleSmall,
                                         textAlign = TextAlign.Center
                                     )
-                                    // Delete button (only show when more than 1 route)
-                                    if (routeNames.size > 1) {
-                                        IconButton(
-                                            onClick = { deleteTarget = name },
-                                            modifier = Modifier
-                                                .align(Alignment.TopStart)
-                                                .size(24.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = "删除",
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        }
+                                    // Delete button
+                                    IconButton(
+                                        onClick = { deleteTarget = name },
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "删除",
+                                            modifier = Modifier.size(14.dp)
+                                        )
                                     }
                                     IconButton(
                                         onClick = {
