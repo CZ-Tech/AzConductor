@@ -40,7 +40,7 @@ class RouteConnector : ViewModel() {
     // ---- Remote save to robot ----
 
     var robotIp: String
-        get() = configManager["robot_ip"] ?: ""
+        get() = configManager["robot_ip"] ?: "192.168.43.1"
         set(value) {
             configManager["robot_ip"] = value
             remoteSave = if (value.isNotBlank()) {
@@ -62,7 +62,7 @@ class RouteConnector : ViewModel() {
     var currentRouteName by mutableStateOf("默认路径")
 
     init {
-        val storedIp = configManager["robot_ip"] ?: ""
+        val storedIp = configManager["robot_ip"] ?: "192.168.43.1"
         if (storedIp.isNotBlank()) {
             remoteSave = RemoteSave(storedIp) { status -> connectionStatus = status }
             connectionStatus = "就绪"

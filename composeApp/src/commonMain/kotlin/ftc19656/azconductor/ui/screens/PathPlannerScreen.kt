@@ -814,7 +814,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                             value = dialogIpInput,
                             onValueChange = { dialogIpInput = it },
                             singleLine = true,
-                            placeholder = { Text("192.168.1.100") },
+                            placeholder = { Text("192.168.43.1") },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
