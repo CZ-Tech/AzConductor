@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.*
@@ -37,6 +38,9 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit) {
     // Rename dialog
     var renameTarget by remember { mutableStateOf<String?>(null) }
     var renameText by remember { mutableStateOf("") }
+
+    // Delete confirmation dialog
+    var deleteTarget by remember { mutableStateOf<String?>(null) }
 
     // Drag state
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
@@ -184,6 +188,21 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit) {
                                         style = MaterialTheme.typography.titleSmall,
                                         textAlign = TextAlign.Center
                                     )
+                                    // Delete button (only show when more than 1 route)
+                                    if (routeNames.size > 1) {
+                                        IconButton(
+                                            onClick = { deleteTarget = name },
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .size(24.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "删除",
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
                                     IconButton(
                                         onClick = {
                                             renameTarget = name
@@ -272,6 +291,31 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { renameTarget = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // Delete confirmation dialog
+    if (deleteTarget != null) {
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除路径") },
+            text = { Text("确定要删除路径「${deleteTarget}」吗？此操作不可撤销。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        route.deleteRoute(deleteTarget!!)
+                        refreshRouteNames()
+                        deleteTarget = null
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) {
                     Text("取消")
                 }
             }
