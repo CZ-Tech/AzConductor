@@ -26,7 +26,7 @@ actual suspend fun httpPostJson(url: String, jsonBody: String): String? {
         } else {
             null
         }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         println("httpPostJson failed for $url: ${e.message}")
         null
     }

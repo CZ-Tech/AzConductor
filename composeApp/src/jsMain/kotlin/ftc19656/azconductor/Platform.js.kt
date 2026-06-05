@@ -1,12 +1,8 @@
 ﻿package ftc19656.azconductor
 
 import kotlinx.browser.window
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.await
 import org.w3c.fetch.RequestInit
-import org.w3c.fetch.RequestMode
 
 class JsPlatform: Platform {
     override val name: String = "Web with Kotlin/JS"
@@ -29,7 +25,7 @@ actual suspend fun httpPostJson(url: String, jsonBody: String): String? {
         } else {
             null
         }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         println("httpPostJson failed for $url: ${e.message}")
         null
     }

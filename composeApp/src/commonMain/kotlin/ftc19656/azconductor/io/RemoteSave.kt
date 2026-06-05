@@ -35,22 +35,27 @@ class RemoteSave(
      */
     fun send(jsonBody: String, pathName: String) {
         scope.launch {
-            // Step 1: send the JSON payload to current memory
-            val uploadResult = httpPostJson("$baseUrl/", jsonBody)
-            if (uploadResult == null) {
-                onStatusChange("连接失败")
-                println("RemoteSave: failed to upload to $baseUrl/")
-                return@launch
-            }
+            try {
+                // Step 1: send the JSON payload to current memory
+                val uploadResult = httpPostJson("$baseUrl/", jsonBody)
+                if (uploadResult == null) {
+                    onStatusChange("连接失败")
+                    println("RemoteSave: failed to upload to $baseUrl/")
+                    return@launch
+                }
 
-            // Step 2: persist under the named path (no body needed)
-            val saveResult = httpPostJson("$baseUrl/save/$pathName", "")
-            if (saveResult == null) {
-                onStatusChange("已发送")
-                println("RemoteSave: failed to persist at $baseUrl/save/$pathName")
-            } else {
-                onStatusChange("已保存")
-                println("RemoteSave: successfully sent and saved to robot at $baseUrl")
+                // Step 2: persist under the named path (no body needed)
+                val saveResult = httpPostJson("$baseUrl/save/$pathName", "")
+                if (saveResult == null) {
+                    onStatusChange("已发送")
+                    println("RemoteSave: failed to persist at $baseUrl/save/$pathName")
+                } else {
+                    onStatusChange("已保存")
+                    println("RemoteSave: successfully sent and saved to robot at $baseUrl")
+                }
+            } catch (e: Throwable) {
+                onStatusChange("连接失败")
+                println("RemoteSave: exception in send: ${e.message}")
             }
         }
     }
@@ -61,13 +66,19 @@ class RemoteSave(
      */
     fun load(pathName: String, onResult: (String?) -> Unit) {
         scope.launch {
-            val result = httpPostJson("$baseUrl/load/$pathName", "")
-            if (result != null) {
-                onStatusChange("已加载")
-                onResult(result)
-            } else {
+            try {
+                val result = httpPostJson("$baseUrl/load/$pathName", "")
+                if (result != null) {
+                    onStatusChange("已加载")
+                    onResult(result)
+                } else {
+                    onStatusChange("加载失败")
+                    onResult(null)
+                }
+            } catch (e: Throwable) {
                 onStatusChange("加载失败")
                 onResult(null)
+                println("RemoteSave: exception in load: ${e.message}")
             }
         }
     }
