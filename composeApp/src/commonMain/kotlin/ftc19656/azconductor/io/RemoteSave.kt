@@ -96,4 +96,30 @@ class RemoteSave(
             null
         }
     }
+
+    /**
+     * Fetch a saved path JSON from the robot via GET /{pathName}.
+     * Returns the raw JSON body, or null if not found or on failure.
+     */
+    suspend fun fetchPath(pathName: String): String? {
+        return try {
+            httpGet("$baseUrl/$pathName")
+        } catch (e: Throwable) {
+            println("RemoteSave: exception in fetchPath($pathName): ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * List all saved path names from the robot via GET /list.
+     * Returns the raw JSON response body (e.g. {"status":"ok","paths":["a","b"]}), or null on failure.
+     */
+    suspend fun listPaths(): String? {
+        return try {
+            httpGet("$baseUrl/list")
+        } catch (e: Throwable) {
+            println("RemoteSave: exception in listPaths: ${e.message}")
+            null
+        }
+    }
 }

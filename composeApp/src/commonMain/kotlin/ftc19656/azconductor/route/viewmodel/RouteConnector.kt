@@ -17,10 +17,14 @@ import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
 import ftc19656.azconductor.io.RobotTaskItem
 import ftc19656.azconductor.io.RobotTaskListResponse
+import ftc19656.azconductor.io.RobotPathListResponse
+import ftc19656.azconductor.io.SyncConflictData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -49,6 +53,7 @@ class RouteConnector : ViewModel() {
         get() = configManager["robot_ip"] ?: "192.168.43.1"
         set(value) {
             configManager["robot_ip"] = value
+            periodicSyncJob?.cancel()
             remoteSave = if (value.isNotBlank()) {
                 connectionStatus = "就绪"
                 RemoteSave(value) { status -> connectionStatus = status }
@@ -57,6 +62,7 @@ class RouteConnector : ViewModel() {
                 null
             }
             connectAndFetchTasks()
+            startPeriodicSync()
         }
 
     private var remoteSave: RemoteSave? = null
@@ -70,6 +76,11 @@ class RouteConnector : ViewModel() {
     var availableTasks by mutableStateOf<List<RobotTaskItem>>(emptyList())
         private set
     var currentRouteName by mutableStateOf("默认路径")
+    var syncConflict by mutableStateOf<SyncConflictData?>(null)
+        private set
+
+    private val conflictQueue = mutableListOf<SyncConflictData>()
+    private var periodicSyncJob: Job? = null
 
     init {
         val storedIp = configManager["robot_ip"] ?: "192.168.43.1"
@@ -82,6 +93,8 @@ class RouteConnector : ViewModel() {
         // Clean legacy large values from ConfigManager cache (Preferences has ~8KB per-key limit)
         configManager[LEGACY_KEY] = ""
         configManager[STORAGE_KEY] = "0"
+
+        startPeriodicSync()
     }
 
     // ---- Proactive robot connection ----
@@ -113,6 +126,186 @@ class RouteConnector : ViewModel() {
                 connectionStatus = "连接失败"
             }
         }
+    }
+
+    // ---- Periodic sync with robot ----
+
+    private fun startPeriodicSync(intervalMs: Long = 5000L) {
+        println("RouteConnector: starting periodic sync (interval=${intervalMs}ms)")
+        periodicSyncJob = scope.launch {
+            while (isActive) {
+                delay(intervalMs)
+                val rs = remoteSave
+                if (rs == null) {
+                    println("RouteConnector: sync skipped (no remoteSave)")
+                    continue
+                }
+
+                println("RouteConnector: sync cycle start")
+
+                // Step 1: refresh task list
+                try {
+                    val tasksResult = rs.fetchTasks()
+                    if (tasksResult != null) {
+                        try {
+                            val response = jsonConfig.decodeFromString<RobotTaskListResponse>(tasksResult)
+                            if (response.status == "ok") {
+                                availableTasks = response.tasks
+                                println("RouteConnector: tasks refreshed (${response.tasks.size} tasks)")
+                            }
+                        } catch (_: Exception) { println("RouteConnector: failed to parse tasks response") }
+                    } else {
+                        println("RouteConnector: fetchTasks returned null")
+                    }
+                } catch (e: Throwable) { println("RouteConnector: fetchTasks error: ${e.message}") }
+
+                // Step 2: list robot paths and compare each with local
+                try {
+                    val listResult = rs.listPaths()
+                    if (listResult != null) {
+                        try {
+                            val pathList = jsonConfig.decodeFromString<RobotPathListResponse>(listResult)
+                            if (pathList.status == "ok") {
+                                println("RouteConnector: robot has ${pathList.paths.size} paths: ${pathList.paths}")
+                                println("RouteConnector: local has ${allRoutes.size} routes: ${allRoutes.map { it.name }}")
+                                val localRoutes = allRoutes.toList()
+                                for (routeData in localRoutes) {
+                                    if (conflictQueue.any { it.pathName == routeData.name }) {
+                                        println("RouteConnector: '${routeData.name}' already in conflict queue, skip")
+                                        continue
+                                    }
+                                    if (syncConflict?.pathName == routeData.name) {
+                                        println("RouteConnector: '${routeData.name}' currently showing conflict, skip")
+                                        continue
+                                    }
+                                    if (routeData.name !in pathList.paths) {
+                                        println("RouteConnector: '${routeData.name}' not on robot, skip")
+                                        continue
+                                    }
+
+                                    try {
+                                        val remoteJson = rs.fetchPath(routeData.name)
+                                        if (remoteJson == null) {
+                                            println("RouteConnector: fetchPath('${routeData.name}') returned null")
+                                            continue
+                                        }
+                                        if (remoteJson.contains("\"status\":\"not_found\"")) {
+                                            println("RouteConnector: fetchPath('${routeData.name}') returned not_found")
+                                            continue
+                                        }
+
+                                        val localJson = jsonConfig.encodeToString(routeData.points)
+                                        if (localJson != remoteJson) {
+                                            conflictQueue.add(SyncConflictData(
+                                                pathName = routeData.name,
+                                                localJson = localJson,
+                                                remoteJson = remoteJson
+                                            ))
+                                            println("RouteConnector: sync conflict detected for '${routeData.name}'")
+                                        } else {
+                                            println("RouteConnector: '${routeData.name}' local == remote, no conflict")
+                                        }
+                                    } catch (e: Throwable) {
+                                        println("RouteConnector: fetchPath('${routeData.name}') error: ${e.message}")
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) { println("RouteConnector: failed to parse path list response") }
+                    } else {
+                        println("RouteConnector: listPaths returned null")
+                    }
+                } catch (e: Throwable) { println("RouteConnector: listPaths error: ${e.message}") }
+
+                // Step 3: pop next conflict from queue if no dialog is currently shown
+                if (syncConflict == null && conflictQueue.isNotEmpty()) {
+                    syncConflict = conflictQueue.removeAt(0)
+                }
+
+                println("RouteConnector: sync cycle end")
+            }
+            println("RouteConnector: periodic sync stopped")
+        }
+    }
+
+    private fun popNextConflict() {
+        syncConflict = if (conflictQueue.isNotEmpty()) conflictQueue.removeAt(0) else null
+    }
+
+    /**
+     * Keep the local version, discard the remote version.
+     */
+    fun resolveConflictKeepLocal() {
+        if (syncConflict != null) {
+            popNextConflict()
+        }
+    }
+
+    /**
+     * Replace local waypoints with the robot version.
+     */
+    fun resolveConflictKeepRemote() {
+        val conflict = syncConflict ?: return
+        try {
+            val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
+            allRoutes = allRoutes.map { route ->
+                if (route.name == conflict.pathName) route.copy(points = points) else route
+            }
+            if (currentRouteName == conflict.pathName) {
+                _waypoints.clear()
+                _waypoints.addAll(points)
+                routeLogic.setWaypoints(points)
+                pathVersion++
+            }
+            // Persist to local storage only (don't re-send to robot)
+            val robots = listOf(RobotRoutes(routes = allRoutes))
+            val json = jsonConfig.encodeToString(robots)
+            lastPersistedHash = allRoutes.hashCode()
+            saveRouteData(json)
+            configManager[STORAGE_KEY] = lastPersistedHash.toString()
+        } catch (_: Exception) {
+            println("RouteConnector: failed to apply remote version for '${conflict.pathName}'")
+        }
+        popNextConflict()
+    }
+
+    /**
+     * Keep both versions: rename the local version (e.g. "默认路径(电脑端)")
+     * and download the robot version under the original name.
+     */
+    fun resolveConflictKeepBoth() {
+        val conflict = syncConflict ?: return
+        try {
+            // 1. Generate new name for the local version
+            var localNewName = "${conflict.pathName}(电脑端)"
+            var suffix = 1
+            while (allRoutes.any { it.name == localNewName }) {
+                suffix++
+                localNewName = "${conflict.pathName}(电脑端$suffix)"
+            }
+            // 2. Rename local route
+            allRoutes = allRoutes.map { route ->
+                if (route.name == conflict.pathName) route.copy(name = localNewName) else route
+            }
+            // 3. Add robot version under original name
+            val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
+            allRoutes = allRoutes + RouteData(name = conflict.pathName, points = points)
+            // 4. If currently editing the conflict path, switch waypoints to robot version
+            if (currentRouteName == conflict.pathName) {
+                _waypoints.clear()
+                _waypoints.addAll(points)
+                routeLogic.setWaypoints(points)
+                pathVersion++
+            }
+            // 5. Persist
+            val robots = listOf(RobotRoutes(routes = allRoutes))
+            val json = jsonConfig.encodeToString(robots)
+            lastPersistedHash = allRoutes.hashCode()
+            saveRouteData(json)
+            configManager[STORAGE_KEY] = lastPersistedHash.toString()
+        } catch (_: Exception) {
+            println("RouteConnector: failed to keep both versions for '${conflict.pathName}'")
+        }
+        popNextConflict()
     }
 
     // ---- Internal model ----

@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.route.viewmodel.RouteConnector
+import ftc19656.azconductor.ui.dialogs.SyncConflictDialog
 import ftc19656.azconductor.ui.screens.HomeScreen
 import ftc19656.azconductor.ui.screens.PathPlannerScreen
 import ftc19656.azconductor.ui.theme.AzConductorTheme
@@ -106,6 +107,16 @@ fun App(route: RouteConnector = RouteConnector()) {
                         Text("取消")
                     }
                 }
+            )
+        }
+
+        // ---- Sync conflict dialog (global, can appear on any screen) ----
+        route.syncConflict?.let { conflict ->
+            SyncConflictDialog(
+                conflict = conflict,
+                onKeepLocal = { route.resolveConflictKeepLocal() },
+                onKeepRemote = { route.resolveConflictKeepRemote() },
+                onKeepBoth = { route.resolveConflictKeepBoth() }
             )
         }
     }

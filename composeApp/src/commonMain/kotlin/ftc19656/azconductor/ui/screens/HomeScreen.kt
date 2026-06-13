@@ -29,7 +29,7 @@ import ftc19656.azconductor.route.viewmodel.RouteConnector
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit) {
-    var routeNames by remember { mutableStateOf(route.getRouteNames()) }
+    var routeNames by remember(route.pathVersion) { mutableStateOf(route.getRouteNames()) }
 
     // New route dialog
     var showCreateDialog by remember { mutableStateOf(false) }
