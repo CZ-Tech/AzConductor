@@ -75,6 +75,8 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
     var currentTime by remember { mutableStateOf(0f) }
     var isPlaying by remember { mutableStateOf(false) }
     var showGhostRobot by remember { mutableStateOf(true) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var dialogIpInput by remember { mutableStateOf(route.robotIp) }
 
     var showExportDialog by remember { mutableStateOf(false) }
     var exportedJson by remember { mutableStateOf("") }
@@ -150,7 +152,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(bottom = 24.dp)) {
         val isLandscape = maxWidth > maxHeight
 
         Box(
@@ -878,6 +880,75 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
             }
 
         }
+        }
+
+        // 底部状态栏
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(24.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = 2.dp
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth()) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "设置",
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 4.dp)
+                        .size(16.dp)
+                        .clickable { showSettingsDialog = true },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = route.connectionStatus,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when (route.connectionStatus) {
+                        "连接失败", "未配置IP", "加载失败" -> Color.Red
+                        "已保存", "已加载" -> Color(0xFF4CAF50)
+                        "已发送" -> Color(0xFFFFA000)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+        }
+
+        // 设置对话框
+        if (showSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = { Text("设置") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "机器人 IP 地址",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        OutlinedTextField(
+                            value = dialogIpInput,
+                            onValueChange = { dialogIpInput = it },
+                            singleLine = true,
+                            placeholder = { Text("192.168.43.1") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        route.robotIp = dialogIpInput
+                        showSettingsDialog = false
+                    }) {
+                        Text("保存")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSettingsDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            )
         }
     }
 }

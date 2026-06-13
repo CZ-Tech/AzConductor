@@ -27,13 +27,3 @@ expect fun getPlatform(): Platform
  * - JS/WASM: browser fetch() API
  */
 expect suspend fun httpPostJson(url: String, jsonBody: String): String?
-
-/**
- * Send a GET request to [url] and return the response body string.
- * Returns null on failure (network error, timeout, non-2xx).
- *
- * Platform implementations:
- * - JVM: java.net.HttpURLConnection
- * - JS/WASM: browser fetch() API
- */
-expect suspend fun httpGet(url: String): String?

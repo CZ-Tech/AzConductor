@@ -1,6 +1,5 @@
 package ftc19656.azconductor.io
 
-import ftc19656.azconductor.httpGet
 import ftc19656.azconductor.httpPostJson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -81,19 +80,6 @@ class RemoteSave(
                 onResult(null)
                 println("RemoteSave: exception in load: ${e.message}")
             }
-        }
-    }
-
-    /**
-     * Fetch the list of available tasks from the robot via GET /tasks.
-     * Returns the raw JSON response body, or null on failure.
-     */
-    suspend fun fetchTasks(): String? {
-        return try {
-            httpGet("$baseUrl/tasks")
-        } catch (e: Throwable) {
-            println("RemoteSave: exception in fetchTasks: ${e.message}")
-            null
         }
     }
 }

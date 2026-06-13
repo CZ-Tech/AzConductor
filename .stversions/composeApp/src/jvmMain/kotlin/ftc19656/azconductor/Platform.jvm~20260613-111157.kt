@@ -58,23 +58,3 @@ actual suspend fun httpPostJson(url: String, jsonBody: String): String? = withCo
         null
     }
 }
-
-actual suspend fun httpGet(url: String): String? = withContext(Dispatchers.IO) {
-    try {
-        val uri = URI(url)
-        val connection = uri.toURL().openConnection() as HttpURLConnection
-        connection.requestMethod = "GET"
-        connection.connectTimeout = 3000
-        connection.readTimeout = 3000
-
-        val responseCode = connection.responseCode
-        if (responseCode in 200..299) {
-            connection.inputStream.use { it.readAllBytes().toString(Charsets.UTF_8) }
-        } else {
-            null
-        }
-    } catch (e: Throwable) {
-        println("httpGet failed for $url: ${e.message}")
-        null
-    }
-}

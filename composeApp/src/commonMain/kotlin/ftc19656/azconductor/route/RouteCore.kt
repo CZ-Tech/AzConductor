@@ -58,6 +58,13 @@ class RouteCore() {
         rebuildTrajectories()
     }
 
+    fun addPointAt(index: Int, point: ControlNode) {
+        if (index in 0.._waypoints.size) {
+            _waypoints.add(index, point)
+            rebuildTrajectories()
+        }
+    }
+
     fun setWaypoints(points: List<ControlNode>) {
         _waypoints.clear()
         _waypoints.addAll(points)

@@ -15,13 +15,7 @@ import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
-import ftc19656.azconductor.io.RobotTaskItem
-import ftc19656.azconductor.io.RobotTaskListResponse
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -56,18 +50,14 @@ class RouteConnector : ViewModel() {
                 connectionStatus = "未配置IP"
                 null
             }
-            connectAndFetchTasks()
         }
 
     private var remoteSave: RemoteSave? = null
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     // ---- UI state ----
 
     var pathVersion by mutableStateOf(0)
     var connectionStatus by mutableStateOf("未配置IP")
-        private set
-    var availableTasks by mutableStateOf<List<RobotTaskItem>>(emptyList())
         private set
     var currentRouteName by mutableStateOf("默认路径")
 
@@ -77,42 +67,10 @@ class RouteConnector : ViewModel() {
             remoteSave = RemoteSave(storedIp) { status -> connectionStatus = status }
             connectionStatus = "就绪"
         }
-        connectAndFetchTasks()
 
         // Clean legacy large values from ConfigManager cache (Preferences has ~8KB per-key limit)
         configManager[LEGACY_KEY] = ""
         configManager[STORAGE_KEY] = "0"
-    }
-
-    // ---- Proactive robot connection ----
-
-    /**
-     * Proactively call GET /tasks on the robot to verify connectivity
-     * and populate [availableTasks] with the task list.
-     */
-    private fun connectAndFetchTasks() {
-        val rs = remoteSave ?: return
-        connectionStatus = "正在连接..."
-        scope.launch {
-            try {
-                val result = rs.fetchTasks()
-                if (result != null) {
-                    try {
-                        val response = jsonConfig.decodeFromString<RobotTaskListResponse>(result)
-                        if (response.status == "ok") {
-                            availableTasks = response.tasks
-                        }
-                        connectionStatus = "就绪"
-                    } catch (_: Exception) {
-                        connectionStatus = "已连接"
-                    }
-                } else {
-                    connectionStatus = "连接失败"
-                }
-            } catch (_: Throwable) {
-                connectionStatus = "连接失败"
-            }
-        }
     }
 
     // ---- Internal model ----

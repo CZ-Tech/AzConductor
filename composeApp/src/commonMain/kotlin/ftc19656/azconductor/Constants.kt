@@ -50,6 +50,9 @@ object RobotConfig {
  * UI 表现与交互配置
  */
 object UIConfig {
+    const val EXPAND_ARROW_BUTTON_SIZE_DIP = 36
+    const val EXPAND_ARROW_ICON_SIZE_DIP = 24
+
     const val CANVAS_LINE_WIDTH = 2f
     const val CURVE_DRAW_STEP = 1000
     const val CANVAS_ROTATE_DEG = 0f

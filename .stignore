@@ -1,0 +1,22 @@
+// 1. Gradle 相关的编译产物和本地缓存 (必须排除)
+build/
+.gradle/
+
+// 2. IDEA 的本地工作区状态 (必须排除，否则每次两边打开窗口布局都会乱跳)
+.idea/
+*.iml
+
+target/
+
+// 生成的临时源码
+src/main/generated/
+
+// 5. Git 锁文件 (同步 .git 文件夹要这几行保命)
+.git/index.lock
+.git/HEAD.lock
+.git/refs/**/*.lock
+.git/objects/**/tmp_*
+
+// 6. 操作系统垃圾文件
+.DS_Store
+Thumbs.db

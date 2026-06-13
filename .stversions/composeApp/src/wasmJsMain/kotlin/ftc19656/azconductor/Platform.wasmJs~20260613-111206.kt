@@ -31,17 +31,3 @@ actual suspend fun httpPostJson(url: String, jsonBody: String): String? {
         null
     }
 }
-
-actual suspend fun httpGet(url: String): String? {
-    return try {
-        val response: Response = window.fetch(url).await()
-        if (response.ok) {
-            response.text().await()
-        } else {
-            null
-        }
-    } catch (e: Throwable) {
-        println("httpGet failed for $url: ${e.message}")
-        null
-    }
-}
