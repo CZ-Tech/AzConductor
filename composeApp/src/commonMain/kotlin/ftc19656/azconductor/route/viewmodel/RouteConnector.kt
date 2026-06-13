@@ -15,8 +15,8 @@ import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
-import ftc19656.azconductor.io.RobotTaskItem
-import ftc19656.azconductor.io.RobotTaskListResponse
+import ftc19656.azconductor.io.RobotCommandItem
+import ftc19656.azconductor.io.RobotCommandListResponse
 import ftc19656.azconductor.io.RobotPathListResponse
 import ftc19656.azconductor.io.SyncConflictData
 import kotlinx.coroutines.CoroutineScope
@@ -61,7 +61,7 @@ class RouteConnector : ViewModel() {
                 connectionStatus = "未配置IP"
                 null
             }
-            connectAndFetchTasks()
+            connectAndFetchCommands()
             startPeriodicSync()
         }
 
@@ -73,7 +73,7 @@ class RouteConnector : ViewModel() {
     var pathVersion by mutableStateOf(0)
     var connectionStatus by mutableStateOf("未配置IP")
         private set
-    var availableTasks by mutableStateOf<List<RobotTaskItem>>(emptyList())
+    var availableCommands by mutableStateOf<List<RobotCommandItem>>(emptyList())
         private set
     var currentRouteName by mutableStateOf("默认路径")
     var syncConflict by mutableStateOf<SyncConflictData?>(null)
@@ -88,7 +88,7 @@ class RouteConnector : ViewModel() {
             remoteSave = RemoteSave(storedIp) { status -> connectionStatus = status }
             connectionStatus = "就绪"
         }
-        connectAndFetchTasks()
+        connectAndFetchCommands()
 
         // Clean legacy large values from ConfigManager cache (Preferences has ~8KB per-key limit)
         configManager[LEGACY_KEY] = ""
@@ -100,20 +100,20 @@ class RouteConnector : ViewModel() {
     // ---- Proactive robot connection ----
 
     /**
-     * Proactively call GET /tasks on the robot to verify connectivity
-     * and populate [availableTasks] with the task list.
+     * Proactively call GET /commands on the robot to verify connectivity
+     * and populate [availableCommands] with the command list.
      */
-    private fun connectAndFetchTasks() {
+    private fun connectAndFetchCommands() {
         val rs = remoteSave ?: return
         connectionStatus = "正在连接..."
         scope.launch {
             try {
-                val result = rs.fetchTasks()
+                val result = rs.fetchCommands()
                 if (result != null) {
                     try {
-                        val response = jsonConfig.decodeFromString<RobotTaskListResponse>(result)
+                        val response = jsonConfig.decodeFromString<RobotCommandListResponse>(result)
                         if (response.status == "ok") {
-                            availableTasks = response.tasks
+                            availableCommands = response.commands
                         }
                         connectionStatus = "就绪"
                     } catch (_: Exception) {
@@ -143,21 +143,21 @@ class RouteConnector : ViewModel() {
 
                 println("RouteConnector: sync cycle start")
 
-                // Step 1: refresh task list
+                // Step 1: refresh command list
                 try {
-                    val tasksResult = rs.fetchTasks()
-                    if (tasksResult != null) {
+                    val commandsResult = rs.fetchCommands()
+                    if (commandsResult != null) {
                         try {
-                            val response = jsonConfig.decodeFromString<RobotTaskListResponse>(tasksResult)
+                            val response = jsonConfig.decodeFromString<RobotCommandListResponse>(commandsResult)
                             if (response.status == "ok") {
-                                availableTasks = response.tasks
-                                println("RouteConnector: tasks refreshed (${response.tasks.size} tasks)")
+                                availableCommands = response.commands
+                                println("RouteConnector: commands refreshed (${response.commands.size} commands)")
                             }
-                        } catch (_: Exception) { println("RouteConnector: failed to parse tasks response") }
+                        } catch (_: Exception) { println("RouteConnector: failed to parse commands response") }
                     } else {
-                        println("RouteConnector: fetchTasks returned null")
+                        println("RouteConnector: fetchCommands returned null")
                     }
-                } catch (e: Throwable) { println("RouteConnector: fetchTasks error: ${e.message}") }
+                } catch (e: Throwable) { println("RouteConnector: fetchCommands error: ${e.message}") }
 
                 // Step 2: list robot paths and compare each with local
                 try {
@@ -235,9 +235,14 @@ class RouteConnector : ViewModel() {
      * Keep the local version, discard the remote version.
      */
     fun resolveConflictKeepLocal() {
-        if (syncConflict != null) {
-            popNextConflict()
+        val conflict = syncConflict ?: return
+        // Push the local version to the robot so the conflict won't reappear on the next sync cycle.
+        val localRoute = allRoutes.find { it.name == conflict.pathName }
+        if (localRoute != null) {
+            val localJson = jsonConfig.encodeToString(localRoute.points)
+            remoteSave?.send(localJson, conflict.pathName)
         }
+        popNextConflict()
     }
 
     /**

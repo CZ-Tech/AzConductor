@@ -18,8 +18,9 @@ import org.firstinspires.ftc.teamcode.opmode.auto.JsonPathOpMode;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -51,8 +52,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <tr><td>POST</td><td>/load/{name}</td><td>None</td><td>{"status":"loaded","path":"{name}","data":...}</td><td>Load saved JSON into current memory</td></tr>
  *   <tr><td>POST</td><td>/clear/{name}</td><td>None</td><td>{"status":"cleared","path":"{name}"}</td><td>Delete a named path</td></tr>
  *   <tr><td>GET</td><td>/list</td><td>None</td><td>{"status":"ok","paths":[...]}</td><td>List all saved path names</td></tr>
- *   <tr><td>GET</td><td>/tasks</td><td>None</td><td>{"status":"ok","tasks":[...]}</td><td>List all registered {@link AutoTask} tasks with signatures</td></tr>
- *   <tr><td>POST</td><td>/tasks/run/{name}</td><td>JSON array of args</td><td>{"status":"ok"}</td><td>Invoke a registered task by name</td></tr>
+ *   <tr><td>GET</td><td>/commands</td><td>None</td><td>{"status":"ok","commands":[...]}</td><td>List all registered {@link AutoTask} commands with signatures</td></tr>
+ *   <tr><td>POST</td><td>/commands/run/{name}</td><td>JSON array of args</td><td>{"status":"ok"}</td><td>Invoke a registered command by name</td></tr>
  * </table>
  *
  * <h2>CORS</h2>
@@ -74,14 +75,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * Each path is stored as a separate SharedPreferences key ({@code http_saved_json_{pathName}}),
  * surviving app updates. Only a full uninstall or "Clear Data" removes them.
  *
- * <h2>AutoTask System</h2>
+ * <h2>AutoCommand System</h2>
  * Classes and methods annotated with {@code @AutoTask} are automatically registered as
- * HTTP-invokable tasks when {@link #scanObjectTree(Object)} is called (triggered internally
- * by {@code TrajectoryLoader.execute()}). Invoked tasks run on independent threads via
+ * HTTP-invokable commands when {@link #scanObjectTree(Object)} is called (triggered internally
+ * by {@code TrajectoryLoader.execute()}). Invoked commands run on independent threads via
  * {@code TaskLoopFrame.runOnce()}.
  *
  * <h2>Thread Safety</h2>
- * {@code currentJson} is volatile; the path cache and task registry use ConcurrentHashMap.
+ * {@code currentJson} is volatile; the path cache and command registry use ConcurrentHashMap.
  * Server runs on a daemon min-priority thread.
  */
 public class HttpJsonService {
@@ -99,13 +100,13 @@ public class HttpJsonService {
     /** In-memory cache: pathName → saved JSON. ConcurrentHashMap for thread safety. */
     private static final ConcurrentHashMap<String, String> pathCache = new ConcurrentHashMap<>();
 
-    /** Task registry: taskName → TaskEntry. Populated by scanObjectTree(). */
-    private static final ConcurrentHashMap<String, TaskEntry> taskRegistry = new ConcurrentHashMap<>();
+    /** Command registry: commandName → CommandEntry. Populated by scanObjectTree(). */
+    private static final ConcurrentHashMap<String, CommandEntry> commandRegistry = new ConcurrentHashMap<>();
     /** Tracks which root objects have already been scanned (by identity hash). */
     private static final Set<Integer> scannedRoots = new HashSet<>();
 
-    /** Holds a registered task's invocation metadata. */
-    static class TaskEntry {
+    /** Holds a registered command's invocation metadata. */
+    static class CommandEntry {
         final String name;
         final String matchKey;
         volatile Object instance;
@@ -113,7 +114,7 @@ public class HttpJsonService {
         final Class<?>[] paramTypes;
         volatile boolean ready;
 
-        TaskEntry(String name, String matchKey, Object instance, Method method,
+        CommandEntry(String name, String matchKey, Object instance, Method method,
                   Class<?>[] paramTypes, boolean ready) {
             this.name = name;
             this.matchKey = matchKey;
@@ -171,13 +172,12 @@ public class HttpJsonService {
             while (!Thread.currentThread().isInterrupted()) {
                 try (Socket socket = serverSocket.accept()) {
                     socket.setSoTimeout(5000);
-                    try (BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                    try (InputStream in = socket.getInputStream();
                          OutputStream output = socket.getOutputStream()) {
 
                         try {
-                            String requestLine = reader.readLine();
-                            if (requestLine == null) continue;
+                            String requestLine = readLineFromStream(in);
+                            if (requestLine == null || requestLine.isEmpty()) continue;
 
                             boolean isPost    = requestLine.startsWith("POST");
                             boolean isGet     = requestLine.startsWith("GET");
@@ -186,12 +186,19 @@ public class HttpJsonService {
 
                             int contentLength = 0;
                             String headerLine;
-                            while ((headerLine = reader.readLine()) != null && !headerLine.isEmpty()) {
+                            while (!(headerLine = readLineFromStream(in)).isEmpty()) {
                                 if (headerLine.toLowerCase().startsWith("content-length:")) {
                                     try {
                                         contentLength = Integer.parseInt(headerLine.substring(15).trim());
                                     } catch (Exception ignored) {}
                                 }
+                            }
+
+                            // Read body as BYTES (not chars) so Content-Length works correctly for UTF-8
+                            String body = "";
+                            if (contentLength > 0) {
+                                byte[] bodyBytes = readBodyBytes(in, contentLength);
+                                body = new String(bodyBytes, StandardCharsets.UTF_8);
                             }
 
                             // --- OPTIONS preflight — CORS ---
@@ -208,7 +215,7 @@ public class HttpJsonService {
 
                             // --- POST / (with body) — receive JSON into current memory ---
                             if (isPost && "/".equals(fullPath) && contentLength > 0) {
-                                currentJson = readBody(reader, contentLength);
+                                currentJson = body;
                                 Log.d(TAG, "Received JSON: " + currentJson);
                                 sendResponse(output, 200, "application/json", "{\"status\":\"success\"}");
                                 continue;
@@ -233,7 +240,7 @@ public class HttpJsonService {
                             // --- GET /{pathName} — read saved JSON for a path
                             // pathName may be in action (e.g. GET /myPath) or pathName (e.g. GET //myPath)
                             if (isGet && !action.isEmpty() && pathName.isEmpty()
-                                    && !"list".equals(action) && !"tasks".equals(action)) {
+                                    && !"list".equals(action) && !"commands".equals(action)) {
                                 String saved = pathCache.get(action);
                                 if (saved != null) {
                                     sendResponse(output, 200, "application/json", saved);
@@ -283,11 +290,11 @@ public class HttpJsonService {
                                 continue;
                             }
 
-                            // --- GET /tasks ---
-                            if (isGet && "tasks".equals(action) && pathName.isEmpty()) {
-                                StringBuilder sb = new StringBuilder("{\"status\":\"ok\",\"tasks\":[");
+                            // --- GET /commands ---
+                            if (isGet && "commands".equals(action) && pathName.isEmpty()) {
+                                StringBuilder sb = new StringBuilder("{\"status\":\"ok\",\"commands\":[");
                                 boolean first = true;
-                                for (TaskEntry entry : taskRegistry.values()) {
+                                for (CommandEntry entry : commandRegistry.values()) {
                                     if (!first) sb.append(",");
                                     first = false;
                                     sb.append("{\"name\":\"").append(escapeJson(entry.name))
@@ -303,29 +310,29 @@ public class HttpJsonService {
                                 continue;
                             }
 
-                            // --- POST /tasks/run/{taskName} ---
-                            if (isPost && "tasks".equals(action) && pathName.startsWith("run/")) {
-                                String taskName = pathName.substring(4);
-                                TaskEntry entry = taskRegistry.get(taskName);
+                            // --- POST /commands/run/{commandName} ---
+                            if (isPost && "commands".equals(action) && pathName.startsWith("run/")) {
+                                String commandName = pathName.substring(4);
+                                CommandEntry entry = commandRegistry.get(commandName);
                                 if (entry == null) {
                                     sendResponse(output, 404, "application/json",
-                                            "{\"status\":\"error\",\"message\":\"Task not found: " + escapeJson(taskName) + "\"}");
+                                            "{\"status\":\"error\",\"message\":\"Command not found: " + escapeJson(commandName) + "\"}");
                                     continue;
                                 }
                                 if (!entry.ready || entry.instance == null) {
                                     sendResponse(output, 503, "application/json",
-                                            "{\"status\":\"error\",\"message\":\"Task not ready: " + escapeJson(taskName) + " (no active OpMode)\"}");
+                                            "{\"status\":\"error\",\"message\":\"Command not ready: " + escapeJson(commandName) + " (no active OpMode)\"}");
                                     continue;
                                 }
                                 try {
-                                    String body = (contentLength > 0) ? readBody(reader, contentLength) : "[]";
-                                    JSONArray jsonArgs = new JSONArray(body);
+                                    String commandBody = (contentLength > 0) ? body : "[]";
+                                    JSONArray jsonArgs = new JSONArray(commandBody);
                                     Object[] args = convertArgs(jsonArgs, entry.paramTypes);
                                     TaskLoopFrame.runOnce(() -> {
                                         try {
                                             entry.method.invoke(entry.instance, args);
                                         } catch (Exception e) {
-                                            Log.e(TAG, "Task invocation failed: " + entry.name, e);
+                                            Log.e(TAG, "Command invocation failed: " + entry.name, e);
                                         }
                                     });
                                     sendResponse(output, 200, "application/json", "{\"status\":\"ok\"}");
@@ -365,16 +372,47 @@ public class HttpJsonService {
         return path;
     }
 
-    /** Read the request body for a given Content-Length */
-    private static String readBody(BufferedReader reader, int contentLength) throws Exception {
-        char[] buffer = new char[contentLength];
+    /**
+     * Read one line (terminated by \r\n) from the raw InputStream,
+     * decoding as UTF-8. Returns "" for an empty line (just \r\n),
+     * or null if the stream ends before any data.
+     */
+    private static String readLineFromStream(InputStream in) throws IOException {
+        ByteArrayOutputStream line = new ByteArrayOutputStream();
+        int prev = -1;
+        int ch;
+        while ((ch = in.read()) != -1) {
+            if (prev == '\r' && ch == '\n') {
+                // Strip the trailing \r from the accumulated bytes
+                byte[] bytes = line.toByteArray();
+                int len = bytes.length;
+                if (len > 0 && bytes[len - 1] == '\r') {
+                    return new String(bytes, 0, len - 1, StandardCharsets.UTF_8);
+                }
+                return new String(bytes, StandardCharsets.UTF_8);
+            }
+            line.write(ch);
+            prev = ch;
+        }
+        // EOF reached — return whatever was accumulated, or null if nothing
+        byte[] bytes = line.toByteArray();
+        return bytes.length > 0 ? new String(bytes, StandardCharsets.UTF_8) : null;
+    }
+
+    /**
+     * Read exactly {@code contentLength} bytes from the stream.
+     * Content-Length is a byte count, not a character count — this is critical
+     * for correct UTF-8 handling when the body contains multi-byte characters.
+     */
+    private static byte[] readBodyBytes(InputStream in, int contentLength) throws IOException {
+        byte[] buffer = new byte[contentLength];
         int totalRead = 0;
         while (totalRead < contentLength) {
-            int read = reader.read(buffer, totalRead, contentLength - totalRead);
+            int read = in.read(buffer, totalRead, contentLength - totalRead);
             if (read == -1) break;
             totalRead += read;
         }
-        return new String(buffer);
+        return buffer;
     }
 
     // ---- Persistence: each path saved as a separate SharedPreferences key ----
@@ -442,13 +480,13 @@ public class HttpJsonService {
         out.flush();
     }
 
-    // ---- Task registration and invocation ----
+    // ---- Command registration and invocation ----
 
     /**
      * Type-level scan: traverses the class hierarchy starting from {@code rootClass},
      * following field types (not values) to discover {@link AutoTask} annotations.
-     * Registers task signatures without instances ({@code ready = false}).
-     * Called at app startup so task names are visible even before any OpMode runs.
+     * Registers command signatures without instances ({@code ready = false}).
+     * Called at app startup so command names are visible even before any OpMode runs.
      */
     public static void scanClassTree(Class<?> rootClass) {
         if (rootClass == null) return;
@@ -462,7 +500,7 @@ public class HttpJsonService {
             Class<?> clazz = stack.pop();
             if (clazz == null || !visited.add(clazz)) continue;
 
-            registerTaskSignatures(clazz);
+            registerCommandSignatures(clazz);
 
             if (!isUserClass(clazz)) continue;
 
@@ -477,11 +515,11 @@ public class HttpJsonService {
                 stack.push(fieldType);
             }
         }
-        Log.i(TAG, "Class scan complete. Pre-registered " + taskRegistry.size() + " task signatures.");
+        Log.i(TAG, "Class scan complete. Pre-registered " + commandRegistry.size() + " command signatures.");
     }
 
-    /** Registers task signatures (name + param types) from a class without an instance. */
-    private static void registerTaskSignatures(Class<?> clazz) {
+    /** Registers command signatures (name + param types) from a class without an instance. */
+    private static void registerCommandSignatures(Class<?> clazz) {
         boolean classAnnotated = clazz.isAnnotationPresent(AutoTask.class);
 
         for (Method method : clazz.getDeclaredMethods()) {
@@ -489,16 +527,16 @@ public class HttpJsonService {
             if (annot == null && !classAnnotated) continue;
             if (!Modifier.isPublic(method.getModifiers())) continue;
 
-            String taskName = (annot != null && !annot.value().isEmpty())
+            String commandName = (annot != null && !annot.value().isEmpty())
                     ? annot.value() : method.getName();
             String matchKey = buildMatchKey(clazz, method);
 
-            if (!taskRegistry.containsKey(taskName)) {
+            if (!commandRegistry.containsKey(commandName)) {
                 method.setAccessible(true);
                 Class<?>[] paramTypes = method.getParameterTypes();
-                taskRegistry.put(taskName,
-                        new TaskEntry(taskName, matchKey, null, method, paramTypes, false));
-                Log.d(TAG, "Pre-registered task: " + taskName + " (" + clazz.getSimpleName() + ") [not ready]");
+                commandRegistry.put(commandName,
+                        new CommandEntry(commandName, matchKey, null, method, paramTypes, false));
+                Log.d(TAG, "Pre-registered command: " + commandName + " (" + clazz.getSimpleName() + ") [not ready]");
             }
         }
     }
@@ -518,7 +556,7 @@ public class HttpJsonService {
         synchronized (scannedRoots) {
             if (scannedRoots.contains(rootId)) return;
             // New root -> new OpMode, invalidate all old instances
-            for (TaskEntry entry : taskRegistry.values()) {
+            for (CommandEntry entry : commandRegistry.values()) {
                 entry.instance = null;
                 entry.ready = false;
             }
@@ -538,7 +576,7 @@ public class HttpJsonService {
             if (!visited.add(id)) continue;
 
             Class<?> clazz = obj.getClass();
-            matchTaskInstances(clazz, obj);
+            matchCommandInstances(clazz, obj);
 
             if (!isUserClass(clazz)) continue;
 
@@ -559,11 +597,11 @@ public class HttpJsonService {
                 }
             }
         }
-        Log.i(TAG, "Instance scan complete. " + countReady() + " tasks ready.");
+        Log.i(TAG, "Instance scan complete. " + countReady() + " commands ready.");
     }
 
-    /** Matches a discovered object's methods against pre-registered TaskEntry by matchKey. */
-    private static void matchTaskInstances(Class<?> clazz, Object instance) {
+    /** Matches a discovered object's methods against pre-registered CommandEntry by matchKey. */
+    private static void matchCommandInstances(Class<?> clazz, Object instance) {
         boolean classAnnotated = clazz.isAnnotationPresent(AutoTask.class);
 
         for (Method method : clazz.getDeclaredMethods()) {
@@ -572,12 +610,12 @@ public class HttpJsonService {
             if (!Modifier.isPublic(method.getModifiers())) continue;
 
             String matchKey = buildMatchKey(clazz, method);
-            for (TaskEntry entry : taskRegistry.values()) {
+            for (CommandEntry entry : commandRegistry.values()) {
                 if (matchKey.equals(entry.matchKey) && entry.instance == null) {
                     entry.method.setAccessible(true);
                     entry.instance = instance;
                     entry.ready = true;
-                    Log.d(TAG, "Task ready: " + entry.name + " (" + clazz.getSimpleName() + ")");
+                    Log.d(TAG, "Command ready: " + entry.name + " (" + clazz.getSimpleName() + ")");
                     break;
                 }
             }
@@ -596,10 +634,10 @@ public class HttpJsonService {
         return sb.toString();
     }
 
-    /** Returns the count of ready tasks. */
+    /** Returns the count of ready commands. */
     private static int countReady() {
         int count = 0;
-        for (TaskEntry entry : taskRegistry.values()) {
+        for (CommandEntry entry : commandRegistry.values()) {
             if (entry.ready) count++;
         }
         return count;

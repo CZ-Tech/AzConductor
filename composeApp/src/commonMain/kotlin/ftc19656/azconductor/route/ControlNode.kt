@@ -16,7 +16,7 @@ data class ControlNode(
     val dHeading: Double = 0.0,
     val duration: Double = 1.0,
     val marker: String = "",
-    val task: String = "",
+    val command: String = "",
     val delayAfterArrive: Double = 0.0
 ) {
     infix fun isCloseTo(other: ControlNode): Boolean {
@@ -29,7 +29,7 @@ data class ControlNode(
                 abs(dHeading - other.dHeading) < epsilon &&
                 abs(duration - other.duration) < epsilon &&
                 marker == other.marker &&
-                task == other.task &&
+                command == other.command &&
                 abs(delayAfterArrive - other.delayAfterArrive) < epsilon
     }
 }

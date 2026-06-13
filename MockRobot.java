@@ -1,6 +1,7 @@
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -31,8 +32,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <tr><td>POST</td><td>/load/{name}</td><td>None</td><td>{"status":"loaded","path":"{name}","data":...}</td><td>Load saved JSON into current memory</td></tr>
  *   <tr><td>POST</td><td>/clear/{name}</td><td>None</td><td>{"status":"cleared","path":"{name}"}</td><td>Delete a named path</td></tr>
  *   <tr><td>GET</td><td>/list</td><td>None</td><td>{"status":"ok","paths":[...]}</td><td>List all saved path names</td></tr>
- *   <tr><td>GET</td><td>/tasks</td><td>None</td><td>{"status":"ok","tasks":[...]}</td><td>List all registered tasks with signatures</td></tr>
- *   <tr><td>POST</td><td>/tasks/run/{name}</td><td>JSON array of args</td><td>{"status":"ok"}</td><td>Invoke a registered task by name</td></tr>
+ *   <tr><td>GET</td><td>/commands</td><td>None</td><td>{"status":"ok","commands":[...]}</td><td>List all registered commands with signatures</td></tr>
+ *   <tr><td>POST</td><td>/commands/run/{name}</td><td>JSON array of args</td><td>{"status":"ok"}</td><td>Invoke a registered command by name</td></tr>
  * </table>
  *
  * <h2>CORS</h2>
@@ -64,11 +65,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *   # 列出所有路径
  *   curl http://localhost:8888/list
  *
- *   # 获取任务列表
- *   curl http://localhost:8888/tasks
+ *   # 获取指令列表
+ *   curl http://localhost:8888/commands
  *
- *   # 调用任务
- *   curl -X POST http://localhost:8888/tasks/run/myTask -d '["arg1",123]'
+ *   # 调用指令
+ *   curl -X POST http://localhost:8888/commands/run/myCommand -d '["arg1",123]'
  * }</pre>
  */
 public class MockRobot {
@@ -96,8 +97,8 @@ public class MockRobot {
         System.out.println("    POST /load/{name}       — 加载到当前内存");
         System.out.println("    POST /clear/{name}      — 删除指定路径");
         System.out.println("    GET  /list              — 列出所有路径");
-        System.out.println("    GET  /tasks             — 连接检查 + 任务列表");
-        System.out.println("    POST /tasks/run/{name}  — 调用任务");
+        System.out.println("    GET  /commands             — 连接检查 + 指令列表");
+        System.out.println("    POST /commands/run/{name}  — 调用指令");
         System.out.println("==============================================");
         System.out.println();
         System.out.println("  键入 'q' 并回车可停止服务。");
@@ -145,13 +146,12 @@ public class MockRobot {
             while (!Thread.currentThread().isInterrupted()) {
                 try (Socket socket = serverSocket.accept()) {
                     socket.setSoTimeout(5000);
-                    try (BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                    try (InputStream in = socket.getInputStream();
                          OutputStream output = socket.getOutputStream()) {
 
                         try {
-                            String requestLine = reader.readLine();
-                            if (requestLine == null) continue;
+                            String requestLine = readLineFromStream(in);
+                            if (requestLine == null || requestLine.isEmpty()) continue;
 
                             boolean isPost    = requestLine.startsWith("POST");
                             boolean isGet     = requestLine.startsWith("GET");
@@ -160,12 +160,19 @@ public class MockRobot {
 
                             int contentLength = 0;
                             String headerLine;
-                            while ((headerLine = reader.readLine()) != null && !headerLine.isEmpty()) {
+                            while (!(headerLine = readLineFromStream(in)).isEmpty()) {
                                 if (headerLine.toLowerCase().startsWith("content-length:")) {
                                     try {
                                         contentLength = Integer.parseInt(headerLine.substring(15).trim());
                                     } catch (Exception ignored) {}
                                 }
+                            }
+
+                            // Read body as BYTES (not chars) so Content-Length works correctly for UTF-8
+                            String body = "";
+                            if (contentLength > 0) {
+                                byte[] bodyBytes = readBodyBytes(in, contentLength);
+                                body = new String(bodyBytes, StandardCharsets.UTF_8);
                             }
 
                             // --- OPTIONS preflight — CORS ---
@@ -182,7 +189,7 @@ public class MockRobot {
 
                             // --- POST / (with body) — receive JSON into current memory ---
                             if (isPost && "/".equals(fullPath) && contentLength > 0) {
-                                currentJson = readBody(reader, contentLength);
+                                currentJson = body;
                                 log("Received JSON: " + currentJson);
                                 sendResponse(output, 200, "application/json", "{\"status\":\"success\"}");
                                 continue;
@@ -206,7 +213,7 @@ public class MockRobot {
                             // --- GET /{pathName} — read saved JSON for a path
                             // pathName may be in action (e.g. GET /myPath) or pathName (e.g. GET //myPath)
                             if (isGet && !action.isEmpty() && pathName.isEmpty()
-                                    && !"list".equals(action) && !"tasks".equals(action)) {
+                                    && !"list".equals(action) && !"commands".equals(action)) {
                                 String saved = pathCache.get(action);
                                 if (saved != null) {
                                     sendResponse(output, 200, "application/json", saved);
@@ -255,10 +262,10 @@ public class MockRobot {
                                 continue;
                             }
 
-                            // --- GET /tasks ---
-                            if (isGet && "tasks".equals(action) && pathName.isEmpty()) {
+                            // --- GET /commands ---
+                            if (isGet && "commands".equals(action) && pathName.isEmpty()) {
                                 sendResponse(output, 200, "application/json",
-                                        "{\"status\":\"ok\",\"tasks\":["
+                                        "{\"status\":\"ok\",\"commands\":["
                                         + "{\"name\":\"moveForward\",\"params\":[\"double\"],\"ready\":true},"
                                         + "{\"name\":\"turn\",\"params\":[\"double\"],\"ready\":true},"
                                         + "{\"name\":\"moveToPosition\",\"params\":[\"double\",\"double\"],\"ready\":true},"
@@ -271,11 +278,11 @@ public class MockRobot {
                                 continue;
                             }
 
-                            // --- POST /tasks/run/{taskName} ---
-                            if (isPost && "tasks".equals(action) && pathName.startsWith("run/")) {
-                                String taskName = pathName.substring(4);
-                                String body = (contentLength > 0) ? readBody(reader, contentLength) : "[]";
-                                log("Task invoked: " + taskName + ", args: " + body);
+                            // --- POST /commands/run/{commandName} ---
+                            if (isPost && "commands".equals(action) && pathName.startsWith("run/")) {
+                                String commandName = pathName.substring(4);
+                                String commandBody = (contentLength > 0) ? body : "[]";
+                                log("Command invoked: " + commandName + ", args: " + commandBody);
                                 sendResponse(output, 200, "application/json", "{\"status\":\"ok\"}");
                                 continue;
                             }
@@ -309,16 +316,47 @@ public class MockRobot {
         return path;
     }
 
-    /** Read the request body for a given Content-Length */
-    private static String readBody(BufferedReader reader, int contentLength) throws Exception {
-        char[] buffer = new char[contentLength];
+    /**
+     * Read one line (terminated by \r\n) from the raw InputStream,
+     * decoding as UTF-8. Returns "" for an empty line (just \r\n),
+     * or null if the stream ends before any data.
+     */
+    private static String readLineFromStream(InputStream in) throws IOException {
+        ByteArrayOutputStream line = new ByteArrayOutputStream();
+        int prev = -1;
+        int ch;
+        while ((ch = in.read()) != -1) {
+            if (prev == '\r' && ch == '\n') {
+                // Strip the trailing \r from the accumulated bytes
+                byte[] bytes = line.toByteArray();
+                int len = bytes.length;
+                if (len > 0 && bytes[len - 1] == '\r') {
+                    return new String(bytes, 0, len - 1, StandardCharsets.UTF_8);
+                }
+                return new String(bytes, StandardCharsets.UTF_8);
+            }
+            line.write(ch);
+            prev = ch;
+        }
+        // EOF reached — return whatever was accumulated, or null if nothing
+        byte[] bytes = line.toByteArray();
+        return bytes.length > 0 ? new String(bytes, StandardCharsets.UTF_8) : null;
+    }
+
+    /**
+     * Read exactly {@code contentLength} bytes from the stream.
+     * Content-Length is a byte count, not a character count — this is critical
+     * for correct UTF-8 handling when the body contains multi-byte characters.
+     */
+    private static byte[] readBodyBytes(InputStream in, int contentLength) throws IOException {
+        byte[] buffer = new byte[contentLength];
         int totalRead = 0;
         while (totalRead < contentLength) {
-            int read = reader.read(buffer, totalRead, contentLength - totalRead);
+            int read = in.read(buffer, totalRead, contentLength - totalRead);
             if (read == -1) break;
             totalRead += read;
         }
-        return new String(buffer);
+        return buffer;
     }
 
     // ---- Persistence: each path saved as a separate file ----

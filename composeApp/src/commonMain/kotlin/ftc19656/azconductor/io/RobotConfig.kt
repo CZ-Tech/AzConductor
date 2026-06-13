@@ -41,17 +41,15 @@ class ConfigManager private constructor(
     var isInitialized = false
         private set
 
-    private suspend fun loadFromSettings() {
-        withContext(Dispatchers.Default) {
-            val jsonString = configStorge.getString(id, "{}")
-            val map = try {
-                Json.decodeFromString<Map<String, String>>(jsonString)
-            } catch (e: Exception) {
-                emptyMap()
-            }
-            cache.putAll(map)
-            isInitialized = true
+    private fun loadFromSettings() {
+        val jsonString = configStorge.getString(id, "{}")
+        val map = try {
+            Json.decodeFromString<Map<String, String>>(jsonString)
+        } catch (e: Exception) {
+            emptyMap()
         }
+        cache.putAll(map)
+        isInitialized = true
     }
 
     operator fun set(key: String, value: String) {
@@ -130,7 +128,7 @@ class ConfigManager private constructor(
         fun getOrCreate(id: String): ConfigManager {
             return instances.getOrPut(id) {
                 ConfigManager(id).apply {
-                    CoroutineScope(Dispatchers.Default).launch { loadFromSettings() }
+                    loadFromSettings()
                 }
             }
         }

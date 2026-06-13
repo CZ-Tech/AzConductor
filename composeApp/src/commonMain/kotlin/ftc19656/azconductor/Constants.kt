@@ -68,7 +68,7 @@ object UIConfig {
     const val K_VELOCITY_HANDLE = 5.0  // 速度向量手柄缩放系数
 
     // NodeEditorDialog 中 ControlNode 属性的显示顺序
-    val NODE_EDITOR_FIELD_ORDER = listOf("marker", "task", "heading", "dHeading", "duration", "delayAfterArrive", "x", "dx", "y", "dy")
+    val NODE_EDITOR_FIELD_ORDER = listOf("marker", "command", "heading", "dHeading", "duration", "delayAfterArrive", "x", "dx", "y", "dy")
 
     /**
      * 机器人组件触控容差系数

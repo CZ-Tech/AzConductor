@@ -11,6 +11,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.ui.dialogs.SyncConflictDialog
+import ftc19656.azconductor.ui.screens.CommandsScreen
 import ftc19656.azconductor.ui.screens.HomeScreen
 import ftc19656.azconductor.ui.screens.PathPlannerScreen
 import ftc19656.azconductor.ui.theme.AzConductorTheme
@@ -29,10 +30,14 @@ fun App(route: RouteConnector = RouteConnector()) {
                 when (currentScreen) {
                     "home" -> HomeScreen(
                         route = route,
-                        onNavigateToPlanner = { currentScreen = "pathPlanner" }
+                        onNavigateToPlanner = { currentScreen = "pathPlanner" },
+                        onNavigateToCommands = { currentScreen = "commands" }
                     )
                     "pathPlanner" -> PathPlannerScreen(
                         route,
+                        onNavigateBack = { currentScreen = "home" }
+                    )
+                    "commands" -> CommandsScreen(
                         onNavigateBack = { currentScreen = "home" }
                     )
                 }

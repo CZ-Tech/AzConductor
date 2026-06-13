@@ -85,14 +85,14 @@ class RemoteSave(
     }
 
     /**
-     * Fetch the list of available tasks from the robot via GET /tasks.
+     * Fetch the list of available commands from the robot via GET /commands.
      * Returns the raw JSON response body, or null on failure.
      */
-    suspend fun fetchTasks(): String? {
+    suspend fun fetchCommands(): String? {
         return try {
-            httpGet("$baseUrl/tasks")
+            httpGet("$baseUrl/commands")
         } catch (e: Throwable) {
-            println("RemoteSave: exception in fetchTasks: ${e.message}")
+            println("RemoteSave: exception in fetchCommands: ${e.message}")
             null
         }
     }
