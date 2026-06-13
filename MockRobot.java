@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>POST /load/{pathName} — 从指定路径加载 JSON 到当前内存</li>
  *   <li>POST /clear/{pathName} — 删除指定路径的持久化数据</li>
  *   <li>GET  /list — 列出所有已保存的路径名</li>
+ *   <li>GET  /tasks — 连接检查 + 获取任务列表（格式与项目 RobotTaskListResponse 匹配）</li>
  * </ul>
  *
  * <p>CORS：所有响应均包含跨域头，允许浏览器端从任意源调用。</p>
@@ -50,6 +51,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  *   # 列出所有路径
  *   curl http://localhost:8888/list
+ *
+ *   # 获取任务列表（连接检查）
+ *   curl http://localhost:8888/tasks
  * }</pre>
  */
 public class MockRobot {
@@ -76,6 +80,7 @@ public class MockRobot {
         System.out.println("    POST /load/{name}       — 加载到当前内存");
         System.out.println("    POST /clear/{name}      — 删除指定路径");
         System.out.println("    GET  /list              — 列出所有路径");
+        System.out.println("    GET  /tasks             — 连接检查 + 任务列表");
         System.out.println("==============================================");
         System.out.println();
         System.out.println("  键入 'q' 并回车可停止服务。");
@@ -214,6 +219,24 @@ public class MockRobot {
                         String listJson = savedPaths.keySet().toString();
                         sendResponse(output, 200, "application/json",
                                 "{\"status\":\"ok\",\"paths\":" + listJson + "}");
+                        continue;
+                    }
+
+                    // --- GET /tasks — 连接检查 + 任务列表 ---
+                    // 返回格式与项目 RobotTaskListResponse 匹配：{"status":"ok","tasks":[{"name":"..."},...]}
+                    if (isGet && "tasks".equals(action)) {
+                        StringBuilder tasksJson = new StringBuilder("[");
+                        boolean first = true;
+                        for (String name : savedPaths.keySet()) {
+                            if (!first) {
+                                tasksJson.append(",");
+                            }
+                            tasksJson.append("{\"name\":\"").append(name).append("\"}");
+                            first = false;
+                        }
+                        tasksJson.append("]");
+                        sendResponse(output, 200, "application/json",
+                                "{\"status\":\"ok\",\"tasks\":" + tasksJson.toString() + "}");
                         continue;
                     }
 
