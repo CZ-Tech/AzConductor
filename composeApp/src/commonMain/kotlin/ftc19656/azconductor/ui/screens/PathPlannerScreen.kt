@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
+import ftc19656.azconductor.io.RobotTaskItem
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -576,18 +577,16 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                         .fillMaxWidth()
                                                         .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
                                                 ) {
-                                                    var filterText by remember { mutableStateOf("") }
+                                                    var filterText by remember { mutableStateOf(node.task) }
                                                     var dropdownExpanded by remember { mutableStateOf(false) }
-                                                    val filteredWaypoints = remember(filterText, route.pathVersion) {
+                                                    val availableTasks = route.availableTasks
+                                                    val filteredTasks = remember(filterText, availableTasks) {
                                                         if (filterText.isBlank()) {
-                                                            route.waypoints.mapIndexed { idx, node -> idx to node }
+                                                            availableTasks
                                                         } else {
                                                             val lower = filterText.lowercase()
-                                                            route.waypoints.mapIndexed { idx, node ->
-                                                                idx to node
-                                                            }.filter { (idx, node) ->
-                                                                node.marker.lowercase().contains(lower) ||
-                                                                        "点 ${idx + 1}".contains(lower)
+                                                            availableTasks.filter { task ->
+                                                                task.name.lowercase().contains(lower)
                                                             }
                                                         }
                                                     }
@@ -601,7 +600,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                                 filterText = it
                                                                 dropdownExpanded = true
                                                             },
-                                                            placeholder = { Text("查找目标节点") },
+                                                            placeholder = { Text("选择任务") },
                                                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
@@ -613,19 +612,34 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                             expanded = dropdownExpanded,
                                                             onDismissRequest = { dropdownExpanded = false }
                                                         ) {
-                                                            if (filteredWaypoints.isEmpty()) {
+                                                            // "无"选项：清空 task
+                                                            DropdownMenuItem(
+                                                                text = { Text("无") },
+                                                                onClick = {
+                                                                    val current = route.waypoints.getOrNull(index)
+                                                                    if (current != null && current.task.isNotBlank()) {
+                                                                        route.moveNode(index, current.copy(task = ""))
+                                                                    }
+                                                                    filterText = ""
+                                                                    dropdownExpanded = false
+                                                                }
+                                                            )
+                                                            if (filteredTasks.isEmpty()) {
                                                                 DropdownMenuItem(
-                                                                    text = { Text("无匹配节点") },
+                                                                    text = { Text("无匹配任务") },
                                                                     onClick = { dropdownExpanded = false },
                                                                     enabled = false
                                                                 )
                                                             } else {
-                                                                filteredWaypoints.forEach { (targetIdx, targetNode) ->
+                                                                filteredTasks.forEach { task: RobotTaskItem ->
                                                                     DropdownMenuItem(
-                                                                        text = { Text(targetNode.marker.ifBlank { "点 ${targetIdx + 1}" }) },
+                                                                        text = { Text(task.name) },
                                                                         onClick = {
-                                                                            selectedNodeIndex.value = targetIdx
-                                                                            filterText = targetNode.marker.ifBlank { "点 ${targetIdx + 1}" }
+                                                                            val current = route.waypoints.getOrNull(index)
+                                                                            if (current != null && current.task != task.name) {
+                                                                                route.moveNode(index, current.copy(task = task.name))
+                                                                            }
+                                                                            filterText = task.name
                                                                             dropdownExpanded = false
                                                                         }
                                                                     )
