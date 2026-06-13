@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <tr><td>GET</td><td>/list</td><td>None</td><td>{"status":"ok","paths":[...]}</td><td>List all saved path names</td></tr>
  *   <tr><td>GET</td><td>/commands</td><td>None</td><td>{"status":"ok","commands":[...]}</td><td>List all registered commands with signatures</td></tr>
  *   <tr><td>POST</td><td>/commands/run/{name}</td><td>JSON array of args</td><td>{"status":"ok"}</td><td>Invoke a registered command by name</td></tr>
+ *   <tr><td>GET</td><td>/position</td><td>None</td><td>{"status":"ok","x":...,"y":...,"heading":...,"unit":"inches","headingUnit":"degrees"}</td><td>Get simulated robot position</td></tr>
  * </table>
  *
  * <h2>CORS</h2>
@@ -99,6 +100,7 @@ public class MockRobot {
         System.out.println("    GET  /list              — 列出所有路径");
         System.out.println("    GET  /commands             — 连接检查 + 指令列表");
         System.out.println("    POST /commands/run/{name}  — 调用指令");
+        System.out.println("    GET  /position           — 获取模拟位置");
         System.out.println("==============================================");
         System.out.println();
         System.out.println("  键入 'q' 并回车可停止服务。");
@@ -213,7 +215,7 @@ public class MockRobot {
                             // --- GET /{pathName} — read saved JSON for a path
                             // pathName may be in action (e.g. GET /myPath) or pathName (e.g. GET //myPath)
                             if (isGet && !action.isEmpty() && pathName.isEmpty()
-                                    && !"list".equals(action) && !"commands".equals(action)) {
+                                    && !"list".equals(action) && !"commands".equals(action) && !"position".equals(action)) {
                                 String saved = pathCache.get(action);
                                 if (saved != null) {
                                     sendResponse(output, 200, "application/json", saved);
@@ -275,6 +277,12 @@ public class MockRobot {
                                         + "{\"name\":\"wait\",\"params\":[\"long\"],\"ready\":true},"
                                         + "{\"name\":\"calibrateGyro\",\"params\":[],\"ready\":true}"
                                         + "]}");
+                                continue;
+                            }
+
+                            // --- GET /position ---
+                            if (isGet && "position".equals(action) && pathName.isEmpty()) {
+                                sendResponse(output, 200, "application/json", getMockPosition());
                                 continue;
                             }
 
@@ -445,6 +453,33 @@ public class MockRobot {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    /**
+     * Stateless mock robot position derived from current time.
+     * Uses a modulated Lissajous curve so position varies continuously
+     * at ~1 inch/s within [-72, 72] inches, with smoothly changing heading.
+     */
+    private static String getMockPosition() {
+        double t = System.currentTimeMillis() / 1000.0;
+        double omega = 1.0 / 72.0;          // base angular frequency (rad/s)
+        double freqRatio = 1.3 + 0.2 * Math.sin(0.03 * t); // slowly varying
+
+        double phaseX = omega * t;
+        double phaseY = omega * freqRatio * t;
+
+        double x = 72.0 * Math.sin(phaseX);
+        double y = 72.0 * Math.cos(phaseY);
+
+        // Heading = instantaneous direction of motion (velocity vector angle)
+        double dxdt =  72.0 * omega * Math.cos(phaseX);
+        double dydt = -72.0 * omega * freqRatio * Math.sin(phaseY);
+        double headingDeg = Math.toDegrees(Math.atan2(dydt, dxdt));
+        if (headingDeg < 0.0) headingDeg += 360.0;
+
+        return String.format(java.util.Locale.US,
+            "{\"status\":\"ok\",\"x\":%.2f,\"y\":%.2f,\"heading\":%.1f,\"unit\":\"inches\",\"headingUnit\":\"degrees\"}",
+            x, y, headingDeg);
     }
 
     // ---- Logging ----

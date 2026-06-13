@@ -785,112 +785,21 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                 ),
             contentAlignment = Alignment.Center
         ) {
-            if (isLandscape) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        BoxWithConstraints(contentAlignment = Alignment.Center) {
-                            Slider(
-                                value = currentTime.coerceIn(0f, maxTime),
-                                onValueChange = {
-                                    currentTime = it
-                                    isPlaying = false
-                                },
-                                valueRange = 0f..maxTime,
-                                colors = SliderDefaults.colors(
-                                    activeTrackColor = UIConfig.WIN11_ACCENT,
-                                    inactiveTrackColor = UIConfig.WIN11_INACTIVE,
-                                    thumbColor = UIConfig.WIN11_ACCENT
-                                ),
-                                thumb = {
-                                    SliderDefaults.Thumb(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
-                                        thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
-                                    )
-                                },
-                                modifier = Modifier
-                                    .graphicsLayer {
-                                        rotationZ = -90f
-                                    }
-                                    .requiredWidth(maxHeight)
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = {
-                            if (!isPlaying && currentTime >= totalTime) {
-                                currentTime = 0f
-                            }
-                            isPlaying = !isPlaying
-                        },
-                        enabled = totalTime > 0f,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "暂停" else "开始",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Slider(
-                        value = currentTime.coerceIn(0f, maxTime),
-                        onValueChange = {
-                            currentTime = it
-                            isPlaying = false
-                        },
-                        valueRange = 0f..maxTime,
-                        colors = SliderDefaults.colors(
-                            activeTrackColor = UIConfig.WIN11_ACCENT,
-                            inactiveTrackColor = UIConfig.WIN11_INACTIVE,
-                            thumbColor = UIConfig.WIN11_ACCENT
-                        ),
-                        thumb = {
-                            SliderDefaults.Thumb(
-                                interactionSource = remember { MutableInteractionSource() },
-                                colors = SliderDefaults.colors(thumbColor = UIConfig.WIN11_ACCENT),
-                                thumbSize = androidx.compose.ui.unit.DpSize(16.dp, 16.dp)
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = {
-                            if (!isPlaying && currentTime >= totalTime) {
-                                currentTime = 0f
-                            }
-                            isPlaying = !isPlaying
-                        },
-                        enabled = totalTime > 0f,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "暂停" else "开始",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-
+            PlaybackProgressBar(
+                currentTime = currentTime,
+                totalTime = totalTime,
+                onValueChange = {
+                    currentTime = it
+                    isPlaying = false
+                },
+                isPlaying = isPlaying,
+                onPlayPauseToggle = {
+                    if (!isPlaying && currentTime >= totalTime) currentTime = 0f
+                    isPlaying = !isPlaying
+                },
+                isVertical = isLandscape,
+                modifier = Modifier.fillMaxSize()
+            )
         }
         }
     }

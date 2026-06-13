@@ -51,7 +51,7 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
 
     // Drawer state
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    var selectedDrawerItem by remember { mutableStateOf("路径") }
+    var selectedDrawerItem by remember { mutableStateOf("运行") }
     val scope = rememberCoroutineScope()
 
     fun refreshRouteNames() {
@@ -95,10 +95,10 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                 )
                 NavigationDrawerItem(
                     icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                    label = { Text("指令") },
-                    selected = selectedDrawerItem == "指令",
+                    label = { Text("运行") },
+                    selected = selectedDrawerItem == "运行",
                     onClick = {
-                        selectedDrawerItem = "指令"
+                        selectedDrawerItem = "运行"
                         scope.launch { drawerState.close() }
                         onNavigateToCommands()
                     },

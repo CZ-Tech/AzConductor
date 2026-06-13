@@ -27,3 +27,5 @@ fun Double.toFixed(decimals: Int): String {
     val fraction = (absolute % scale).toString().padStart(decimals, '0')
     return "$sign$whole.$fraction"
 }
+
+fun Float.toTimeString(): String = this.toDouble().toFixed(1) + "s"
