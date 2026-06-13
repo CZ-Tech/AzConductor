@@ -109,14 +109,13 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
         CompositionLocalProvider(LocalContentColor provides Color.Transparent) {
             NodeEditorDialog(
                 node = preloadSerializer(),
-                onDismiss = { isPreheated = true },
-                onConfirm = { isPreheated = true },
-                onDelete = { isPreheated = true }
+                onDismiss = { },
+                onConfirm = { },
+                onDelete = { }
             )
         }
         LaunchedEffect(Unit) {
             delay(100)
-            isPreheated = true
         }
     }
 
