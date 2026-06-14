@@ -75,4 +75,5 @@ object UIConfig {
      * 允许的点击范围为圆点大小的多少倍？
      */
     const val ROBOT_COMPONENT_TOUCH_THRESHOLD_RATIO = 1.5f
+
 }

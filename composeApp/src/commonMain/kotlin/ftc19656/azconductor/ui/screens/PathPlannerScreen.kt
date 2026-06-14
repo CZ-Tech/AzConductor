@@ -1,4 +1,4 @@
-package ftc19656.azconductor.ui.screens
+﻿package ftc19656.azconductor.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween

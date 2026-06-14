@@ -1,7 +1,6 @@
 ﻿package ftc19656.azconductor.route.viewmodel
 
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -24,6 +23,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
@@ -227,6 +229,20 @@ class RouteConnector : ViewModel() {
         }
     }
 
+    /**
+     * Fetch the list of saved path names from the robot via GET /list.
+     * Returns an empty list on failure or if the robot is unreachable.
+     * Does NOT store any ViewModel state — the caller decides what to cache.
+     */
+    suspend fun listRobotPaths(): List<String> {
+        val result = remoteSave?.listPaths() ?: return emptyList()
+        return try {
+            jsonConfig.decodeFromString<RobotPathListResponse>(result).paths
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private fun popNextConflict() {
         syncConflict = if (conflictQueue.isNotEmpty()) conflictQueue.removeAt(0) else null
     }
@@ -256,8 +272,7 @@ class RouteConnector : ViewModel() {
                 if (route.name == conflict.pathName) route.copy(points = points) else route
             }
             if (currentRouteName == conflict.pathName) {
-                _waypoints.clear()
-                _waypoints.addAll(points)
+                _waypoints = points
                 routeLogic.setWaypoints(points)
                 pathVersion++
             }
@@ -296,8 +311,7 @@ class RouteConnector : ViewModel() {
             allRoutes = allRoutes + RouteData(name = conflict.pathName, points = points)
             // 4. If currently editing the conflict path, switch waypoints to robot version
             if (currentRouteName == conflict.pathName) {
-                _waypoints.clear()
-                _waypoints.addAll(points)
+                _waypoints = points
                 routeLogic.setWaypoints(points)
                 pathVersion++
             }
@@ -316,7 +330,7 @@ class RouteConnector : ViewModel() {
     // ---- Internal model ----
 
     private val routeLogic = RouteCore()
-    private val _waypoints = mutableStateListOf<ControlNode>()
+    private var _waypoints by mutableStateOf<List<ControlNode>>(emptyList())
     val waypoints: List<ControlNode> get() = _waypoints
 
     private var allRoutes by mutableStateOf(listOf(RouteData(name = "默认路径")))
@@ -328,7 +342,7 @@ class RouteConnector : ViewModel() {
             allRoutes = loadedRoutes
             val first = loadedRoutes.first()
             currentRouteName = first.name
-            _waypoints.addAll(first.points)
+            _waypoints = first.points
             routeLogic.setWaypoints(first.points)
             lastPersistedHash = loadedRoutes.hashCode()
         }
@@ -356,8 +370,7 @@ class RouteConnector : ViewModel() {
     fun switchRoute(name: String) {
         val route = allRoutes.find { it.name == name } ?: return
         currentRouteName = name
-        _waypoints.clear()
-        _waypoints.addAll(route.points)
+        _waypoints = route.points
         routeLogic.setWaypoints(route.points)
         pathVersion++
     }
@@ -366,7 +379,7 @@ class RouteConnector : ViewModel() {
         allRoutes = allRoutes.filter { it.name != name }
         if (allRoutes.isEmpty()) {
             currentRouteName = ""
-            _waypoints.clear()
+            _waypoints = emptyList()
             routeLogic.setWaypoints(emptyList())
             pathVersion++
         } else if (currentRouteName == name) {
@@ -457,8 +470,7 @@ class RouteConnector : ViewModel() {
                 lastPersistedHash = remoteHash
                 val current = parsed.find { it.name == currentRouteName }
                 if (current != null) {
-                    _waypoints.clear()
-                    _waypoints.addAll(current.points)
+                    _waypoints = current.points
                     routeLogic.setWaypoints(current.points)
                     pathVersion++
                 }
@@ -476,22 +488,21 @@ class RouteConnector : ViewModel() {
 
     fun addPoint(point: ControlNode) {
         routeLogic.addPoint(point)
-        _waypoints.add(point)
+        _waypoints = _waypoints + point
         pathVersion++
         syncAndSave()
     }
 
     fun addPointAt(index: Int, point: ControlNode) {
         routeLogic.addPointAt(index, point)
-        _waypoints.add(index, point)
+        _waypoints = _waypoints.toMutableList().apply { add(index, point) }
         pathVersion++
         syncAndSave()
     }
 
     fun setWaypoints(points: List<ControlNode>) {
         routeLogic.setWaypoints(points)
-        _waypoints.clear()
-        _waypoints.addAll(points)
+        _waypoints = points
         pathVersion++
         syncAndSave()
     }
@@ -499,7 +510,7 @@ class RouteConnector : ViewModel() {
     fun moveNode(index: Int, newPoint: ControlNode) {
         routeLogic.moveNode(index, newPoint)
         if (index in _waypoints.indices) {
-            _waypoints[index] = newPoint
+            _waypoints = _waypoints.toMutableList().apply { this[index] = newPoint }
             pathVersion++
             syncAndSave()
         }
@@ -508,8 +519,10 @@ class RouteConnector : ViewModel() {
     fun moveNodeOrder(fromIndex: Int, toIndex: Int) {
         if (fromIndex !in _waypoints.indices || toIndex !in _waypoints.indices || fromIndex == toIndex) return
         routeLogic.moveNodeOrder(fromIndex, toIndex)
-        val node = _waypoints.removeAt(fromIndex)
-        _waypoints.add(toIndex, node)
+        _waypoints = _waypoints.toMutableList().apply {
+            val node = removeAt(fromIndex)
+            add(toIndex, node)
+        }
         pathVersion++
         syncAndSave()
     }
@@ -517,7 +530,7 @@ class RouteConnector : ViewModel() {
     fun removeNode(index: Int) {
         routeLogic.removeNode(index)
         if (index in _waypoints.indices) {
-            _waypoints.removeAt(index)
+            _waypoints = _waypoints.toMutableList().apply { removeAt(index) }
             pathVersion++
             syncAndSave()
         }
@@ -555,8 +568,7 @@ class RouteConnector : ViewModel() {
             allRoutes = routes
             val first = routes.first()
             currentRouteName = first.name
-            _waypoints.clear()
-            _waypoints.addAll(first.points)
+            _waypoints = first.points
             routeLogic.setWaypoints(first.points)
             pathVersion++
             persist()

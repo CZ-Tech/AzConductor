@@ -1,4 +1,4 @@
-package ftc19656.azconductor.ui.components
+﻿package ftc19656.azconductor.ui.components
 
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures

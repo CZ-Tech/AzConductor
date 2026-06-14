@@ -10,10 +10,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import azconductor.composeapp.generated.resources.FTC_MAP26
 import azconductor.composeapp.generated.resources.Res
+import ftc19656.azconductor.route.viewmodel.CommandsViewModel
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.ui.components.PlaybackProgressBar
 import kotlinx.coroutines.delay
@@ -44,6 +46,18 @@ fun CommandsScreen(route: RouteConnector, onNavigateBack: () -> Unit) {
             currentTime = (currentTime + 0.016f).coerceAtMost(totalTime)
             if (currentTime >= totalTime) isPlaying = false
         }
+    }
+
+    // ---- Commands-scoped ViewModel (robot path list) ----
+    val commandsViewModel = remember { CommandsViewModel(route) }
+    val robotPaths by commandsViewModel.robotPaths.collectAsState()
+    var selectedRobotPath by remember { mutableStateOf("") }
+    var pathDropdownExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredPaths = remember(robotPaths, searchQuery) {
+        if (searchQuery.isBlank()) robotPaths
+        else robotPaths.filter { it.contains(searchQuery, ignoreCase = true) }
     }
 
     ModalNavigationDrawer(
@@ -94,7 +108,6 @@ fun CommandsScreen(route: RouteConnector, onNavigateBack: () -> Unit) {
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.Top
                 ) {
-                    // Vertical progress bar — same height as map
                     PlaybackProgressBar(
                         currentTime = currentTime,
                         totalTime = totalTime,
@@ -113,7 +126,6 @@ fun CommandsScreen(route: RouteConnector, onNavigateBack: () -> Unit) {
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Field map — height = 2/3 screen, width from aspect ratio
                     Image(
                         painter = painterResource(Res.drawable.FTC_MAP26),
                         contentDescription = "场地地图",
@@ -122,20 +134,105 @@ fun CommandsScreen(route: RouteConnector, onNavigateBack: () -> Unit) {
                     )
                 }
 
-                // Floating menu button on top of the map
-                IconButton(
-                    onClick = { scope.launch { drawerState.open() } },
+                // ---- Top-left: menu button + robot path selector ----
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(4.dp)
-                        .size(36.dp)
-                        .zIndex(2f)
+                        .zIndex(2f),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Default.Menu,
-                        contentDescription = "菜单",
-                        modifier = Modifier.size(22.dp)
-                    )
+                    IconButton(
+                        onClick = { scope.launch { drawerState.open() } },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Menu,
+                            contentDescription = "菜单",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    ExposedDropdownMenuBox(
+                        expanded = pathDropdownExpanded,
+                        onExpandedChange = { pathDropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = {
+                                searchQuery = it
+                                pathDropdownExpanded = true
+                            },
+                            placeholder = {
+                                Text(
+                                    "选择路径",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            singleLine = true,
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = pathDropdownExpanded)
+                            },
+                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
+                                .width(160.dp)
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = pathDropdownExpanded,
+                            onDismissRequest = { pathDropdownExpanded = false }
+                        ) {
+                            if (filteredPaths.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "无可用路径",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    onClick = { pathDropdownExpanded = false },
+                                    enabled = false
+                                )
+                            } else {
+                                filteredPaths.forEach { pathName ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                pathName,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        onClick = {
+                                            selectedRobotPath = pathName
+                                            searchQuery = pathName
+                                            pathDropdownExpanded = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.List,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

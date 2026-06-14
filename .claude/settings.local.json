@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./gradlew :composeApp:compileKotlinJvm)"
+      "Bash(./gradlew :composeApp:compileKotlinJvm)",
+      "Skill(code-review)",
+      "Bash(rtk ls *)",
+      "Bash(code-review-graph build *)",
+      "Bash(rtk gradlew *)"
     ]
   }
 }
