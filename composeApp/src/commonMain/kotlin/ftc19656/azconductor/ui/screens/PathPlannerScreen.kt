@@ -59,6 +59,10 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
         onDispose { route.stopAutoSaveWatcher() }
     }
 
+    val waypoints by route.waypoints.collectAsState()
+    val availableCommands by route.availableCommands.collectAsState()
+    val pv by route.pathVersion.collectAsState()
+
     val painter = painterResource(Res.drawable.FTC_MAP26)
     var canvasPhysicalSize by remember { mutableStateOf(IntSize.Zero) }
     val rotationDegrees = UIConfig.CANVAS_ROTATE_DEG
@@ -147,7 +151,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
         }
 
         route.addPoint(newNode)
-        selectedNodeIndex.value = route.waypoints.lastIndex
+        selectedNodeIndex.value = waypoints.lastIndex
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -224,7 +228,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
                 // 閫変腑鑺傜偣鐨勬満鍣ㄤ汉缁勪欢
                 selectedNodeIndex.value?.let { index ->
-                    route.waypoints.getOrNull(index)?.let { node ->
+                    waypoints.getOrNull(index)?.let { node ->
                         val screenPos = mapper.logicalToScreen(node.x.toFloat(), node.y.toFloat())
                         val centerOffsetX = (RobotConfig.ROBOT_LOGICAL_WIDTH + ROBOT_RENDER_PADDING) / 2f * mapper.scale
                         val centerOffsetY = (RobotConfig.ROBOT_LOGICAL_HEIGHT + ROBOT_RENDER_PADDING) / 2f * mapper.scale
@@ -250,7 +254,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                 }
 
                 // 鑺傜偣
-                route.waypoints.forEachIndexed { index, node ->
+                waypoints.forEachIndexed { index, node ->
                     key(index) {
                         if (selectedNodeIndex.value == index) {
                             VectorHandle(
@@ -279,7 +283,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                 }
 
                 editingNodeIndex?.let { indexToEdit ->
-                    route.waypoints.getOrNull(indexToEdit)?.let { targetNode ->
+                    waypoints.getOrNull(indexToEdit)?.let { targetNode ->
                         NodeEditorDialog(
                             node = targetNode,
                             onDismiss = { editingNodeIndex = null },
@@ -409,7 +413,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                 style = MaterialTheme.typography.titleLarge
                             )
                             Text(
-                                text = "总时长: ${route.pathVersion.let { route.getTotalTime().toFixed(2) }}s",
+                                text = "总时长: ${pv.let { route.getTotalTime().toFixed(2) }}s",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -423,7 +427,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
 
-                        if (route.waypoints.isEmpty()) {
+                        if (waypoints.isEmpty()) {
                             Text(
                                 text = "暂无控制点",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -454,7 +458,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                     .weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                itemsIndexed(route.waypoints) { index, node ->
+                                itemsIndexed(waypoints) { index, node ->
                                     val isSelected = selectedNodeIndex.value == index
                                     Card(
                                         modifier = Modifier
@@ -466,7 +470,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                     shadowElevation = 8f
                                                 }
                                             }
-                                            .pointerInput(route.waypoints.size) {
+                                            .pointerInput(waypoints.size) {
                                                 detectDragGestures(
                                                     onDragStart = {
                                                         draggingNodeIndex = index
@@ -487,7 +491,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
                                                         while (
                                                             draggedNodeOffsetY > reorderThresholdPx &&
-                                                            currentIndex < route.waypoints.lastIndex
+                                                            currentIndex < waypoints.lastIndex
                                                         ) {
                                                             moveSidebarNode(currentIndex, currentIndex + 1)
                                                             currentIndex += 1
@@ -539,6 +543,13 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
+                                                    if (node.command.isNotBlank()) {
+                                                        Text(
+                                                            text = "⚡ ${node.command}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = UIConfig.WIN11_ACCENT
+                                                        )
+                                                    }
                                                 }
 
                                                 IconButton(onClick = { editingNodeIndex = index }) {
@@ -579,13 +590,13 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                 ) {
                                                     var filterText by remember { mutableStateOf(node.command) }
                                                     var dropdownExpanded by remember { mutableStateOf(false) }
-                                                    val availableCommands = route.availableCommands
-                                                    val filteredCommands = remember(filterText, availableCommands) {
+                                                    val availableCommandsList = availableCommands
+                                                    val filteredCommands = remember(filterText, availableCommandsList) {
                                                         if (filterText.isBlank()) {
-                                                            availableCommands
+                                                            availableCommandsList
                                                         } else {
                                                             val lower = filterText.lowercase()
-                                                            availableCommands.filter { command ->
+                                                            availableCommandsList.filter { command ->
                                                                 command.name.lowercase().contains(lower)
                                                             }
                                                         }
@@ -616,7 +627,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                             DropdownMenuItem(
                                                                 text = { Text("无") },
                                                                 onClick = {
-                                                                    val current = route.waypoints.getOrNull(index)
+                                                                    val current = waypoints.getOrNull(index)
                                                                     if (current != null && current.command.isNotBlank()) {
                                                                         route.moveNode(index, current.copy(command = ""))
                                                                     }
@@ -635,7 +646,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                                     DropdownMenuItem(
                                                                         text = { Text(command.name) },
                                                                         onClick = {
-                                                                            val current = route.waypoints.getOrNull(index)
+                                                                            val current = waypoints.getOrNull(index)
                                                                             if (current != null && current.command != command.name) {
                                                                                 route.moveNode(index, current.copy(command = command.name))
                                                                             }
@@ -654,7 +665,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .clickable {
-                                                                val current = route.waypoints.getOrNull(index)
+                                                                val current = waypoints.getOrNull(index)
                                                                 val newNode = if (current == null) {
                                                                     ControlNode(
                                                                         x = 0.0.coerceIn(bounds.minX, bounds.maxX),

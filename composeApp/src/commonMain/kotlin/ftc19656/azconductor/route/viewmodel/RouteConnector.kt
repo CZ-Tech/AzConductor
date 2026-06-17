@@ -1,262 +1,111 @@
-﻿package ftc19656.azconductor.route.viewmodel
+package ftc19656.azconductor.route.viewmodel
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
-import com.russhwolf.settings.Settings
 import ftc19656.azconductor.io.ConfigManager
-import ftc19656.azconductor.io.RemoteSave
-import ftc19656.azconductor.io.loadRouteData
-import ftc19656.azconductor.io.saveRouteData
+import ftc19656.azconductor.io.RobotSyncService
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
-import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
 import ftc19656.azconductor.io.RobotCommandItem
-import ftc19656.azconductor.io.RobotCommandListResponse
-import ftc19656.azconductor.io.RobotPathListResponse
+import ftc19656.azconductor.io.RouteRepository
 import ftc19656.azconductor.io.SyncConflictData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
-class RouteConnector : ViewModel() {
+class RouteConnector {
 
-    private val settingsStorage = Settings()
     private val jsonConfig = Json {
         prettyPrint = true
         encodeDefaults = true
         ignoreUnknownKeys = true
     }
 
-    // ---- Storage keys ----
-    companion object {
-        private const val STORAGE_KEY = "robot_routes"
-        private const val LEGACY_KEY = "auto_save_waypoints"
-    }
-
     private val configManager = ConfigManager.getOrCreate("route")
 
-    // ---- Remote save to robot ----
+    private val routeRepo = RouteRepository(jsonConfig, configManager)
+
+    // ---- Robot sync service ----
+
+    private val robotSyncService = RobotSyncService(
+        jsonConfig = jsonConfig,
+        scope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
+        onConnectionStatusChange = { status -> _connectionStatus.value = status },
+        onCommandsRefreshed = { commands -> _availableCommands.value = commands },
+        onConflictDetected = { conflict ->
+            conflictQueue.add(conflict)
+            if (_syncConflict.value == null) {
+                _syncConflict.value = conflictQueue.removeAt(0)
+            }
+        },
+        getLocalRoutes = { _allRoutes.value },
+        getActiveConflictName = { _syncConflict.value?.pathName },
+        isNameInConflictQueue = { name -> conflictQueue.any { it.pathName == name } },
+    )
+
+    // ---- Remote connection ----
 
     var robotIp: String
         get() = configManager["robot_ip"] ?: "192.168.43.1"
         set(value) {
             configManager["robot_ip"] = value
-            periodicSyncJob?.cancel()
-            remoteSave = if (value.isNotBlank()) {
-                connectionStatus = "就绪"
-                RemoteSave(value) { status -> connectionStatus = status }
-            } else {
-                connectionStatus = "未配置IP"
-                null
+            robotSyncService.setRobotIp(value)
+            if (value.isBlank()) {
+                _connectionStatus.value = "未配置IP"
             }
-            connectAndFetchCommands()
-            startPeriodicSync()
         }
 
-    private var remoteSave: RemoteSave? = null
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    // ---- Observable state ----
 
-    // ---- UI state ----
+    private val _pathVersion = MutableStateFlow(0)
+    val pathVersion: StateFlow<Int> = _pathVersion.asStateFlow()
 
-    var pathVersion by mutableStateOf(0)
-    var connectionStatus by mutableStateOf("未配置IP")
-        private set
-    var availableCommands by mutableStateOf<List<RobotCommandItem>>(emptyList())
-        private set
-    var currentRouteName by mutableStateOf("默认路径")
-    var syncConflict by mutableStateOf<SyncConflictData?>(null)
-        private set
+    private val _connectionStatus = MutableStateFlow("未配置IP")
+    val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
+
+    private val _availableCommands = MutableStateFlow<List<RobotCommandItem>>(emptyList())
+    val availableCommands: StateFlow<List<RobotCommandItem>> = _availableCommands.asStateFlow()
+
+    private val _currentRouteName = MutableStateFlow("默认路径")
+    val currentRouteName: StateFlow<String> = _currentRouteName.asStateFlow()
+
+    private val _syncConflict = MutableStateFlow<SyncConflictData?>(null)
+    val syncConflict: StateFlow<SyncConflictData?> = _syncConflict.asStateFlow()
 
     private val conflictQueue = mutableListOf<SyncConflictData>()
-    private var periodicSyncJob: Job? = null
 
     init {
         val storedIp = configManager["robot_ip"] ?: "192.168.43.1"
         if (storedIp.isNotBlank()) {
-            remoteSave = RemoteSave(storedIp) { status -> connectionStatus = status }
-            connectionStatus = "就绪"
-        }
-        connectAndFetchCommands()
-
-        // Clean legacy large values from ConfigManager cache (Preferences has ~8KB per-key limit)
-        configManager[LEGACY_KEY] = ""
-        configManager[STORAGE_KEY] = "0"
-
-        startPeriodicSync()
-    }
-
-    // ---- Proactive robot connection ----
-
-    /**
-     * Proactively call GET /commands on the robot to verify connectivity
-     * and populate [availableCommands] with the command list.
-     */
-    private fun connectAndFetchCommands() {
-        val rs = remoteSave ?: return
-        connectionStatus = "正在连接..."
-        scope.launch {
-            try {
-                val result = rs.fetchCommands()
-                if (result != null) {
-                    try {
-                        val response = jsonConfig.decodeFromString<RobotCommandListResponse>(result)
-                        if (response.status == "ok") {
-                            availableCommands = response.commands
-                        }
-                        connectionStatus = "就绪"
-                    } catch (_: Exception) {
-                        connectionStatus = "已连接"
-                    }
-                } else {
-                    connectionStatus = "连接失败"
-                }
-            } catch (_: Throwable) {
-                connectionStatus = "连接失败"
-            }
+            robotSyncService.setRobotIp(storedIp)
+            _connectionStatus.value = "就绪"
         }
     }
 
-    // ---- Periodic sync with robot ----
-
-    private fun startPeriodicSync(intervalMs: Long = 5000L) {
-        println("RouteConnector: starting periodic sync (interval=${intervalMs}ms)")
-        periodicSyncJob = scope.launch {
-            while (isActive) {
-                delay(intervalMs)
-                val rs = remoteSave
-                if (rs == null) {
-                    println("RouteConnector: sync skipped (no remoteSave)")
-                    continue
-                }
-
-                println("RouteConnector: sync cycle start")
-
-                // Step 1: refresh command list
-                try {
-                    val commandsResult = rs.fetchCommands()
-                    if (commandsResult != null) {
-                        try {
-                            val response = jsonConfig.decodeFromString<RobotCommandListResponse>(commandsResult)
-                            if (response.status == "ok") {
-                                availableCommands = response.commands
-                                println("RouteConnector: commands refreshed (${response.commands.size} commands)")
-                            }
-                        } catch (_: Exception) { println("RouteConnector: failed to parse commands response") }
-                    } else {
-                        println("RouteConnector: fetchCommands returned null")
-                    }
-                } catch (e: Throwable) { println("RouteConnector: fetchCommands error: ${e.message}") }
-
-                // Step 2: list robot paths and compare each with local
-                try {
-                    val listResult = rs.listPaths()
-                    if (listResult != null) {
-                        try {
-                            val pathList = jsonConfig.decodeFromString<RobotPathListResponse>(listResult)
-                            if (pathList.status == "ok") {
-                                println("RouteConnector: robot has ${pathList.paths.size} paths: ${pathList.paths}")
-                                println("RouteConnector: local has ${allRoutes.size} routes: ${allRoutes.map { it.name }}")
-                                val localRoutes = allRoutes.toList()
-                                for (routeData in localRoutes) {
-                                    if (conflictQueue.any { it.pathName == routeData.name }) {
-                                        println("RouteConnector: '${routeData.name}' already in conflict queue, skip")
-                                        continue
-                                    }
-                                    if (syncConflict?.pathName == routeData.name) {
-                                        println("RouteConnector: '${routeData.name}' currently showing conflict, skip")
-                                        continue
-                                    }
-                                    if (routeData.name !in pathList.paths) {
-                                        println("RouteConnector: '${routeData.name}' not on robot, skip")
-                                        continue
-                                    }
-
-                                    try {
-                                        val remoteJson = rs.fetchPath(routeData.name)
-                                        if (remoteJson == null) {
-                                            println("RouteConnector: fetchPath('${routeData.name}') returned null")
-                                            continue
-                                        }
-                                        if (remoteJson.contains("\"status\":\"not_found\"")) {
-                                            println("RouteConnector: fetchPath('${routeData.name}') returned not_found")
-                                            continue
-                                        }
-
-                                        val localJson = jsonConfig.encodeToString(routeData.points)
-                                        if (localJson != remoteJson) {
-                                            conflictQueue.add(SyncConflictData(
-                                                pathName = routeData.name,
-                                                localJson = localJson,
-                                                remoteJson = remoteJson
-                                            ))
-                                            println("RouteConnector: sync conflict detected for '${routeData.name}'")
-                                        } else {
-                                            println("RouteConnector: '${routeData.name}' local == remote, no conflict")
-                                        }
-                                    } catch (e: Throwable) {
-                                        println("RouteConnector: fetchPath('${routeData.name}') error: ${e.message}")
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) { println("RouteConnector: failed to parse path list response") }
-                    } else {
-                        println("RouteConnector: listPaths returned null")
-                    }
-                } catch (e: Throwable) { println("RouteConnector: listPaths error: ${e.message}") }
-
-                // Step 3: pop next conflict from queue if no dialog is currently shown
-                if (syncConflict == null && conflictQueue.isNotEmpty()) {
-                    syncConflict = conflictQueue.removeAt(0)
-                }
-
-                println("RouteConnector: sync cycle end")
-            }
-            println("RouteConnector: periodic sync stopped")
-        }
-    }
-
-    /**
-     * Fetch the list of saved path names from the robot via GET /list.
-     * Returns an empty list on failure or if the robot is unreachable.
-     * Does NOT store any ViewModel state — the caller decides what to cache.
-     */
-    suspend fun listRobotPaths(): List<String> {
-        val result = remoteSave?.listPaths() ?: return emptyList()
-        return try {
-            jsonConfig.decodeFromString<RobotPathListResponse>(result).paths
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
+    // ---- Conflict resolution ----
 
     private fun popNextConflict() {
-        syncConflict = if (conflictQueue.isNotEmpty()) conflictQueue.removeAt(0) else null
+        _syncConflict.value = if (conflictQueue.isNotEmpty()) conflictQueue.removeAt(0) else null
     }
 
     /**
      * Keep the local version, discard the remote version.
      */
     fun resolveConflictKeepLocal() {
-        val conflict = syncConflict ?: return
+        val conflict = _syncConflict.value ?: return
         // Push the local version to the robot so the conflict won't reappear on the next sync cycle.
-        val localRoute = allRoutes.find { it.name == conflict.pathName }
+        val localRoute = _allRoutes.value.find { it.name == conflict.pathName }
         if (localRoute != null) {
             val localJson = jsonConfig.encodeToString(localRoute.points)
-            remoteSave?.send(localJson, conflict.pathName)
+            robotSyncService.sendToRobot(localJson, conflict.pathName)
         }
         popNextConflict()
     }
@@ -265,23 +114,19 @@ class RouteConnector : ViewModel() {
      * Replace local waypoints with the robot version.
      */
     fun resolveConflictKeepRemote() {
-        val conflict = syncConflict ?: return
+        val conflict = _syncConflict.value ?: return
         try {
             val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
-            allRoutes = allRoutes.map { route ->
+            _allRoutes.value = _allRoutes.value.map { route ->
                 if (route.name == conflict.pathName) route.copy(points = points) else route
             }
-            if (currentRouteName == conflict.pathName) {
-                _waypoints = points
+            if (_currentRouteName.value == conflict.pathName) {
+                _waypoints.value = points
                 routeLogic.setWaypoints(points)
-                pathVersion++
+                _pathVersion.update { it + 1 }
             }
             // Persist to local storage only (don't re-send to robot)
-            val robots = listOf(RobotRoutes(routes = allRoutes))
-            val json = jsonConfig.encodeToString(robots)
-            lastPersistedHash = allRoutes.hashCode()
-            saveRouteData(json)
-            configManager[STORAGE_KEY] = lastPersistedHash.toString()
+            persistLocal()
         } catch (_: Exception) {
             println("RouteConnector: failed to apply remote version for '${conflict.pathName}'")
         }
@@ -293,56 +138,61 @@ class RouteConnector : ViewModel() {
      * and download the robot version under the original name.
      */
     fun resolveConflictKeepBoth() {
-        val conflict = syncConflict ?: return
+        val conflict = _syncConflict.value ?: return
         try {
             // 1. Generate new name for the local version
             var localNewName = "${conflict.pathName}(电脑端)"
             var suffix = 1
-            while (allRoutes.any { it.name == localNewName }) {
+            while (_allRoutes.value.any { it.name == localNewName }) {
                 suffix++
                 localNewName = "${conflict.pathName}(电脑端$suffix)"
             }
             // 2. Rename local route
-            allRoutes = allRoutes.map { route ->
+            _allRoutes.value = _allRoutes.value.map { route ->
                 if (route.name == conflict.pathName) route.copy(name = localNewName) else route
             }
             // 3. Add robot version under original name
             val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
-            allRoutes = allRoutes + RouteData(name = conflict.pathName, points = points)
+            _allRoutes.value = _allRoutes.value + RouteData(name = conflict.pathName, points = points)
             // 4. If currently editing the conflict path, switch waypoints to robot version
-            if (currentRouteName == conflict.pathName) {
-                _waypoints = points
+            if (_currentRouteName.value == conflict.pathName) {
+                _waypoints.value = points
                 routeLogic.setWaypoints(points)
-                pathVersion++
+                _pathVersion.update { it + 1 }
             }
-            // 5. Persist
-            val robots = listOf(RobotRoutes(routes = allRoutes))
-            val json = jsonConfig.encodeToString(robots)
-            lastPersistedHash = allRoutes.hashCode()
-            saveRouteData(json)
-            configManager[STORAGE_KEY] = lastPersistedHash.toString()
+            // 5. Persist locally
+            persistLocal()
         } catch (_: Exception) {
             println("RouteConnector: failed to keep both versions for '${conflict.pathName}'")
         }
         popNextConflict()
     }
 
+    // ---- Robot path listing ----
+
+    /**
+     * Fetch the list of saved path names from the robot via GET /list.
+     * Returns an empty list on failure or if the robot is unreachable.
+     * Does NOT store any ViewModel state — the caller decides what to cache.
+     */
+    suspend fun listRobotPaths(): List<String> = robotSyncService.listRobotPaths()
+
     // ---- Internal model ----
 
     private val routeLogic = RouteCore()
-    private var _waypoints by mutableStateOf<List<ControlNode>>(emptyList())
-    val waypoints: List<ControlNode> get() = _waypoints
+    private val _waypoints = MutableStateFlow<List<ControlNode>>(emptyList())
+    val waypoints: StateFlow<List<ControlNode>> = _waypoints.asStateFlow()
 
-    private var allRoutes by mutableStateOf(listOf(RouteData(name = "默认路径")))
+    private val _allRoutes = MutableStateFlow(listOf(RouteData(name = "默认路径")))
     private var lastPersistedHash = 0
 
     init {
-        val loadedRoutes = loadFromStorage()
+        val loadedRoutes = routeRepo.loadAll()
         if (loadedRoutes.isNotEmpty()) {
-            allRoutes = loadedRoutes
+            _allRoutes.value = loadedRoutes
             val first = loadedRoutes.first()
-            currentRouteName = first.name
-            _waypoints = first.points
+            _currentRouteName.value = first.name
+            _waypoints.value = first.points
             routeLogic.setWaypoints(first.points)
             lastPersistedHash = loadedRoutes.hashCode()
         }
@@ -358,49 +208,49 @@ class RouteConnector : ViewModel() {
 
     // ---- Route management ----
 
-    fun getRouteNames(): List<String> = allRoutes.map { it.name }
+    fun getRouteNames(): List<String> = _allRoutes.value.map { it.name }
 
     fun createRoute(name: String) {
-        if (allRoutes.any { it.name == name }) return
-        allRoutes = allRoutes + RouteData(name = name)
+        if (_allRoutes.value.any { it.name == name }) return
+        _allRoutes.value = _allRoutes.value + RouteData(name = name)
         switchRoute(name)
         persist()
     }
 
     fun switchRoute(name: String) {
-        val route = allRoutes.find { it.name == name } ?: return
-        currentRouteName = name
-        _waypoints = route.points
+        val route = _allRoutes.value.find { it.name == name } ?: return
+        _currentRouteName.value = name
+        _waypoints.value = route.points
         routeLogic.setWaypoints(route.points)
-        pathVersion++
+        _pathVersion.update { it + 1 }
     }
 
     fun deleteRoute(name: String) {
-        allRoutes = allRoutes.filter { it.name != name }
-        if (allRoutes.isEmpty()) {
-            currentRouteName = ""
-            _waypoints = emptyList()
+        _allRoutes.value = _allRoutes.value.filter { it.name != name }
+        if (_allRoutes.value.isEmpty()) {
+            _currentRouteName.value = ""
+            _waypoints.value = emptyList()
             routeLogic.setWaypoints(emptyList())
-            pathVersion++
-        } else if (currentRouteName == name) {
-            val next = allRoutes.first()
+            _pathVersion.update { it + 1 }
+        } else if (_currentRouteName.value == name) {
+            val next = _allRoutes.value.first()
             switchRoute(next.name)
         }
         persist()
     }
 
     fun renameRoute(oldName: String, newName: String) {
-        if (oldName == newName || allRoutes.any { it.name == newName }) return
-        allRoutes = allRoutes.map { if (it.name == oldName) it.copy(name = newName) else it }
-        if (currentRouteName == oldName) {
-            currentRouteName = newName
+        if (oldName == newName || _allRoutes.value.any { it.name == newName }) return
+        _allRoutes.value = _allRoutes.value.map { if (it.name == oldName) it.copy(name = newName) else it }
+        if (_currentRouteName.value == oldName) {
+            _currentRouteName.value = newName
         }
         persist()
     }
 
     fun moveRouteOrder(fromIndex: Int, toIndex: Int) {
-        if (fromIndex !in allRoutes.indices || toIndex !in allRoutes.indices || fromIndex == toIndex) return
-        allRoutes = allRoutes.toMutableList().apply {
+        if (fromIndex !in _allRoutes.value.indices || toIndex !in _allRoutes.value.indices || fromIndex == toIndex) return
+        _allRoutes.value = _allRoutes.value.toMutableList().apply {
             val item = removeAt(fromIndex)
             add(toIndex, item)
         }
@@ -410,40 +260,28 @@ class RouteConnector : ViewModel() {
     // ---- Persistence ----
 
     private fun syncAndSave() {
-        val updated = allRoutes.map { route ->
-            if (route.name == currentRouteName) route.copy(points = _waypoints.toList())
+        val updated = _allRoutes.value.map { route ->
+            if (route.name == _currentRouteName.value) route.copy(points = _waypoints.value.toList())
             else route
         }
-        allRoutes = updated
+        _allRoutes.value = updated
         persist()
     }
 
+    /** Save all routes to local storage AND send the current route to the robot. */
     private fun persist() {
-        val robots = listOf(RobotRoutes(routes = allRoutes))
-        val json = jsonConfig.encodeToString(robots)
-        lastPersistedHash = allRoutes.hashCode()
-        saveRouteData(json)
-        configManager[STORAGE_KEY] = lastPersistedHash.toString()
-        remoteSave?.send(jsonConfig.encodeToString(_waypoints.toList()), currentRouteName)
+        persistLocal()
+        robotSyncService.sendToRobot(
+            jsonConfig.encodeToString(_waypoints.value.toList()),
+            _currentRouteName.value
+        )
     }
 
-    private fun loadFromStorage(): List<RouteData> {
-        val json = loadRouteData()
-        if (!json.isNullOrBlank()) {
-            return try {
-                jsonConfig.decodeFromString<List<RobotRoutes>>(json)
-                    .flatMap { it.routes }
-            } catch (_: Exception) { emptyList() }
-        }
-        // Legacy fallback from old Settings-based storage
-        val legacyJson = settingsStorage.getString(LEGACY_KEY, "")
-        if (legacyJson.isNotBlank()) {
-            return try {
-                val points = jsonConfig.decodeFromString<List<ControlNode>>(legacyJson)
-                listOf(RouteData(name = "默认路径", points = points))
-            } catch (_: Exception) { emptyList() }
-        }
-        return emptyList()
+    /** Save all routes to local storage only (without sending to the robot). */
+    private fun persistLocal() {
+        routeRepo.saveAll(_allRoutes.value)
+        lastPersistedHash = _allRoutes.value.hashCode()
+        configManager[RouteRepository.STORAGE_KEY] = lastPersistedHash.toString()
     }
 
     // ---- Auto-save watcher ----
@@ -454,27 +292,21 @@ class RouteConnector : ViewModel() {
         stopAutoSaveWatcher()
 
         autoSaveJob = configManager.watchPath(
-            pathKey = STORAGE_KEY,
+            pathKey = RouteRepository.STORAGE_KEY,
             intervalMs = 50L
         ) { newValue ->
             val remoteHash = newValue.toIntOrNull() ?: return@watchPath
             if (remoteHash != lastPersistedHash) {
-                val json = loadRouteData()
-                if (json.isNullOrBlank()) return@watchPath
-                val parsed = try {
-                    jsonConfig.decodeFromString<List<RobotRoutes>>(json)
-                        .flatMap { it.routes }
-                } catch (_: Exception) {
-                    return@watchPath
-                }
+                val parsed = routeRepo.loadAll()
+                if (parsed.isEmpty()) return@watchPath
                 lastPersistedHash = remoteHash
-                val current = parsed.find { it.name == currentRouteName }
+                val current = parsed.find { it.name == _currentRouteName.value }
                 if (current != null) {
-                    _waypoints = current.points
+                    _waypoints.value = current.points
                     routeLogic.setWaypoints(current.points)
-                    pathVersion++
+                    _pathVersion.update { it + 1 }
                 }
-                allRoutes = parsed
+                _allRoutes.value = parsed
             }
         }
     }
@@ -488,61 +320,61 @@ class RouteConnector : ViewModel() {
 
     fun addPoint(point: ControlNode) {
         routeLogic.addPoint(point)
-        _waypoints = _waypoints + point
-        pathVersion++
+        _waypoints.value = _waypoints.value + point
+        _pathVersion.update { it + 1 }
         syncAndSave()
     }
 
     fun addPointAt(index: Int, point: ControlNode) {
         routeLogic.addPointAt(index, point)
-        _waypoints = _waypoints.toMutableList().apply { add(index, point) }
-        pathVersion++
+        _waypoints.value = _waypoints.value.toMutableList().apply { add(index, point) }
+        _pathVersion.update { it + 1 }
         syncAndSave()
     }
 
     fun setWaypoints(points: List<ControlNode>) {
         routeLogic.setWaypoints(points)
-        _waypoints = points
-        pathVersion++
+        _waypoints.value = points
+        _pathVersion.update { it + 1 }
         syncAndSave()
     }
 
     fun moveNode(index: Int, newPoint: ControlNode) {
         routeLogic.moveNode(index, newPoint)
-        if (index in _waypoints.indices) {
-            _waypoints = _waypoints.toMutableList().apply { this[index] = newPoint }
-            pathVersion++
+        if (index in _waypoints.value.indices) {
+            _waypoints.value = _waypoints.value.toMutableList().apply { this[index] = newPoint }
+            _pathVersion.update { it + 1 }
             syncAndSave()
         }
     }
 
     fun moveNodeOrder(fromIndex: Int, toIndex: Int) {
-        if (fromIndex !in _waypoints.indices || toIndex !in _waypoints.indices || fromIndex == toIndex) return
+        if (fromIndex !in _waypoints.value.indices || toIndex !in _waypoints.value.indices || fromIndex == toIndex) return
         routeLogic.moveNodeOrder(fromIndex, toIndex)
-        _waypoints = _waypoints.toMutableList().apply {
+        _waypoints.value = _waypoints.value.toMutableList().apply {
             val node = removeAt(fromIndex)
             add(toIndex, node)
         }
-        pathVersion++
+        _pathVersion.update { it + 1 }
         syncAndSave()
     }
 
     fun removeNode(index: Int) {
         routeLogic.removeNode(index)
-        if (index in _waypoints.indices) {
-            _waypoints = _waypoints.toMutableList().apply { removeAt(index) }
-            pathVersion++
+        if (index in _waypoints.value.indices) {
+            _waypoints.value = _waypoints.value.toMutableList().apply { removeAt(index) }
+            _pathVersion.update { it + 1 }
             syncAndSave()
         }
     }
 
     fun moveNode(sourceNode: ControlNode, destinationNode: ControlNode) {
-        val index = _waypoints.indexOfFirst { it isCloseTo sourceNode }
+        val index = _waypoints.value.indexOfFirst { it isCloseTo sourceNode }
         if (index != -1) moveNode(index, destinationNode)
     }
 
     fun removeNode(point2D: ControlNode) {
-        val index = _waypoints.indexOfFirst { it isCloseTo point2D }
+        val index = _waypoints.value.indexOfFirst { it isCloseTo point2D }
         if (index != -1) removeNode(index)
     }
 
@@ -557,35 +389,19 @@ class RouteConnector : ViewModel() {
 
     fun exportToJson(): String {
         syncAndSave()
-        return jsonConfig.encodeToString(listOf(RobotRoutes(routes = allRoutes)))
+        return routeRepo.exportJson(_allRoutes.value)
     }
 
     fun importFromJson(jsonText: String): Boolean {
-        return try {
-            val robots = jsonConfig.decodeFromString<List<RobotRoutes>>(jsonText)
-            val routes = robots.flatMap { it.routes }
-            if (routes.isEmpty()) return false
-            allRoutes = routes
-            val first = routes.first()
-            currentRouteName = first.name
-            _waypoints = first.points
-            routeLogic.setWaypoints(first.points)
-            pathVersion++
-            persist()
-            true
-        } catch (_: Exception) {
-            // Legacy format fallback
-            try {
-                val points = jsonConfig.decodeFromString<List<ControlNode>>(jsonText)
-                val route = RouteData(name = "导入路径", points = points)
-                allRoutes = allRoutes + route
-                switchRoute(route.name)
-                persist()
-                true
-            } catch (e2: Exception) {
-                println("Import failed: ${e2.message}")
-                false
-            }
-        }
+        val routes = routeRepo.importJson(jsonText) ?: return false
+        if (routes.isEmpty()) return false
+        _allRoutes.value = routes
+        val first = routes.first()
+        _currentRouteName.value = first.name
+        _waypoints.value = first.points
+        routeLogic.setWaypoints(first.points)
+        _pathVersion.update { it + 1 }
+        persist()
+        return true
     }
 }

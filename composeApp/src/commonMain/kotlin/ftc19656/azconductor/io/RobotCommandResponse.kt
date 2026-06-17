@@ -4,11 +4,13 @@ import kotlinx.serialization.Serializable
 
 /**
  * Individual command item returned by GET /commands on the robot HTTP API (port 8888).
- * Extra fields beyond [name] are silently ignored via ignoreUnknownKeys.
+ * Extra fields beyond [name], [params], and [ready] are silently ignored via ignoreUnknownKeys.
  */
 @Serializable
 data class RobotCommandItem(
-    val name: String
+    val name: String,
+    val params: List<String> = emptyList(),
+    val ready: Boolean = false
 )
 
 /**

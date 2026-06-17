@@ -23,6 +23,9 @@ fun App(route: RouteConnector = RouteConnector()) {
     var showSettingsDialog by remember { mutableStateOf(false) }
     var dialogIpInput by remember { mutableStateOf(route.robotIp) }
 
+    val connectionStatus by route.connectionStatus.collectAsState()
+    val syncConflict by route.syncConflict.collectAsState()
+
     AzConductorTheme {
         Column(modifier = Modifier.fillMaxSize()) {
             // Main content area: fills all remaining space above the status bar
@@ -67,9 +70,9 @@ fun App(route: RouteConnector = RouteConnector()) {
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = route.connectionStatus,
+                        text = connectionStatus,
                         style = MaterialTheme.typography.labelSmall,
-                        color = when (route.connectionStatus) {
+                        color = when (connectionStatus) {
                             "连接失败", "未配置IP", "加载失败" -> Color.Red
                             "已保存", "已加载", "已连接" -> Color(0xFF4CAF50)
                             "已发送", "正在连接..." -> Color(0xFFFFA000)
@@ -117,7 +120,7 @@ fun App(route: RouteConnector = RouteConnector()) {
         }
 
         // ---- Sync conflict dialog (global, can appear on any screen) ----
-        route.syncConflict?.let { conflict ->
+        syncConflict?.let { conflict ->
             SyncConflictDialog(
                 conflict = conflict,
                 onKeepLocal = { route.resolveConflictKeepLocal() },

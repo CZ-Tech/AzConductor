@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -27,6 +29,11 @@ fun RouteCanvas(
     rotationDegrees: Float,
     modifier: Modifier = Modifier
 ) {
+    // 在此处读取 pathVersion。向 Compose 注册了依赖关系
+    // 只要 route.pathVersion 发生变化，这个 Canvas 就会触发重绘阶段
+    @Suppress("UNUSED_VARIABLE")
+    val currentVersion by route.pathVersion.collectAsState()
+
     Canvas(
         modifier = modifier
             .fillMaxSize()
@@ -45,11 +52,9 @@ fun RouteCanvas(
                 }
             }
             ) {
-            // 在此处读取 pathVersion。向 Compose 注册了依赖关系
-            // 只要 route.pathVersion 发生变化，这个 Canvas 就会触发重绘阶段
-            @Suppress("UNUSED_VARIABLE")
-            val currentVersion = route.pathVersion
-        
+
+        @Suppress("UNUSED_VARIABLE")
+        val v = currentVersion  // 强制 onDraw 闭包捕获变化的值，否则 Compose 可能跳过重绘
         withTransform({
             translate(mapper.centerX, mapper.centerY)
             rotate(rotationDegrees, pivot = Offset.Zero)

@@ -31,7 +31,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigateToCommands: () -> Unit = {}) {
-    var routeNames by remember(route.pathVersion) { mutableStateOf(route.getRouteNames()) }
+    val pv by route.pathVersion.collectAsState()
+    var routeNames by remember(pv) { mutableStateOf(route.getRouteNames()) }
 
     // New route dialog
     var showCreateDialog by remember { mutableStateOf(false) }
