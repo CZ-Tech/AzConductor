@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import azconductor.composeapp.generated.resources.FTC_MAP26
 import azconductor.composeapp.generated.resources.Res
+import ftc19656.azconductor.io.SyncManager
 import ftc19656.azconductor.route.viewmodel.CommandsViewModel
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.ui.components.PlaybackProgressBar
@@ -24,7 +25,7 @@ import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommandsScreen(route: RouteConnector, onNavigateBack: () -> Unit) {
+fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBack: () -> Unit) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var selectedDrawerItem by remember { mutableStateOf("运行") }
     val scope = rememberCoroutineScope()
@@ -49,7 +50,7 @@ fun CommandsScreen(route: RouteConnector, onNavigateBack: () -> Unit) {
     }
 
     // ---- Commands-scoped ViewModel (robot path list) ----
-    val commandsViewModel = remember { CommandsViewModel(route) }
+    val commandsViewModel = remember { CommandsViewModel(syncManager) }
     val robotPaths by commandsViewModel.robotPaths.collectAsState()
     var selectedRobotPath by remember { mutableStateOf("") }
     var pathDropdownExpanded by remember { mutableStateOf(false) }

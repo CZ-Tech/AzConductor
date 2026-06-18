@@ -54,11 +54,7 @@ private const val ROBOT_RENDER_PADDING = 10f
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onNavigateBack: () -> Unit = {}) {
-    DisposableEffect(route) {
-        route.startAutoSaveWatcher()
-        onDispose { route.stopAutoSaveWatcher() }
-    }
-
+    // Auto-save is handled globally by SyncManager (started in App.kt)
     val waypoints by route.waypoints.collectAsState()
     val availableCommands by route.availableCommands.collectAsState()
     val pv by route.pathVersion.collectAsState()

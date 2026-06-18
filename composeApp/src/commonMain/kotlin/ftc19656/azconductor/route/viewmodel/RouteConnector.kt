@@ -1,7 +1,7 @@
 package ftc19656.azconductor.route.viewmodel
 
+import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.io.ConfigManager
-import ftc19656.azconductor.io.RobotSyncService
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RouteCore
@@ -9,173 +9,51 @@ import ftc19656.azconductor.route.RouteData
 import ftc19656.azconductor.io.RobotCommandItem
 import ftc19656.azconductor.io.RouteRepository
 import ftc19656.azconductor.io.SyncConflictData
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
+import ftc19656.azconductor.io.SyncManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
-class RouteConnector {
-
-    private val jsonConfig = Json {
-        prettyPrint = true
-        encodeDefaults = true
-        ignoreUnknownKeys = true
+class RouteConnector(
+    private val jsonConfig: Json = AppContext.jsonConfig,
+    private val configManager: ConfigManager = AppContext.configManager,
+    private val routeRepo: RouteRepository = AppContext.routeRepo,
+    private val syncManager: SyncManager = AppContext.syncManager
+) {
+    init {
+        syncManager.onDataChanged = { reloadFromRepo() }
+        syncManager.localRoutesProvider = { _allRoutes.value }
     }
-
-    private val configManager = ConfigManager.getOrCreate("route")
-
-    private val routeRepo = RouteRepository(jsonConfig, configManager)
-
-    // ---- Robot sync service ----
-
-    private val robotSyncService = RobotSyncService(
-        jsonConfig = jsonConfig,
-        scope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
-        onConnectionStatusChange = { status -> _connectionStatus.value = status },
-        onCommandsRefreshed = { commands -> _availableCommands.value = commands },
-        onConflictDetected = { conflict ->
-            conflictQueue.add(conflict)
-            if (_syncConflict.value == null) {
-                _syncConflict.value = conflictQueue.removeAt(0)
-            }
-        },
-        getLocalRoutes = { _allRoutes.value },
-        getActiveConflictName = { _syncConflict.value?.pathName },
-        isNameInConflictQueue = { name -> conflictQueue.any { it.pathName == name } },
-    )
-
-    // ---- Remote connection ----
-
-    var robotIp: String
-        get() = configManager["robot_ip"] ?: "192.168.43.1"
-        set(value) {
-            configManager["robot_ip"] = value
-            robotSyncService.setRobotIp(value)
-            if (value.isBlank()) {
-                _connectionStatus.value = "未配置IP"
-            }
-        }
 
     // ---- Observable state ----
 
     private val _pathVersion = MutableStateFlow(0)
     val pathVersion: StateFlow<Int> = _pathVersion.asStateFlow()
 
-    private val _connectionStatus = MutableStateFlow("未配置IP")
-    val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
+    /** Delegates to [SyncManager.connectionStatus] (ultimately RobotSyncService). */
+    val connectionStatus: StateFlow<String> get() = syncManager.connectionStatus
 
-    private val _availableCommands = MutableStateFlow<List<RobotCommandItem>>(emptyList())
-    val availableCommands: StateFlow<List<RobotCommandItem>> = _availableCommands.asStateFlow()
+    /** Delegates to [SyncManager.availableCommands] (ultimately RobotSyncService). */
+    val availableCommands: StateFlow<List<RobotCommandItem>> get() = syncManager.availableCommands
 
     private val _currentRouteName = MutableStateFlow("默认路径")
     val currentRouteName: StateFlow<String> = _currentRouteName.asStateFlow()
 
-    private val _syncConflict = MutableStateFlow<SyncConflictData?>(null)
-    val syncConflict: StateFlow<SyncConflictData?> = _syncConflict.asStateFlow()
+    /** Delegates to [SyncManager.conflictState]. */
+    val syncConflict: StateFlow<SyncConflictData?> get() = syncManager.conflictState
 
-    private val conflictQueue = mutableListOf<SyncConflictData>()
+    // ---- Conflict resolution (delegated to SyncManager) ----
 
-    init {
-        val storedIp = configManager["robot_ip"] ?: "192.168.43.1"
-        if (storedIp.isNotBlank()) {
-            robotSyncService.setRobotIp(storedIp)
-            _connectionStatus.value = "就绪"
-        }
-    }
+    fun resolveConflictKeepLocal() = syncManager.resolveKeepLocal()
+    fun resolveConflictKeepRemote() = syncManager.resolveKeepRemote()
+    fun resolveConflictKeepBoth() = syncManager.resolveKeepBoth()
 
-    // ---- Conflict resolution ----
+    // ---- Conflict detection lifecycle ----
 
-    private fun popNextConflict() {
-        _syncConflict.value = if (conflictQueue.isNotEmpty()) conflictQueue.removeAt(0) else null
-    }
-
-    /**
-     * Keep the local version, discard the remote version.
-     */
-    fun resolveConflictKeepLocal() {
-        val conflict = _syncConflict.value ?: return
-        // Push the local version to the robot so the conflict won't reappear on the next sync cycle.
-        val localRoute = _allRoutes.value.find { it.name == conflict.pathName }
-        if (localRoute != null) {
-            val localJson = jsonConfig.encodeToString(localRoute.points)
-            robotSyncService.sendToRobot(localJson, conflict.pathName)
-        }
-        popNextConflict()
-    }
-
-    /**
-     * Replace local waypoints with the robot version.
-     */
-    fun resolveConflictKeepRemote() {
-        val conflict = _syncConflict.value ?: return
-        try {
-            val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
-            _allRoutes.value = _allRoutes.value.map { route ->
-                if (route.name == conflict.pathName) route.copy(points = points) else route
-            }
-            if (_currentRouteName.value == conflict.pathName) {
-                _waypoints.value = points
-                routeLogic.setWaypoints(points)
-                _pathVersion.update { it + 1 }
-            }
-            // Persist to local storage only (don't re-send to robot)
-            persistLocal()
-        } catch (_: Exception) {
-            println("RouteConnector: failed to apply remote version for '${conflict.pathName}'")
-        }
-        popNextConflict()
-    }
-
-    /**
-     * Keep both versions: rename the local version (e.g. "默认路径(电脑端)")
-     * and download the robot version under the original name.
-     */
-    fun resolveConflictKeepBoth() {
-        val conflict = _syncConflict.value ?: return
-        try {
-            // 1. Generate new name for the local version
-            var localNewName = "${conflict.pathName}(电脑端)"
-            var suffix = 1
-            while (_allRoutes.value.any { it.name == localNewName }) {
-                suffix++
-                localNewName = "${conflict.pathName}(电脑端$suffix)"
-            }
-            // 2. Rename local route
-            _allRoutes.value = _allRoutes.value.map { route ->
-                if (route.name == conflict.pathName) route.copy(name = localNewName) else route
-            }
-            // 3. Add robot version under original name
-            val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
-            _allRoutes.value = _allRoutes.value + RouteData(name = conflict.pathName, points = points)
-            // 4. If currently editing the conflict path, switch waypoints to robot version
-            if (_currentRouteName.value == conflict.pathName) {
-                _waypoints.value = points
-                routeLogic.setWaypoints(points)
-                _pathVersion.update { it + 1 }
-            }
-            // 5. Persist locally
-            persistLocal()
-        } catch (_: Exception) {
-            println("RouteConnector: failed to keep both versions for '${conflict.pathName}'")
-        }
-        popNextConflict()
-    }
-
-    // ---- Robot path listing ----
-
-    /**
-     * Fetch the list of saved path names from the robot via GET /list.
-     * Returns an empty list on failure or if the robot is unreachable.
-     * Does NOT store any ViewModel state — the caller decides what to cache.
-     */
-    suspend fun listRobotPaths(): List<String> = robotSyncService.listRobotPaths()
+    fun startConflictDetection() = syncManager.start()
+    fun stopConflictDetection() = syncManager.stop()
 
     // ---- Internal model ----
 
@@ -184,7 +62,6 @@ class RouteConnector {
     val waypoints: StateFlow<List<ControlNode>> = _waypoints.asStateFlow()
 
     private val _allRoutes = MutableStateFlow(listOf(RouteData(name = "默认路径")))
-    private var lastPersistedHash = 0
 
     init {
         val loadedRoutes = routeRepo.loadAll()
@@ -194,8 +71,32 @@ class RouteConnector {
             _currentRouteName.value = first.name
             _waypoints.value = first.points
             routeLogic.setWaypoints(first.points)
-            lastPersistedHash = loadedRoutes.hashCode()
         }
+    }
+
+    /**
+     * Reload all local state from [routeRepo].  Called by [SyncManager]
+     * after a conflict resolution mutates the repository.
+     */
+    private fun reloadFromRepo() {
+        val routes = routeRepo.loadAll()
+        _allRoutes.value = routes
+
+        val current = routes.find { it.name == _currentRouteName.value }
+        if (current != null) {
+            _waypoints.value = current.points
+            routeLogic.setWaypoints(current.points)
+        } else if (routes.isNotEmpty()) {
+            val first = routes.first()
+            _currentRouteName.value = first.name
+            _waypoints.value = first.points
+            routeLogic.setWaypoints(first.points)
+        } else {
+            _currentRouteName.value = ""
+            _waypoints.value = emptyList()
+            routeLogic.setWaypoints(emptyList())
+        }
+        _pathVersion.update { it + 1 }
     }
 
     val trajectoryList: List<OrientedTrajectoryGenerator2D>
@@ -214,7 +115,6 @@ class RouteConnector {
         if (_allRoutes.value.any { it.name == name }) return
         _allRoutes.value = _allRoutes.value + RouteData(name = name)
         switchRoute(name)
-        persist()
     }
 
     fun switchRoute(name: String) {
@@ -236,7 +136,7 @@ class RouteConnector {
             val next = _allRoutes.value.first()
             switchRoute(next.name)
         }
-        persist()
+        // auto-saved by SyncManager timer
     }
 
     fun renameRoute(oldName: String, newName: String) {
@@ -245,7 +145,7 @@ class RouteConnector {
         if (_currentRouteName.value == oldName) {
             _currentRouteName.value = newName
         }
-        persist()
+        // auto-saved by SyncManager timer
     }
 
     fun moveRouteOrder(fromIndex: Int, toIndex: Int) {
@@ -254,66 +154,23 @@ class RouteConnector {
             val item = removeAt(fromIndex)
             add(toIndex, item)
         }
-        persist()
+        // auto-saved by SyncManager timer
     }
 
-    // ---- Persistence ----
+    // ---- In-memory sync ----
+    // Persistence is handled externally by SyncManager's auto-save timer.
 
-    private fun syncAndSave() {
+    /**
+     * Copies the current route's waypoints into [_allRoutes] so that
+     * [exportToJson] and the auto-save timer see the latest points.
+     * Does NOT touch storage or network — pure in-memory operation.
+     */
+    private fun syncCurrentRoute() {
         val updated = _allRoutes.value.map { route ->
             if (route.name == _currentRouteName.value) route.copy(points = _waypoints.value.toList())
             else route
         }
         _allRoutes.value = updated
-        persist()
-    }
-
-    /** Save all routes to local storage AND send the current route to the robot. */
-    private fun persist() {
-        persistLocal()
-        robotSyncService.sendToRobot(
-            jsonConfig.encodeToString(_waypoints.value.toList()),
-            _currentRouteName.value
-        )
-    }
-
-    /** Save all routes to local storage only (without sending to the robot). */
-    private fun persistLocal() {
-        routeRepo.saveAll(_allRoutes.value)
-        lastPersistedHash = _allRoutes.value.hashCode()
-        configManager[RouteRepository.STORAGE_KEY] = lastPersistedHash.toString()
-    }
-
-    // ---- Auto-save watcher ----
-
-    private var autoSaveJob: Job? = null
-
-    fun startAutoSaveWatcher() {
-        stopAutoSaveWatcher()
-
-        autoSaveJob = configManager.watchPath(
-            pathKey = RouteRepository.STORAGE_KEY,
-            intervalMs = 50L
-        ) { newValue ->
-            val remoteHash = newValue.toIntOrNull() ?: return@watchPath
-            if (remoteHash != lastPersistedHash) {
-                val parsed = routeRepo.loadAll()
-                if (parsed.isEmpty()) return@watchPath
-                lastPersistedHash = remoteHash
-                val current = parsed.find { it.name == _currentRouteName.value }
-                if (current != null) {
-                    _waypoints.value = current.points
-                    routeLogic.setWaypoints(current.points)
-                    _pathVersion.update { it + 1 }
-                }
-                _allRoutes.value = parsed
-            }
-        }
-    }
-
-    fun stopAutoSaveWatcher() {
-        autoSaveJob?.cancel()
-        autoSaveJob = null
     }
 
     // ---- CRUD with auto-persist ----
@@ -322,21 +179,21 @@ class RouteConnector {
         routeLogic.addPoint(point)
         _waypoints.value = _waypoints.value + point
         _pathVersion.update { it + 1 }
-        syncAndSave()
+        syncCurrentRoute()
     }
 
     fun addPointAt(index: Int, point: ControlNode) {
         routeLogic.addPointAt(index, point)
         _waypoints.value = _waypoints.value.toMutableList().apply { add(index, point) }
         _pathVersion.update { it + 1 }
-        syncAndSave()
+        syncCurrentRoute()
     }
 
     fun setWaypoints(points: List<ControlNode>) {
         routeLogic.setWaypoints(points)
         _waypoints.value = points
         _pathVersion.update { it + 1 }
-        syncAndSave()
+        syncCurrentRoute()
     }
 
     fun moveNode(index: Int, newPoint: ControlNode) {
@@ -344,7 +201,7 @@ class RouteConnector {
         if (index in _waypoints.value.indices) {
             _waypoints.value = _waypoints.value.toMutableList().apply { this[index] = newPoint }
             _pathVersion.update { it + 1 }
-            syncAndSave()
+            syncCurrentRoute()
         }
     }
 
@@ -356,7 +213,7 @@ class RouteConnector {
             add(toIndex, node)
         }
         _pathVersion.update { it + 1 }
-        syncAndSave()
+        syncCurrentRoute()
     }
 
     fun removeNode(index: Int) {
@@ -364,7 +221,7 @@ class RouteConnector {
         if (index in _waypoints.value.indices) {
             _waypoints.value = _waypoints.value.toMutableList().apply { removeAt(index) }
             _pathVersion.update { it + 1 }
-            syncAndSave()
+            syncCurrentRoute()
         }
     }
 
@@ -388,7 +245,7 @@ class RouteConnector {
     // ---- export / import ----
 
     fun exportToJson(): String {
-        syncAndSave()
+        syncCurrentRoute()
         return routeRepo.exportJson(_allRoutes.value)
     }
 
@@ -401,7 +258,7 @@ class RouteConnector {
         _waypoints.value = first.points
         routeLogic.setWaypoints(first.points)
         _pathVersion.update { it + 1 }
-        persist()
+        // auto-saved by SyncManager timer
         return true
     }
 }

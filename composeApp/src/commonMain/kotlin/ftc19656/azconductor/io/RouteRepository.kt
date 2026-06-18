@@ -4,28 +4,31 @@ import com.russhwolf.settings.Settings
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteData
+import kotlinx.coroutines.Job
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
- * 路径数据访问层，封装 JSON 序列化、平台存储、旧版兼容。
+ * 路径数据访问层，封装 JSON 序列化、平台存储、旧版兼容、跨标签页同步检测。
  *
  * 最小操作单位是一条路径（[ftc19656.azconductor.route.RouteData]）。
  * [ftc19656.azconductor.route.RobotRoutes] 是内部序列化包装，外界不可见。
- * 不持有 UI 状态、不负责同步、不发回调。
+ * 写入自动更新哈希信号，[watchExternalChanges] 可监听外部变更。
  */
 class RouteRepository(
     private val jsonConfig: Json,
     private val configManager: ConfigManager
 ) {
     companion object {
-        /** 跨标签页同步用的 storage key，供 RouteConnector 的 auto-save watcher 引用 */
+        /** 跨标签页同步用的 storage key，写入时自动更新哈希值 */
         internal const val STORAGE_KEY = "robot_routes"
 
         private const val LEGACY_KEY = "auto_save_waypoints"
     }
 
     private val settingsStorage = Settings()
+
+    private var lastPersistedHash = 0
 
     init {
         // 清理旧版大体积数据（Preferences 单 key 限制约 8KB）
@@ -94,6 +97,16 @@ fun saveAll(routes: List<RouteData>) {
         writeAll(routes)
     }
 
+    /**
+     * 仅当路由列表哈希与上次持久化值不同时才写入存储。
+     * @return true 表示实际写入了存储，false 表示跳过（无变化）。
+     */
+    fun saveIfChanged(routes: List<RouteData>): Boolean {
+        if (routes.hashCode() == lastPersistedHash) return false
+        writeAll(routes)
+        return true
+    }
+
     // ---- 导入导出 ----
 
     /** 导出全部路径为 JSON 字符串 */
@@ -124,5 +137,31 @@ fun saveAll(routes: List<RouteData>) {
         val robots = listOf(RobotRoutes(routes = routes))
         val json = jsonConfig.encodeToString(robots)
         saveRouteData(json)
+        lastPersistedHash = routes.hashCode()
+        configManager[STORAGE_KEY] = lastPersistedHash.toString()
+    }
+
+    // ---- 跨标签页监听 ----
+
+    /**
+     * [ConfigManager.watchPath] 并内部维护 [lastPersistedHash]，只在外部变更时回调。
+     * 同一实例通过 [writeAll] 写入不会触发回调。
+     *
+     * @return 可用于取消监听的 [Job]。
+     */
+    fun watchExternalChanges(
+        intervalMs: Long = 50L,
+        onChanged: (List<RouteData>) -> Unit
+    ): Job {
+        return configManager.watchPath(STORAGE_KEY, intervalMs) { newValue ->
+            val remoteHash = newValue.toIntOrNull() ?: return@watchPath
+            if (remoteHash != lastPersistedHash) {
+                val routes = loadAll()
+                if (routes.isNotEmpty()) {
+                    lastPersistedHash = remoteHash
+                    onChanged(routes)
+                }
+            }
+        }
     }
 }

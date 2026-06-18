@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.ui.dialogs.SyncConflictDialog
 import ftc19656.azconductor.ui.screens.CommandsScreen
@@ -21,10 +22,16 @@ import ftc19656.azconductor.ui.theme.AzConductorTheme
 fun App(route: RouteConnector = RouteConnector()) {
     var currentScreen by remember { mutableStateOf("home") }
     var showSettingsDialog by remember { mutableStateOf(false) }
-    var dialogIpInput by remember { mutableStateOf(route.robotIp) }
+    var dialogIpInput by remember { mutableStateOf(AppContext.syncManager.robotIp) }
 
     val connectionStatus by route.connectionStatus.collectAsState()
     val syncConflict by route.syncConflict.collectAsState()
+
+    // Start periodic conflict detection for the lifetime of the app.
+    DisposableEffect(route) {
+        route.startConflictDetection()
+        onDispose { route.stopConflictDetection() }
+    }
 
     AzConductorTheme {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -42,6 +49,7 @@ fun App(route: RouteConnector = RouteConnector()) {
                     )
                     "commands" -> CommandsScreen(
                         route = route,
+                        syncManager = AppContext.syncManager,
                         onNavigateBack = { currentScreen = "home" }
                     )
                 }
@@ -105,7 +113,7 @@ fun App(route: RouteConnector = RouteConnector()) {
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        route.robotIp = dialogIpInput
+                        AppContext.syncManager.robotIp = dialogIpInput
                         showSettingsDialog = false
                     }) {
                         Text("保存")

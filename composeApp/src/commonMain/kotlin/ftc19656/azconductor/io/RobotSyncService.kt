@@ -1,36 +1,50 @@
 package ftc19656.azconductor.io
 
-import ftc19656.azconductor.route.RouteData
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
 /**
- * Handles all robot communication: connection, periodic sync, conflict detection,
- * and command fetching. This is a plain service class — it does NOT hold any
- * UI state itself; all state changes are pushed upward through callbacks.
+ * Global singleton that handles robot I/O: connection management,
+ * periodic command refresh, and raw data push/pull operations.
  *
- * Lifecycle: created once by [RouteConnector], lives for the application lifetime.
+ * This service is a **pure I/O layer** — it does NOT know about local
+ * route state, conflict detection, or UI policy.  Callers push data via
+ * [sendToRobot] and pull data via [listRobotPaths] / [pullRoute]; they
+ * are responsible for comparison, conflict resolution, and scheduling.
+ *
+ * Upward outputs ([connectionStatus], [availableCommands]) are exposed
+ * as [StateFlow]s that UI layers collect directly.
  */
-class RobotSyncService(
-    private val jsonConfig: Json,
-    private val scope: CoroutineScope,
+object RobotSyncService {
 
-    // ---- Upward callbacks (service → ViewModel) ----
-    private val onConnectionStatusChange: (String) -> Unit,
-    private val onCommandsRefreshed: (List<RobotCommandItem>) -> Unit,
-    private val onConflictDetected: (SyncConflictData) -> Unit,
+    private val jsonConfig = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
 
-    // ---- Downward queries (ViewModel answers the service) ----
-    private val getLocalRoutes: () -> List<RouteData>,
-    private val getActiveConflictName: () -> String?,
-    private val isNameInConflictQueue: (String) -> Boolean,
-) {
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    // ---- Upward outputs (read by RouteConnector / UI) ----
+
+    private val _connectionStatus = MutableStateFlow("未配置IP")
+    val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
+
+    private val _availableCommands = MutableStateFlow<List<RobotCommandItem>>(emptyList())
+    val availableCommands: StateFlow<List<RobotCommandItem>> = _availableCommands.asStateFlow()
+
+    // ---- Internal state ----
+
     private var remoteSave: RemoteSave? = null
     private var periodicSyncJob: Job? = null
 
@@ -39,13 +53,13 @@ class RobotSyncService(
     /**
      * Update the robot IP address. Cancels any running sync job, creates
      * a new [RemoteSave] (or null if [ip] is blank), then reconnects
-     * and restarts periodic sync.
+     * and restarts periodic command refresh.
      */
     fun setRobotIp(ip: String) {
         periodicSyncJob?.cancel()
         periodicSyncJob = null
         remoteSave = if (ip.isNotBlank()) {
-            RemoteSave(ip) { status -> onConnectionStatusChange(status) }
+            RemoteSave(ip) { status -> _connectionStatus.value = status }
         } else {
             null
         }
@@ -58,6 +72,14 @@ class RobotSyncService(
         periodicSyncJob?.cancel()
         periodicSyncJob = null
         remoteSave = null
+    }
+
+    /**
+     * Fire-and-forget: push JSON to the robot for a given path name.
+     * Delegates to [RemoteSave.send].
+     */
+    fun sendToRobot(jsonBody: String, pathName: String) {
+        remoteSave?.send(jsonBody, pathName)
     }
 
     /**
@@ -74,22 +96,22 @@ class RobotSyncService(
     }
 
     /**
-     * Fire-and-forget: send JSON to the robot for a given path name.
-     * Delegates to [RemoteSave.send].
+     * Fetch the raw JSON for a single named path from the robot
+     * via GET /{pathName}.  Returns null on failure.
      */
-    fun sendToRobot(jsonBody: String, pathName: String) {
-        remoteSave?.send(jsonBody, pathName)
+    suspend fun pullRoute(pathName: String): String? {
+        return remoteSave?.fetchPath(pathName)
     }
 
     // ---- Internal ----
 
     /**
      * Proactively call GET /commands on the robot to verify connectivity
-     * and report the command list via [onCommandsRefreshed].
+     * and report the command list.
      */
     private fun connectAndFetchCommands() {
         val rs = remoteSave ?: return
-        onConnectionStatusChange("正在连接...")
+        _connectionStatus.value = "正在连接..."
         scope.launch {
             try {
                 val result = rs.fetchCommands()
@@ -97,30 +119,25 @@ class RobotSyncService(
                     try {
                         val response = jsonConfig.decodeFromString<RobotCommandListResponse>(result)
                         if (response.status == "ok") {
-                            onCommandsRefreshed(response.commands)
+                            _availableCommands.value = response.commands
                         }
-                        onConnectionStatusChange("就绪")
+                        _connectionStatus.value = "就绪"
                     } catch (_: Exception) {
-                        onConnectionStatusChange("已连接")
+                        _connectionStatus.value = "已连接"
                     }
                 } else {
-                    onConnectionStatusChange("连接失败")
+                    _connectionStatus.value = "连接失败"
                 }
             } catch (_: Throwable) {
-                onConnectionStatusChange("连接失败")
+                _connectionStatus.value = "连接失败"
             }
         }
     }
 
     /**
-     * Periodic sync loop that runs every [intervalMs] milliseconds:
-     * 1. Refresh the command list from the robot.
-     * 2. Compare each local route against the robot's version — fire
-     *    [onConflictDetected] for any mismatch.
-     *
-     * Skips routes that are already in the conflict queue or currently
-     * shown in the conflict dialog (queried via [getActiveConflictName]
-     * and [isNameInConflictQueue]).
+     * Periodic loop that refreshes the command list from the robot.
+     * Does NOT perform conflict detection — callers are responsible
+     * for comparing local and remote data on their own schedule.
      */
     private fun startPeriodicSync(intervalMs: Long = 5000L) {
         println("RobotSyncService: starting periodic sync (interval=${intervalMs}ms)")
@@ -133,81 +150,25 @@ class RobotSyncService(
                     continue
                 }
 
-                println("RobotSyncService: sync cycle start")
-
-                // Step 1: refresh command list
+                println("RobotSyncService: sync cycle start — refreshing commands")
                 try {
                     val commandsResult = rs.fetchCommands()
                     if (commandsResult != null) {
                         try {
                             val response = jsonConfig.decodeFromString<RobotCommandListResponse>(commandsResult)
                             if (response.status == "ok") {
-                                onCommandsRefreshed(response.commands)
+                                _availableCommands.value = response.commands
                                 println("RobotSyncService: commands refreshed (${response.commands.size} commands)")
                             }
-                        } catch (_: Exception) { println("RobotSyncService: failed to parse commands response") }
+                        } catch (_: Exception) {
+                            println("RobotSyncService: failed to parse commands response")
+                        }
                     } else {
                         println("RobotSyncService: fetchCommands returned null")
                     }
-                } catch (e: Throwable) { println("RobotSyncService: fetchCommands error: ${e.message}") }
-
-                // Step 2: list robot paths and compare each with local
-                try {
-                    val listResult = rs.listPaths()
-                    if (listResult != null) {
-                        try {
-                            val pathList = jsonConfig.decodeFromString<RobotPathListResponse>(listResult)
-                            if (pathList.status == "ok") {
-                                println("RobotSyncService: robot has ${pathList.paths.size} paths: ${pathList.paths}")
-                                val localRoutes = getLocalRoutes()
-                                println("RobotSyncService: local has ${localRoutes.size} routes: ${localRoutes.map { it.name }}")
-                                for (routeData in localRoutes) {
-                                    if (isNameInConflictQueue(routeData.name)) {
-                                        println("RobotSyncService: '${routeData.name}' already in conflict queue, skip")
-                                        continue
-                                    }
-                                    if (getActiveConflictName() == routeData.name) {
-                                        println("RobotSyncService: '${routeData.name}' currently showing conflict, skip")
-                                        continue
-                                    }
-                                    if (routeData.name !in pathList.paths) {
-                                        println("RobotSyncService: '${routeData.name}' not on robot, skip")
-                                        continue
-                                    }
-
-                                    try {
-                                        val remoteJson = rs.fetchPath(routeData.name)
-                                        if (remoteJson == null) {
-                                            println("RobotSyncService: fetchPath('${routeData.name}') returned null")
-                                            continue
-                                        }
-                                        if (remoteJson.contains("\"status\":\"not_found\"")) {
-                                            println("RobotSyncService: fetchPath('${routeData.name}') returned not_found")
-                                            continue
-                                        }
-
-                                        val localJson = jsonConfig.encodeToString(routeData.points)
-                                        if (localJson != remoteJson) {
-                                            onConflictDetected(SyncConflictData(
-                                                pathName = routeData.name,
-                                                localJson = localJson,
-                                                remoteJson = remoteJson
-                                            ))
-                                            println("RobotSyncService: sync conflict detected for '${routeData.name}'")
-                                        } else {
-                                            println("RobotSyncService: '${routeData.name}' local == remote, no conflict")
-                                        }
-                                    } catch (e: Throwable) {
-                                        println("RobotSyncService: fetchPath('${routeData.name}') error: ${e.message}")
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) { println("RobotSyncService: failed to parse path list response") }
-                    } else {
-                        println("RobotSyncService: listPaths returned null")
-                    }
-                } catch (e: Throwable) { println("RobotSyncService: listPaths error: ${e.message}") }
-
+                } catch (e: Throwable) {
+                    println("RobotSyncService: fetchCommands error: ${e.message}")
+                }
                 println("RobotSyncService: sync cycle end")
             }
             println("RobotSyncService: periodic sync stopped")
