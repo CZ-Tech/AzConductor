@@ -38,7 +38,6 @@ import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.FieldConfig
 import ftc19656.azconductor.RobotConfig
-import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.toFixed
 import ftc19656.azconductor.route.ControlNode
@@ -75,8 +74,6 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
     var contextMenuOffset by remember { mutableStateOf(Offset.Zero) }
     var expandedCardIndex by remember { mutableStateOf<Int?>(null) }
 
-    var currentTime by remember { mutableStateOf(0f) }
-    var isPlaying by remember { mutableStateOf(false) }
     var showGhostRobot by remember { mutableStateOf(true) }
 
     var showExportDialog by remember { mutableStateOf(false) }
@@ -155,6 +152,8 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
     Box(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = maxWidth > maxHeight
+        val playbackState = rememberPlaybackState(route.getTotalTime().toFloat())
+        val totalTime = route.getTotalTime().toFloat()
 
         Box(
             modifier = Modifier
@@ -200,7 +199,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
                 // 棰勮鏈哄櫒浜?
                 if (showGhostRobot) {
-                    route.getPointAtTime(currentTime.toDouble())?.let { ghostNode ->
+                    route.getPointAtTime(playbackState.currentTime.toDouble())?.let { ghostNode ->
                         val screenPos = mapper.logicalToScreen(ghostNode.x.toFloat(), ghostNode.y.toFloat())
                         val centerOffsetX = (RobotConfig.ROBOT_LOGICAL_WIDTH + ROBOT_RENDER_PADDING) / 2f * mapper.scale
                         val centerOffsetY = (RobotConfig.ROBOT_LOGICAL_HEIGHT + ROBOT_RENDER_PADDING) / 2f * mapper.scale
@@ -740,27 +739,6 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
             }
         }
 
-        // 杩涘害鏉?
-        val totalTime = route.getTotalTime().toFloat()
-        val maxTime = maxOf(totalTime, 0.001f)
-
-        LaunchedEffect(totalTime) {
-            currentTime = currentTime.coerceIn(0f, maxTime)
-            if (totalTime <= 0f) {
-                isPlaying = false
-            }
-        }
-
-        LaunchedEffect(isPlaying, totalTime) {
-            while (isPlaying && totalTime > 0f) {
-                delay(TimingConfig.PLAYBACK_FRAME_MS)
-                currentTime = (currentTime + TimingConfig.PLAYBACK_FRAME_STEP).coerceAtMost(totalTime)
-                if (currentTime >= totalTime) {
-                    isPlaying = false
-                }
-            }
-        }
-
         // 返回按钮 — 始终保持在左上角，不随进度条移动
         IconButton(
             onClick = onNavigateBack,
@@ -795,17 +773,11 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
             contentAlignment = Alignment.Center
         ) {
             PlaybackProgressBar(
-                currentTime = currentTime,
+                currentTime = playbackState.currentTime,
                 totalTime = totalTime,
-                onValueChange = {
-                    currentTime = it
-                    isPlaying = false
-                },
-                isPlaying = isPlaying,
-                onPlayPauseToggle = {
-                    if (!isPlaying && currentTime >= totalTime) currentTime = 0f
-                    isPlaying = !isPlaying
-                },
+                onValueChange = playbackState.onSeek,
+                isPlaying = playbackState.isPlaying,
+                onPlayPauseToggle = playbackState.onTogglePlayPause,
                 isVertical = isLandscape,
                 modifier = Modifier.fillMaxSize()
             )
