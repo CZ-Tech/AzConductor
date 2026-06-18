@@ -46,6 +46,12 @@ class SyncManager(
     /** Delegates directly to [RobotSyncService.availableCommands]. */
     val availableCommands: StateFlow<List<RobotCommandItem>> get() = syncService.availableCommands
 
+    /** Delegates directly to [RobotSyncService.opModeStatus]. */
+    val opModeStatus: StateFlow<OpModeStatusResponse> get() = syncService.opModeStatus
+
+    /** Delegates directly to [RobotSyncService.robotPosition]. */
+    val robotPosition: StateFlow<RobotPositionResponse?> get() = syncService.robotPosition
+
     // ---- Robot IP ----
 
     /**
@@ -152,6 +158,24 @@ class SyncManager(
      * Returns an empty list on failure or if the robot is unreachable.
      */
     suspend fun listRobotPaths(): List<String> = syncService.listRobotPaths()
+
+    /**
+     * Fetch the raw JSON for a single named path from the robot
+     * via GET /{pathName}.  Returns null on failure.
+     */
+    suspend fun pullRoute(pathName: String): String? = syncService.pullRoute(pathName)
+
+    /**
+     * Queue a saved path for execution on the robot via POST /run/saved/{pathName}.
+     * Returns the raw response body (JSON), or null on failure.
+     */
+    suspend fun executeSavedPath(pathName: String): String? = syncService.executeSavedPath(pathName)
+
+    /**
+     * Queue a temporary path JSON for execution on the robot via POST /run/temp.
+     * Returns the raw response body (JSON), or null on failure.
+     */
+    suspend fun executeTempPath(jsonBody: String): String? = syncService.executeTempPath(jsonBody)
 
     // ---- Periodic sync with robot ----
 
