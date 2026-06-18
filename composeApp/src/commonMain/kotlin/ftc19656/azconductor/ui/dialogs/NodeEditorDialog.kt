@@ -13,12 +13,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.route.ControlNode
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.elementNames
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -27,12 +27,6 @@ import kotlinx.serialization.serializer
 // 获取序列化器（静态以便提前预热避免点击延迟）
 val serializer = serializer<ControlNode>()
 val descriptor = serializer.descriptor
-
-// 配置 Json 实例，强制包含默认值，确保 UI 能够显示 duration, heading 等默认字段
-val editorJson = Json {
-    encodeDefaults = true
-    ignoreUnknownKeys = true
-}
 
 @OptIn(ExperimentalSerializationApi::class)
 fun preloadSerializer(): ControlNode {
@@ -63,7 +57,7 @@ fun preloadSerializer(): ControlNode {
         }
     }
     // 预热反序列化
-    val newNode = editorJson.decodeFromJsonElement(serializer, JsonObject(jsonContent))
+    val newNode = AppContext.jsonConfig.decodeFromJsonElement(serializer, JsonObject(jsonContent))
 
     println("Serializer preloaded! Got $count fields")
     return newNode
@@ -87,7 +81,7 @@ fun NodeEditorDialog(
     val editValues = remember(node) {
         val mutableMap = mutableStateMapOf<String, String>()
         // 使用配置好的 editorJson，确保默认值也会被转成字符串填充到输入框
-        val jsonElement = editorJson.encodeToJsonElement(serializer, node) as JsonObject
+        val jsonElement = AppContext.jsonConfig.encodeToJsonElement(serializer, node) as JsonObject
         jsonElement.forEach { (key, value) ->
             // .jsonPrimitive.content 能把 20.0 或者 "hello" 都变成字符串 "20.0" 或 "hello"
             mutableMap[key] = value.jsonPrimitive.content
@@ -150,7 +144,7 @@ fun NodeEditorDialog(
                     }
 
                     // 反序列化成类，实现改变节点字段时无需修改此处代码
-                    val newNode = editorJson.decodeFromJsonElement(serializer, JsonObject(jsonContent))
+                    val newNode = AppContext.jsonConfig.decodeFromJsonElement(serializer, JsonObject(jsonContent))
                     onConfirm(newNode)
                     onDismiss()
 
