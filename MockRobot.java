@@ -35,6 +35,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <tr><td>GET</td><td>/commands</td><td>None</td><td>{"status":"ok","commands":[...]}</td><td>List all registered commands with signatures</td></tr>
  *   <tr><td>POST</td><td>/commands/run/{name}</td><td>JSON array of args</td><td>{"status":"ok"}</td><td>Invoke a registered command by name</td></tr>
  *   <tr><td>GET</td><td>/position</td><td>None</td><td>{"status":"ok","x":...,"y":...,"heading":...,"unit":"inches","headingUnit":"degrees"}</td><td>Get simulated robot position</td></tr>
+ *   <tr><td>GET</td><td>/status</td><td>None</td><td>{"status":"ok","opModeActive":...,"executionReady":...,"isExecuting":...,"activeOpModeName":...}</td><td>Get simulated OpMode state</td></tr>
+ *   <tr><td>POST</td><td>/run/saved/{name}</td><td>None</td><td>{"status":"ok","path":"{name}"} (200) / error (404/409/503)</td><td>Queue a saved path for mock execution</td></tr>
+ *   <tr><td>POST</td><td>/run/temp</td><td>JSON path</td><td>{"status":"ok"} (200) / error (400/409/503)</td><td>Queue a temporary path from request body for mock execution</td></tr>
  * </table>
  *
  * <h2>CORS</h2>
@@ -84,6 +87,15 @@ public class MockRobot {
     /** 已保存路径的内存缓存：路径名 → JSON */
     private static final ConcurrentHashMap<String, String> pathCache = new ConcurrentHashMap<>();
 
+    /** 模拟 OpMode 执行就绪状态。默认为 true，模拟 OpMode 已启动场景。 */
+    private static volatile boolean executionReady = true;
+    /** 模拟路径执行队列标志。当 HTTP 端点排入路径时设为 true，模拟执行完成后清除。 */
+    private static volatile boolean pendingExecution = false;
+    /** 模拟待执行路径的 JSON 内容。 */
+    private static volatile String pendingPathJson = null;
+    /** 模拟路径执行中的标志。 */
+    private static volatile boolean isExecuting = false;
+
     public static void main(String[] args) {
         System.out.println("==============================================");
         System.out.println("  MockRobot 本地联调模拟机器");
@@ -101,10 +113,14 @@ public class MockRobot {
         System.out.println("    GET  /commands             — 连接检查 + 指令列表");
         System.out.println("    POST /commands/run/{name}  — 调用指令");
         System.out.println("    GET  /position           — 获取模拟位置");
+        System.out.println("    GET  /status             — 获取 OpMode 状态");
+        System.out.println("    POST /run/saved/{name}   — 执行已保存路径");
+        System.out.println("    POST /run/temp           — 执行临时路径");
         System.out.println("==============================================");
         System.out.println();
         System.out.println("  键入 'q' 并回车可停止服务。");
         System.out.println("  键入 'p' 查看当前 JSON。");
+        System.out.println("  键入 'r' 切换 executionReady 状态（模拟 OpMode 启停）。");
         System.out.println();
 
         loadAllFromDisk();
@@ -128,8 +144,11 @@ public class MockRobot {
                     }
                     if ("p".equalsIgnoreCase(line)) {
                         System.out.println("当前 JSON: " + currentJson);
+                    } else if ("r".equalsIgnoreCase(line)) {
+                        executionReady = !executionReady;
+                        System.out.println("[MockRobot] executionReady = " + executionReady + " (模拟 OpMode " + (executionReady ? "已启动" : "已停止") + ")");
                     } else if (!line.isEmpty()) {
-                        System.out.println("未知命令。'q' 退出, 'p' 查看当前 JSON。");
+                        System.out.println("未知命令。'q' 退出, 'p' 查看当前 JSON, 'r' 切换 executionReady。");
                     }
                 } catch (NoSuchElementException e) {
                     // stdin exhausted, keep server alive
@@ -215,7 +234,8 @@ public class MockRobot {
                             // --- GET /{pathName} — read saved JSON for a path
                             // pathName may be in action (e.g. GET /myPath) or pathName (e.g. GET //myPath)
                             if (isGet && !action.isEmpty() && pathName.isEmpty()
-                                    && !"list".equals(action) && !"commands".equals(action) && !"position".equals(action)) {
+                                    && !"list".equals(action) && !"commands".equals(action) && !"position".equals(action)
+                                    && !"status".equals(action) && !"run".equals(action)) {
                                 String saved = pathCache.get(action);
                                 if (saved != null) {
                                     sendResponse(output, 200, "application/json", saved);
@@ -286,11 +306,94 @@ public class MockRobot {
                                 continue;
                             }
 
+                            // --- GET /status ---
+                            if (isGet && "status".equals(action) && pathName.isEmpty()) {
+                                String json = "{" +
+                                    "\"status\":\"ok\"," +
+                                    "\"opModeActive\":true," +
+                                    "\"executionReady\":" + executionReady + "," +
+                                    "\"isExecuting\":" + isExecuting + "," +
+                                    "\"activeOpModeName\":" + (executionReady ? "\"MockDebug\"" : "null") + "," +
+                                    "\"commandCount\":8," +
+                                    "\"commandsReady\":" + (executionReady ? "8" : "0") +
+                                    "}";
+                                sendResponse(output, 200, "application/json", json);
+                                continue;
+                            }
+
                             // --- POST /commands/run/{commandName} ---
                             if (isPost && "commands".equals(action) && pathName.startsWith("run/")) {
                                 String commandName = pathName.substring(4);
                                 String commandBody = (contentLength > 0) ? body : "[]";
                                 log("Command invoked: " + commandName + ", args: " + commandBody);
+                                sendResponse(output, 200, "application/json", "{\"status\":\"ok\"}");
+                                continue;
+                            }
+
+                            // --- POST /run/saved/{pathName} ---
+                            if (isPost && "run".equals(action) && pathName.startsWith("saved/")) {
+                                String savedName = pathName.substring(6);
+                                if (!executionReady) {
+                                    sendResponse(output, 503, "application/json",
+                                            "{\"status\":\"error\",\"message\":\"No OpMode ready for path execution. Start HttpAuto or AzConductorDebug first.\"}");
+                                    continue;
+                                }
+                                if (pendingExecution) {
+                                    sendResponse(output, 409, "application/json",
+                                            "{\"status\":\"error\",\"message\":\"A path is already executing\"}");
+                                    continue;
+                                }
+                                String saved = pathCache.get(savedName);
+                                if (saved == null) {
+                                    sendResponse(output, 404, "application/json",
+                                            "{\"status\":\"error\",\"message\":\"Path not found: " + escapeJson(savedName) + "\"}");
+                                    continue;
+                                }
+                                pendingPathJson = saved;
+                                pendingExecution = true;
+                                isExecuting = true;
+                                log("Queued saved path '" + savedName + "' for mock execution");
+                                // Simulate async execution (completes after 2 seconds)
+                                new Thread(() -> {
+                                    try { Thread.sleep(2000); } catch (InterruptedException e) {}
+                                    isExecuting = false;
+                                    pendingExecution = false;
+                                    pendingPathJson = null;
+                                    log("Mock execution of '" + savedName + "' complete.");
+                                }).start();
+                                sendResponse(output, 200, "application/json",
+                                        "{\"status\":\"ok\",\"path\":\"" + escapeJson(savedName) + "\"}");
+                                continue;
+                            }
+
+                            // --- POST /run/temp ---
+                            if (isPost && "run".equals(action) && "temp".equals(pathName)) {
+                                if (!executionReady) {
+                                    sendResponse(output, 503, "application/json",
+                                            "{\"status\":\"error\",\"message\":\"No OpMode ready for path execution. Start HttpAuto or AzConductorDebug first.\"}");
+                                    continue;
+                                }
+                                if (pendingExecution) {
+                                    sendResponse(output, 409, "application/json",
+                                            "{\"status\":\"error\",\"message\":\"A path is already executing\"}");
+                                    continue;
+                                }
+                                if (body == null || body.isEmpty()) {
+                                    sendResponse(output, 400, "application/json",
+                                            "{\"status\":\"error\",\"message\":\"Missing request body with path JSON\"}");
+                                    continue;
+                                }
+                                pendingPathJson = body;
+                                pendingExecution = true;
+                                isExecuting = true;
+                                log("Queued temporary path from request body for mock execution");
+                                new Thread(() -> {
+                                    try { Thread.sleep(2000); } catch (InterruptedException e) {}
+                                    isExecuting = false;
+                                    pendingExecution = false;
+                                    pendingPathJson = null;
+                                    log("Mock temp path execution complete.");
+                                }).start();
                                 sendResponse(output, 200, "application/json", "{\"status\":\"ok\"}");
                                 continue;
                             }
