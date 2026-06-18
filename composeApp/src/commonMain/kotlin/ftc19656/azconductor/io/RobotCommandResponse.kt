@@ -39,3 +39,43 @@ data class SyncConflictData(
     val localJson: String,
     val remoteJson: String
 )
+
+/**
+ * Response envelope for GET /status on the robot HTTP API (port 8888).
+ * Reports the current OpMode and execution state.
+ */
+@Serializable
+data class OpModeStatusResponse(
+    val status: String = "ok",
+    val opModeActive: Boolean = false,
+    val executionReady: Boolean = false,
+    val isExecuting: Boolean = false,
+    val activeOpModeName: String? = null,
+    val commandCount: Int = 0,
+    val commandsReady: Int = 0
+)
+
+/**
+ * Response envelope for GET /position on the robot HTTP API (port 8888).
+ * Returns the robot's current field coordinates.
+ */
+@Serializable
+data class RobotPositionResponse(
+    val status: String = "ok",
+    val x: Double = 0.0,
+    val y: Double = 0.0,
+    val heading: Double = 0.0,
+    val unit: String = "inches",
+    val headingUnit: String = "degrees"
+)
+
+/**
+ * Response envelope for path execution endpoints
+ * (POST /run/saved/{pathName} and POST /run/temp).
+ */
+@Serializable
+data class PathExecutionResponse(
+    val status: String = "ok",
+    val path: String? = null,
+    val message: String? = null
+)
