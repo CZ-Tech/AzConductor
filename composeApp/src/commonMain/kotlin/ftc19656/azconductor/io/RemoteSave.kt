@@ -129,4 +129,58 @@ class RemoteSave(
             null
         }
     }
+
+    /**
+     * Fetch the current OpMode/execution status from the robot via GET /status.
+     * Returns the raw JSON response body, or null on failure.
+     */
+    suspend fun fetchStatus(): String? {
+        return try {
+            httpGet("$baseUrl/status")
+        } catch (e: Throwable) {
+            println("RemoteSave: exception in fetchStatus: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Fetch the current robot position from the robot via GET /position.
+     * Returns the raw JSON response body, or null on failure.
+     */
+    suspend fun fetchPosition(): String? {
+        return try {
+            httpGet("$baseUrl/position")
+        } catch (e: Throwable) {
+            println("RemoteSave: exception in fetchPosition: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Queue a saved path for execution on the robot via POST /run/saved/{pathName}.
+     * Requires an active HttpAuto or AzConductorDebug OpMode on the robot.
+     * Returns the raw response body, or null on failure.
+     */
+    suspend fun executeSavedPath(pathName: String): String? {
+        return try {
+            httpPostJson("$baseUrl/run/saved/$pathName", "")
+        } catch (e: Throwable) {
+            println("RemoteSave: exception in executeSavedPath($pathName): ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Queue a temporary path JSON for execution on the robot via POST /run/temp.
+     * Requires an active HttpAuto or AzConductorDebug OpMode on the robot.
+     * Returns the raw response body, or null on failure.
+     */
+    suspend fun executeTempPath(jsonBody: String): String? {
+        return try {
+            httpPostJson("$baseUrl/run/temp", jsonBody)
+        } catch (e: Throwable) {
+            println("RemoteSave: exception in executeTempPath: ${e.message}")
+            null
+        }
+    }
 }
