@@ -1,0 +1,86 @@
+[
+    {
+        "x": -50.578625708818436,
+        "dx": 50.0,
+        "y": -18.55556759238243,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "moveForward",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": -43.49883636832237,
+        "dx": 50.0,
+        "y": 12.834957718849182,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "moveToPosition",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": 27.561846256256104,
+        "dx": 0.3910636901855469,
+        "y": -16.171873450279236,
+        "dy": 0.16759775578975677,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": 48.63686919212341,
+        "dx": -0.7821214199066162,
+        "y": -47.061450242996216,
+        "dy": -32.011173248291016,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": 11.162010192871094,
+        "dx": 50.0,
+        "y": -52.65921592712402,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": -17.463108718395233,
+        "dx": -57.262563705444336,
+        "y": -19.37958073616028,
+        "dy": -17.59776473045349,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": -29.645167350769043,
+        "dx": 50.0,
+        "y": -56.68156182765961,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    }
+]

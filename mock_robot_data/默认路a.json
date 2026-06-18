@@ -1,0 +1,86 @@
+[
+    {
+        "x": -41.29039719700813,
+        "dx": 50.0,
+        "y": -26.58291646838188,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "moveForward",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": -12.955398172140121,
+        "dx": 50.0,
+        "y": -5.23158586025238,
+        "dy": 10.480591058731079,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "moveToPosition",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": 27.561846256256104,
+        "dx": 0.3910636901855469,
+        "y": -16.171873450279236,
+        "dy": 0.16759775578975677,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": 48.63686919212341,
+        "dx": -0.7821214199066162,
+        "y": -47.061450242996216,
+        "dy": -32.011173248291016,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": 16.763314247131348,
+        "dx": -62.625694274902344,
+        "y": -49.188172817230225,
+        "dy": 6.536312699317932,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": -6.458597362041473,
+        "dx": -23.990846574306488,
+        "y": -52.5690815448761,
+        "dy": -4.289076566696167,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": -30.897700548171997,
+        "dx": -49.648799896240234,
+        "y": -48.44068455696106,
+        "dy": 11.977819204330444,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "",
+        "delayAfterArrive": 0.0
+    }
+]
