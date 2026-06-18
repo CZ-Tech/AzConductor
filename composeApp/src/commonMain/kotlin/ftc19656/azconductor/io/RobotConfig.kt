@@ -9,21 +9,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 
-class RobotConfig {
-    private val config: ConfigManager
-
-    var teamNumber: String
-
-    constructor(robotName: String, teamNumber: String) {
-        config = ConfigManager.getOrCreate(robotName)
-        this.teamNumber = config["teamNumber"] ?: teamNumber
-    }
-
-
-
-
-
-}
 
 private val configStorge = Settings()
 
