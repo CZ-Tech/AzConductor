@@ -1,6 +1,7 @@
 package ftc19656.azconductor.io
 
 import com.russhwolf.settings.Settings
+import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteData
@@ -150,7 +151,7 @@ fun saveAll(routes: List<RouteData>) {
      * @return 可用于取消监听的 [Job]。
      */
     fun watchExternalChanges(
-        intervalMs: Long = 50L,
+        intervalMs: Long = TimingConfig.STORAGE_POLL_MS,
         onChanged: (List<RouteData>) -> Unit
     ): Job {
         return configManager.watchPath(STORAGE_KEY, intervalMs) { newValue ->

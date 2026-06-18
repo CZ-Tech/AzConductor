@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import azconductor.composeapp.generated.resources.FTC_MAP26
 import azconductor.composeapp.generated.resources.Res
+import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.io.SyncManager
 import ftc19656.azconductor.route.viewmodel.CommandsViewModel
 import ftc19656.azconductor.route.viewmodel.RouteConnector
@@ -43,8 +44,8 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
 
     LaunchedEffect(isPlaying, totalTime) {
         while (isPlaying && totalTime > 0f) {
-            delay(16)
-            currentTime = (currentTime + 0.016f).coerceAtMost(totalTime)
+            delay(TimingConfig.PLAYBACK_FRAME_MS)
+            currentTime = (currentTime + TimingConfig.PLAYBACK_FRAME_STEP).coerceAtMost(totalTime)
             if (currentTime >= totalTime) isPlaying = false
         }
     }

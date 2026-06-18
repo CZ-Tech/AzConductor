@@ -35,8 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import azconductor.composeapp.generated.resources.FTC_MAP26
 import azconductor.composeapp.generated.resources.Res
+import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.FieldConfig
 import ftc19656.azconductor.RobotConfig
+import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.toFixed
 import ftc19656.azconductor.route.ControlNode
@@ -56,7 +58,7 @@ private const val ROBOT_RENDER_PADDING = 10f
 fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onNavigateBack: () -> Unit = {}) {
     // Auto-save is handled globally by SyncManager (started in App.kt)
     val waypoints by route.waypoints.collectAsState()
-    val availableCommands by route.availableCommands.collectAsState()
+    val availableCommands by AppContext.syncManager.availableCommands.collectAsState()
     val pv by route.pathVersion.collectAsState()
 
     val painter = painterResource(Res.drawable.FTC_MAP26)
@@ -751,8 +753,8 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
         LaunchedEffect(isPlaying, totalTime) {
             while (isPlaying && totalTime > 0f) {
-                delay(16)
-                currentTime = (currentTime + 0.016f).coerceAtMost(totalTime)
+                delay(TimingConfig.PLAYBACK_FRAME_MS)
+                currentTime = (currentTime + TimingConfig.PLAYBACK_FRAME_STEP).coerceAtMost(totalTime)
                 if (currentTime >= totalTime) {
                     isPlaying = false
                 }

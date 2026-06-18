@@ -1,6 +1,7 @@
 package ftc19656.azconductor.route.viewmodel
 
 import androidx.lifecycle.ViewModel
+import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.io.SyncManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,7 +15,7 @@ import kotlinx.coroutines.launch
 
 class CommandsViewModel(
     private val syncManager: SyncManager,
-    private val refreshIntervalMs: Long = 5000L
+    private val refreshIntervalMs: Long = TimingConfig.ROBOT_SYNC_INTERVAL_MS
 ) : ViewModel() {
 
     private val _robotPaths = MutableStateFlow<List<String>>(emptyList())

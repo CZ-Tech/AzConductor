@@ -1,5 +1,7 @@
 package ftc19656.azconductor.io
 
+import ftc19656.azconductor.TimingConfig
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -78,7 +80,7 @@ object RobotSyncService {
      * Fire-and-forget: push JSON to the robot for a given path name.
      * Delegates to [RemoteSave.send].
      */
-    fun sendToRobot(jsonBody: String, pathName: String) {
+    suspend fun sendToRobot(jsonBody: String, pathName: String) {
         remoteSave?.send(jsonBody, pathName)
     }
 
@@ -139,7 +141,7 @@ object RobotSyncService {
      * Does NOT perform conflict detection — callers are responsible
      * for comparing local and remote data on their own schedule.
      */
-    private fun startPeriodicSync(intervalMs: Long = 5000L) {
+    private fun startPeriodicSync(intervalMs: Long = TimingConfig.ROBOT_SYNC_INTERVAL_MS) {
         println("RobotSyncService: starting periodic sync (interval=${intervalMs}ms)")
         periodicSyncJob = scope.launch {
             while (isActive) {

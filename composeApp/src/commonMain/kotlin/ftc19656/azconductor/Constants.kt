@@ -77,3 +77,17 @@ object UIConfig {
     const val ROBOT_COMPONENT_TOUCH_THRESHOLD_RATIO = 1.5f
 
 }
+
+/**
+ * 定时器与轮询间隔配置
+ */
+object TimingConfig {
+    /** 本地存储轮询间隔（自动保存检测 + 跨标签页同步） */
+    const val STORAGE_POLL_MS = 50L
+    /** 机器人同步间隔（冲突检测 + 指令列表刷新） */
+    const val ROBOT_SYNC_INTERVAL_MS = 500L
+    /** 时间线播放帧间隔 (~60fps) */
+    const val PLAYBACK_FRAME_MS = 16L
+    /** 时间线播放每帧时间步长 (秒) */
+    const val PLAYBACK_FRAME_STEP = 0.016f
+}

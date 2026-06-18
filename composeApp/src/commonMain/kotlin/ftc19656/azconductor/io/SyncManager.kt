@@ -1,5 +1,6 @@
 package ftc19656.azconductor.io
 
+import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RouteData
 import kotlinx.coroutines.CoroutineScope
@@ -105,8 +106,8 @@ class SyncManager(
      * Safe to call multiple times — any previous loops are cancelled first.
      */
     fun start(
-        autoSaveIntervalMs: Long = 50L,
-        conflictIntervalMs: Long = 5000L
+        autoSaveIntervalMs: Long = TimingConfig.STORAGE_POLL_MS,
+        conflictIntervalMs: Long = TimingConfig.ROBOT_SYNC_INTERVAL_MS
     ) {
         stop()
 
@@ -168,14 +169,19 @@ class SyncManager(
         for (route in localRoutes) {
             val currentHash = route.points.hashCode()
 
-            // 1. Push local changes to robot
+            // 1. Push local changes to robot (await completion to avoid
+            //    race condition on robot's shared POST / memory slot)
             if (currentHash != lastPushedHashes[route.name]) {
-                syncService.sendToRobot(
-                    jsonConfig.encodeToString(route.points),
-                    route.name
-                )
-                lastPushedHashes[route.name] = currentHash
-                println("SyncManager: pushed '${route.name}' to robot")
+                try {
+                    syncService.sendToRobot(
+                        jsonConfig.encodeToString(route.points),
+                        route.name
+                    )
+                    lastPushedHashes[route.name] = currentHash
+                    println("SyncManager: pushed '${route.name}' to robot")
+                } catch (_: Exception) {
+                    println("SyncManager: push '${route.name}' failed, will retry next cycle")
+                }
                 continue
             }
 
@@ -215,8 +221,14 @@ class SyncManager(
         val localRoute = routeRepo.load(conflict.pathName)
         if (localRoute != null) {
             val json = jsonConfig.encodeToString(localRoute.points)
-            syncService.sendToRobot(json, conflict.pathName)
-            lastPushedHashes[conflict.pathName] = localRoute.points.hashCode()
+            scope.launch {
+                try {
+                    syncService.sendToRobot(json, conflict.pathName)
+                    lastPushedHashes[conflict.pathName] = localRoute.points.hashCode()
+                } catch (_: Exception) {
+                    println("SyncManager: resolveKeepLocal push failed for '${conflict.pathName}'")
+                }
+            }
         }
         popNextConflict()
     }

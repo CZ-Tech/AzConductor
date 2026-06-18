@@ -34,30 +34,37 @@ class RemoteSave(
      * @param jsonBody  The serialized waypoints JSON string.
      * @param pathName  The path name to save under on the robot.
      */
-    fun send(jsonBody: String, pathName: String) {
-        scope.launch {
-            try {
-                // Step 1: send the JSON payload to current memory
-                val uploadResult = httpPostJson("$baseUrl/", jsonBody)
-                if (uploadResult == null) {
-                    onStatusChange("连接失败")
-                    println("RemoteSave: failed to upload to $baseUrl/")
-                    return@launch
-                }
-
-                // Step 2: persist under the named path (no body needed)
-                val saveResult = httpPostJson("$baseUrl/save/$pathName", "")
-                if (saveResult == null) {
-                    onStatusChange("已发送")
-                    println("RemoteSave: failed to persist at $baseUrl/save/$pathName")
-                } else {
-                    onStatusChange("已保存")
-                    println("RemoteSave: successfully sent and saved to robot at $baseUrl")
-                }
-            } catch (e: Throwable) {
+    /**
+     * Send JSON payload to robot sequentially (not fire-and-forget).
+     * Step 1: POST / with JSON body → stores in current memory.
+     * Step 2: POST /save/{pathName} → persists memory under named path.
+     *
+     * This is a **suspend** function so callers can await completion,
+     * preventing race conditions when multiple paths are pushed in
+     * quick succession through the shared `/` memory slot.
+     */
+    suspend fun send(jsonBody: String, pathName: String) {
+        try {
+            // Step 1: send the JSON payload to current memory
+            val uploadResult = httpPostJson("$baseUrl/", jsonBody)
+            if (uploadResult == null) {
                 onStatusChange("连接失败")
-                println("RemoteSave: exception in send: ${e.message}")
+                println("RemoteSave: failed to upload to $baseUrl/")
+                return
             }
+
+            // Step 2: persist under the named path (no body needed)
+            val saveResult = httpPostJson("$baseUrl/save/$pathName", "")
+            if (saveResult == null) {
+                onStatusChange("已发送")
+                println("RemoteSave: failed to persist at $baseUrl/save/$pathName")
+            } else {
+                onStatusChange("已保存")
+                println("RemoteSave: successfully sent and saved to robot at $baseUrl")
+            }
+        } catch (e: Throwable) {
+            onStatusChange("连接失败")
+            println("RemoteSave: exception in send: ${e.message}")
         }
     }
 

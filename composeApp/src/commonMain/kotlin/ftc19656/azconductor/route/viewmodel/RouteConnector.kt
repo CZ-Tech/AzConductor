@@ -1,59 +1,27 @@
 package ftc19656.azconductor.route.viewmodel
 
 import ftc19656.azconductor.AppContext
-import ftc19656.azconductor.io.ConfigManager
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
-import ftc19656.azconductor.io.RobotCommandItem
 import ftc19656.azconductor.io.RouteRepository
-import ftc19656.azconductor.io.SyncConflictData
-import ftc19656.azconductor.io.SyncManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.serialization.json.Json
 
 class RouteConnector(
-    private val jsonConfig: Json = AppContext.jsonConfig,
-    private val configManager: ConfigManager = AppContext.configManager,
     private val routeRepo: RouteRepository = AppContext.routeRepo,
-    private val syncManager: SyncManager = AppContext.syncManager
 ) {
-    init {
-        syncManager.onDataChanged = { reloadFromRepo() }
-        syncManager.localRoutesProvider = { _allRoutes.value }
-    }
 
     // ---- Observable state ----
 
     private val _pathVersion = MutableStateFlow(0)
     val pathVersion: StateFlow<Int> = _pathVersion.asStateFlow()
 
-    /** Delegates to [SyncManager.connectionStatus] (ultimately RobotSyncService). */
-    val connectionStatus: StateFlow<String> get() = syncManager.connectionStatus
-
-    /** Delegates to [SyncManager.availableCommands] (ultimately RobotSyncService). */
-    val availableCommands: StateFlow<List<RobotCommandItem>> get() = syncManager.availableCommands
-
     private val _currentRouteName = MutableStateFlow("默认路径")
     val currentRouteName: StateFlow<String> = _currentRouteName.asStateFlow()
-
-    /** Delegates to [SyncManager.conflictState]. */
-    val syncConflict: StateFlow<SyncConflictData?> get() = syncManager.conflictState
-
-    // ---- Conflict resolution (delegated to SyncManager) ----
-
-    fun resolveConflictKeepLocal() = syncManager.resolveKeepLocal()
-    fun resolveConflictKeepRemote() = syncManager.resolveKeepRemote()
-    fun resolveConflictKeepBoth() = syncManager.resolveKeepBoth()
-
-    // ---- Conflict detection lifecycle ----
-
-    fun startConflictDetection() = syncManager.start()
-    fun stopConflictDetection() = syncManager.stop()
 
     // ---- Internal model ----
 
@@ -62,6 +30,9 @@ class RouteConnector(
     val waypoints: StateFlow<List<ControlNode>> = _waypoints.asStateFlow()
 
     private val _allRoutes = MutableStateFlow(listOf(RouteData(name = "默认路径")))
+
+    /** Exposed for [SyncManager]'s local-routes provider callback. */
+    internal val allRoutes: List<RouteData> get() = _allRoutes.value
 
     init {
         val loadedRoutes = routeRepo.loadAll()
@@ -78,7 +49,7 @@ class RouteConnector(
      * Reload all local state from [routeRepo].  Called by [SyncManager]
      * after a conflict resolution mutates the repository.
      */
-    private fun reloadFromRepo() {
+    internal fun reloadFromRepo() {
         val routes = routeRepo.loadAll()
         _allRoutes.value = routes
 

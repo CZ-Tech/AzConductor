@@ -1,5 +1,7 @@
 ﻿package ftc19656.azconductor.io
 
+import ftc19656.azconductor.TimingConfig
+
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import kotlinx.coroutines.*
@@ -75,7 +77,7 @@ class ConfigManager private constructor(
      */
     fun watchPath(
         pathKey: String,
-        intervalMs: Long = 50L,
+        intervalMs: Long = TimingConfig.STORAGE_POLL_MS,
         onChanged: suspend (newValue: String) -> Unit
     ): Job {
         return scope.launch {

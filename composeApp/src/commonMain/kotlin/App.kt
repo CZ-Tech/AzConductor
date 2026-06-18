@@ -24,13 +24,19 @@ fun App(route: RouteConnector = RouteConnector()) {
     var showSettingsDialog by remember { mutableStateOf(false) }
     var dialogIpInput by remember { mutableStateOf(AppContext.syncManager.robotIp) }
 
-    val connectionStatus by route.connectionStatus.collectAsState()
-    val syncConflict by route.syncConflict.collectAsState()
+    val connectionStatus by AppContext.syncManager.connectionStatus.collectAsState()
+    val syncConflict by AppContext.syncManager.conflictState.collectAsState()
 
-    // Start periodic conflict detection for the lifetime of the app.
-    DisposableEffect(route) {
-        route.startConflictDetection()
-        onDispose { route.stopConflictDetection() }
+    // Wire SyncManager callbacks and start periodic loops for the lifetime of the app.
+    DisposableEffect(Unit) {
+        AppContext.syncManager.onDataChanged = { route.reloadFromRepo() }
+        AppContext.syncManager.localRoutesProvider = { route.allRoutes }
+        AppContext.syncManager.start()
+        onDispose {
+            AppContext.syncManager.stop()
+            AppContext.syncManager.onDataChanged = null
+            AppContext.syncManager.localRoutesProvider = null
+        }
     }
 
     AzConductorTheme {
@@ -131,9 +137,9 @@ fun App(route: RouteConnector = RouteConnector()) {
         syncConflict?.let { conflict ->
             SyncConflictDialog(
                 conflict = conflict,
-                onKeepLocal = { route.resolveConflictKeepLocal() },
-                onKeepRemote = { route.resolveConflictKeepRemote() },
-                onKeepBoth = { route.resolveConflictKeepBoth() }
+                onKeepLocal = { AppContext.syncManager.resolveKeepLocal() },
+                onKeepRemote = { AppContext.syncManager.resolveKeepRemote() },
+                onKeepBoth = { AppContext.syncManager.resolveKeepBoth() }
             )
         }
     }
