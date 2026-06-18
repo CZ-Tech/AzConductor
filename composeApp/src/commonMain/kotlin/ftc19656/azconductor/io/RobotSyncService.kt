@@ -1,5 +1,6 @@
 package ftc19656.azconductor.io
 
+import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.TimingConfig
 
 import kotlinx.coroutines.CoroutineScope
@@ -13,7 +14,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 
 /**
  * Global singleton that handles robot I/O: connection management,
@@ -29,12 +29,6 @@ import kotlinx.serialization.json.Json
  */
 object RobotSyncService {
 
-    private val jsonConfig = Json {
-        prettyPrint = true
-        encodeDefaults = true
-        ignoreUnknownKeys = true
-    }
-
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     // ---- Upward outputs (read by RouteConnector / UI) ----
@@ -45,10 +39,18 @@ object RobotSyncService {
     private val _availableCommands = MutableStateFlow<List<RobotCommandItem>>(emptyList())
     val availableCommands: StateFlow<List<RobotCommandItem>> = _availableCommands.asStateFlow()
 
+    private val _opModeStatus = MutableStateFlow(OpModeStatusResponse())
+    val opModeStatus: StateFlow<OpModeStatusResponse> = _opModeStatus.asStateFlow()
+
+    private val _robotPosition = MutableStateFlow<RobotPositionResponse?>(null)
+    val robotPosition: StateFlow<RobotPositionResponse?> = _robotPosition.asStateFlow()
+
     // ---- Internal state ----
 
     private var remoteSave: RemoteSave? = null
     private var periodicSyncJob: Job? = null
+    private var statusPollJob: Job? = null
+    private var positionPollJob: Job? = null
 
     // ---- Public API ----
 
@@ -67,12 +69,18 @@ object RobotSyncService {
         }
         connectAndFetchCommands()
         startPeriodicSync()
+        startStatusPolling()
+        startPositionPolling()
     }
 
-    /** Cancel the sync job and release the RemoteSave reference. Idempotent. */
+    /** Cancel all jobs and release the RemoteSave reference. Idempotent. */
     fun stop() {
         periodicSyncJob?.cancel()
         periodicSyncJob = null
+        statusPollJob?.cancel()
+        statusPollJob = null
+        positionPollJob?.cancel()
+        positionPollJob = null
         remoteSave = null
     }
 
@@ -91,7 +99,7 @@ object RobotSyncService {
     suspend fun listRobotPaths(): List<String> {
         val result = remoteSave?.listPaths() ?: return emptyList()
         return try {
-            jsonConfig.decodeFromString<RobotPathListResponse>(result).paths
+            AppContext.jsonConfig.decodeFromString<RobotPathListResponse>(result).paths
         } catch (_: Exception) {
             emptyList()
         }
@@ -103,6 +111,22 @@ object RobotSyncService {
      */
     suspend fun pullRoute(pathName: String): String? {
         return remoteSave?.fetchPath(pathName)
+    }
+
+    /**
+     * Queue a saved path for execution on the robot via POST /run/saved/{pathName}.
+     * Returns the raw response body (JSON), or null on failure.
+     */
+    suspend fun executeSavedPath(pathName: String): String? {
+        return remoteSave?.executeSavedPath(pathName)
+    }
+
+    /**
+     * Queue a temporary path JSON for execution on the robot via POST /run/temp.
+     * Returns the raw response body (JSON), or null on failure.
+     */
+    suspend fun executeTempPath(jsonBody: String): String? {
+        return remoteSave?.executeTempPath(jsonBody)
     }
 
     // ---- Internal ----
@@ -119,7 +143,7 @@ object RobotSyncService {
                 val result = rs.fetchCommands()
                 if (result != null) {
                     try {
-                        val response = jsonConfig.decodeFromString<RobotCommandListResponse>(result)
+                        val response = AppContext.jsonConfig.decodeFromString<RobotCommandListResponse>(result)
                         if (response.status == "ok") {
                             _availableCommands.value = response.commands
                         }
@@ -157,7 +181,7 @@ object RobotSyncService {
                     val commandsResult = rs.fetchCommands()
                     if (commandsResult != null) {
                         try {
-                            val response = jsonConfig.decodeFromString<RobotCommandListResponse>(commandsResult)
+                            val response = AppContext.jsonConfig.decodeFromString<RobotCommandListResponse>(commandsResult)
                             if (response.status == "ok") {
                                 _availableCommands.value = response.commands
                                 println("RobotSyncService: commands refreshed (${response.commands.size} commands)")
@@ -174,6 +198,53 @@ object RobotSyncService {
                 println("RobotSyncService: sync cycle end")
             }
             println("RobotSyncService: periodic sync stopped")
+        }
+    }
+
+    /**
+     * Periodic polling of GET /status to track OpMode state changes.
+     * Updates [opModeStatus] StateFlow so UI can react to OpMode readiness.
+     */
+    private fun startStatusPolling(intervalMs: Long = 1000L) {
+        statusPollJob = scope.launch {
+            while (isActive) {
+                delay(intervalMs)
+                val rs = remoteSave ?: continue
+                try {
+                    val result = rs.fetchStatus()
+                    if (result != null) {
+                        val parsed = AppContext.jsonConfig.decodeFromString<OpModeStatusResponse>(result)
+                        _opModeStatus.value = parsed
+                    }
+                } catch (_: Exception) {
+                    // Silently keep previous status on parse failure
+                }
+            }
+        }
+    }
+
+    /**
+     * Periodic polling of GET /position to track robot movement.
+     * Only polls when an OpMode is active to avoid unnecessary requests.
+     * Updates [robotPosition] StateFlow.
+     */
+    private fun startPositionPolling(intervalMs: Long = 250L) {
+        positionPollJob = scope.launch {
+            while (isActive) {
+                delay(intervalMs)
+                val rs = remoteSave ?: continue
+                // Only poll position when an OpMode is active
+                if (!_opModeStatus.value.opModeActive) continue
+                try {
+                    val result = rs.fetchPosition()
+                    if (result != null) {
+                        val parsed = AppContext.jsonConfig.decodeFromString<RobotPositionResponse>(result)
+                        _robotPosition.value = parsed
+                    }
+                } catch (_: Exception) {
+                    // Silently keep previous position on parse failure
+                }
+            }
         }
     }
 }
