@@ -84,6 +84,8 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
     var isSidebarVisible by remember { mutableStateOf(true) }
 
+    var showLeaveConfirmDialog by remember { mutableStateOf(false) }
+
     var isPreheated by remember { mutableStateOf(true) }
 
     fun remapIndexAfterMove(index: Int?, fromIndex: Int, toIndex: Int): Int? {
@@ -102,6 +104,32 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
         editingNodeIndex = remapIndexAfterMove(editingNodeIndex, fromIndex, toIndex)
         route.moveNodeOrder(fromIndex, toIndex)
         draggingNodeIndex = toIndex
+    }
+
+    /** 校验参数值是否符合其声明的类型 */
+    fun isValidParamValue(value: String, typeName: String): Boolean {
+        if (value.isBlank()) return false
+        return when (typeName) {
+            "double", "float" -> value.toDoubleOrNull() != null
+            "int" -> value.toIntOrNull() != null
+            "long" -> value.toLongOrNull() != null
+            "short" -> value.toShortOrNull() != null
+            "byte" -> value.toByteOrNull() != null
+            "boolean" -> value.toBooleanStrictOrNull() != null
+            else -> true // String 和未知类型不做校验
+        }
+    }
+
+    /** 检查指定索引的节点是否有未填写或类型错误的命令参数 */
+    fun nodeHasUnfilledParams(index: Int): Boolean {
+        val node = waypoints.getOrNull(index) ?: return false
+        if (node.command.isBlank()) return false
+        val cmd = availableCommands.find { it.name == node.command } ?: return false
+        if (cmd.params.isEmpty()) return false
+        return cmd.params.indices.any { i ->
+            val v = node.commandParams.getOrElse(i) { "" }
+            v.isBlank() || !isValidParamValue(v, cmd.params[i])
+        }
     }
 
     if (!isPreheated) {
@@ -520,7 +548,13 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 IconButton(
-                                                    onClick = { expandedCardIndex = if (expandedCardIndex == index) null else index },
+                                                    onClick = {
+                                                        if (expandedCardIndex == index && nodeHasUnfilledParams(index)) {
+                                                            // 参数未填写时，不允许收起
+                                                        } else {
+                                                            expandedCardIndex = if (expandedCardIndex == index) null else index
+                                                        }
+                                                    },
                                                     modifier = Modifier.size(UIConfig.EXPAND_ARROW_BUTTON_SIZE_DIP.dp)
                                                 ) {
                                                     Icon(
@@ -598,6 +632,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                             }
                                                         }
                                                     }
+                                                    val currentCommand = availableCommands.find { it.name == node.command }
                                                     ExposedDropdownMenuBox(
                                                         expanded = dropdownExpanded,
                                                         onExpandedChange = { dropdownExpanded = it }
@@ -626,7 +661,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                                 onClick = {
                                                                     val current = waypoints.getOrNull(index)
                                                                     if (current != null && current.command.isNotBlank()) {
-                                                                        route.moveNode(index, current.copy(command = ""))
+                                                                        route.moveNode(index, current.copy(command = "", commandParams = emptyList()))
                                                                     }
                                                                     filterText = ""
                                                                     dropdownExpanded = false
@@ -645,7 +680,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                                         onClick = {
                                                                             val current = waypoints.getOrNull(index)
                                                                             if (current != null && current.command != command.name) {
-                                                                                route.moveNode(index, current.copy(command = command.name))
+                                                                                route.moveNode(index, current.copy(command = command.name, commandParams = emptyList()))
                                                                             }
                                                                             filterText = command.name
                                                                             dropdownExpanded = false
@@ -654,6 +689,56 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                                 }
                                                             }
                                                         }
+                                                    }
+
+                                                    // 当选中命令有参数时，显示参数输入框
+                                                    if (currentCommand != null && currentCommand.params.isNotEmpty()) {
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                        currentCommand.params.forEachIndexed { paramIndex, paramType ->
+                                                            val paramValue = node.commandParams.getOrElse(paramIndex) { "" }
+                                                            if (paramType == "boolean") {
+                                                                // boolean 类型使用复选框
+                                                                val isChecked = paramValue.toBooleanStrictOrNull() ?: false
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                                                                ) {
+                                                                    Checkbox(
+                                                                        checked = isChecked,
+                                                                        onCheckedChange = { checked ->
+                                                                            val updatedParams = node.commandParams.toMutableList()
+                                                                            while (updatedParams.size <= paramIndex) {
+                                                                                updatedParams.add("")
+                                                                            }
+                                                                            updatedParams[paramIndex] = checked.toString()
+                                                                            route.moveNode(index, node.copy(commandParams = updatedParams))
+                                                                        }
+                                                                    )
+                                                                    Text(
+                                                                        text = currentCommand.paramNames.getOrElse(paramIndex) { "参数${paramIndex + 1}" } + " (boolean)",
+                                                                        style = MaterialTheme.typography.bodySmall
+                                                                    )
+                                                                }
+                                                            } else {
+                                                                val hasError = paramValue.isBlank() || !isValidParamValue(paramValue, paramType)
+                                                                OutlinedTextField(
+                                                                    value = paramValue,
+                                                                    onValueChange = { newValue ->
+                                                                        val updatedParams = node.commandParams.toMutableList()
+                                                                        while (updatedParams.size <= paramIndex) {
+                                                                            updatedParams.add("")
+                                                                        }
+                                                                        updatedParams[paramIndex] = newValue
+                                                                        route.moveNode(index, node.copy(commandParams = updatedParams))
+                                                                    },
+                                                                    isError = hasError,
+                                                                    label = { Text(currentCommand.paramNames.getOrElse(paramIndex) { "参数${paramIndex + 1}" } + " ($paramType)") },
+                                                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                                                singleLine = true,
+                                                                textStyle = MaterialTheme.typography.bodySmall
+                                                            )
+                                                        }
+                                                    }
                                                     }
 
                                                     Spacer(modifier = Modifier.height(8.dp))
@@ -681,7 +766,9 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                                 }
                                                                 route.addPointAt(index + 1, newNode)
                                                                 selectedNodeIndex.value = index + 1
-                                                                expandedCardIndex = null
+                                                                if (!nodeHasUnfilledParams(index)) {
+                                                                    expandedCardIndex = null
+                                                                }
                                                             },
                                                         contentAlignment = Alignment.Center
                                                     ) {
@@ -741,7 +828,14 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
         // 返回按钮 — 始终保持在左上角，不随进度条移动
         IconButton(
-            onClick = onNavigateBack,
+            onClick = {
+                val hasAnyUnfilled = waypoints.indices.any { nodeHasUnfilledParams(it) }
+                if (hasAnyUnfilled) {
+                    showLeaveConfirmDialog = true
+                } else {
+                    onNavigateBack()
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(8.dp)
@@ -783,6 +877,27 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
             )
         }
         }
+
+        // 参数未填写时退出路径编辑页面的确认对话框
+        if (showLeaveConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showLeaveConfirmDialog = false },
+                title = { Text("参数未填写") },
+                text = { Text("当前路径中有命令参数未填写，确定要离开吗？") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showLeaveConfirmDialog = false
+                        onNavigateBack()
+                    }) {
+                        Text("确定离开")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLeaveConfirmDialog = false }) {
+                        Text("继续编辑")
+                    }
+                }
+            )
+        }
     }
 }
-

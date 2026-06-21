@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 data class RobotCommandItem(
     val name: String,
     val params: List<String> = emptyList(),
+    val paramNames: List<String> = emptyList(),
     val ready: Boolean = false
 )
 

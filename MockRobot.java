@@ -146,6 +146,12 @@ public class MockRobot {
                         System.out.println("当前 JSON: " + currentJson);
                     } else if ("r".equalsIgnoreCase(line)) {
                         executionReady = !executionReady;
+                        if (!executionReady) {
+                            // 模拟 OpMode 停止：清除执行状态
+                            isExecuting = false;
+                            pendingExecution = false;
+                            pendingPathJson = null;
+                        }
                         System.out.println("[MockRobot] executionReady = " + executionReady + " (模拟 OpMode " + (executionReady ? "已启动" : "已停止") + ")");
                     } else if (!line.isEmpty()) {
                         System.out.println("未知命令。'q' 退出, 'p' 查看当前 JSON, 'r' 切换 executionReady。");
@@ -288,14 +294,14 @@ public class MockRobot {
                             if (isGet && "commands".equals(action) && pathName.isEmpty()) {
                                 sendResponse(output, 200, "application/json",
                                         "{\"status\":\"ok\",\"commands\":["
-                                        + "{\"name\":\"moveForward\",\"params\":[\"double\"],\"ready\":true},"
-                                        + "{\"name\":\"turn\",\"params\":[\"double\"],\"ready\":true},"
-                                        + "{\"name\":\"moveToPosition\",\"params\":[\"double\",\"double\"],\"ready\":true},"
-                                        + "{\"name\":\"setLiftHeight\",\"params\":[\"int\"],\"ready\":true},"
-                                        + "{\"name\":\"grabCone\",\"params\":[],\"ready\":true},"
-                                        + "{\"name\":\"releaseCone\",\"params\":[],\"ready\":true},"
-                                        + "{\"name\":\"wait\",\"params\":[\"long\"],\"ready\":true},"
-                                        + "{\"name\":\"calibrateGyro\",\"params\":[],\"ready\":true}"
+                                        + "{\"name\":\"moveForward\",\"params\":[\"double\"],\"paramNames\":[\"distance\"],\"ready\":true},"
+                                        + "{\"name\":\"turn\",\"params\":[\"double\"],\"paramNames\":[\"angle\"],\"ready\":true},"
+                                        + "{\"name\":\"moveToPosition\",\"params\":[\"double\",\"double\"],\"paramNames\":[\"targetX\",\"targetY\"],\"ready\":true},"
+                                        + "{\"name\":\"setLiftHeight\",\"params\":[\"int\"],\"paramNames\":[\"height\"],\"ready\":true},"
+                                        + "{\"name\":\"grabCone\",\"params\":[],\"paramNames\":[],\"ready\":true},"
+                                        + "{\"name\":\"releaseCone\",\"params\":[],\"paramNames\":[],\"ready\":true},"
+                                        + "{\"name\":\"wait\",\"params\":[\"long\"],\"paramNames\":[\"millis\"],\"ready\":true},"
+                                        + "{\"name\":\"calibrateGyro\",\"params\":[\"boolean\"],\"paramNames\":[\"reset\"],\"ready\":true}"
                                         + "]}");
                                 continue;
                             }
@@ -352,15 +358,7 @@ public class MockRobot {
                                 pendingPathJson = saved;
                                 pendingExecution = true;
                                 isExecuting = true;
-                                log("Queued saved path '" + savedName + "' for mock execution");
-                                // Simulate async execution (completes after 2 seconds)
-                                new Thread(() -> {
-                                    try { Thread.sleep(2000); } catch (InterruptedException e) {}
-                                    isExecuting = false;
-                                    pendingExecution = false;
-                                    pendingPathJson = null;
-                                    log("Mock execution of '" + savedName + "' complete.");
-                                }).start();
+                                log("Queued saved path '" + savedName + "' for mock execution (runs until 'r' toggles OpMode off)");
                                 sendResponse(output, 200, "application/json",
                                         "{\"status\":\"ok\",\"path\":\"" + escapeJson(savedName) + "\"}");
                                 continue;
@@ -386,14 +384,7 @@ public class MockRobot {
                                 pendingPathJson = body;
                                 pendingExecution = true;
                                 isExecuting = true;
-                                log("Queued temporary path from request body for mock execution");
-                                new Thread(() -> {
-                                    try { Thread.sleep(2000); } catch (InterruptedException e) {}
-                                    isExecuting = false;
-                                    pendingExecution = false;
-                                    pendingPathJson = null;
-                                    log("Mock temp path execution complete.");
-                                }).start();
+                                log("Queued temporary path from request body for mock execution (runs until 'r' toggles OpMode off)");
                                 sendResponse(output, 200, "application/json", "{\"status\":\"ok\"}");
                                 continue;
                             }

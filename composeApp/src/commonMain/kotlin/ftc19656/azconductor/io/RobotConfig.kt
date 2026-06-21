@@ -81,7 +81,7 @@ class ConfigManager private constructor(
     }
 
     /**
-     * Store an arbitrary serialisable value under [key] and
+     * Store an arbitrary serializable value under [key] and
      * persist it to the cross-platform settings storage.
      */
     inline fun <reified T> putSerializable(key: String, value: T) {
@@ -90,7 +90,7 @@ class ConfigManager private constructor(
     }
 
     /**
-     * Read a previously stored serialisable value.
+     * Read a previously stored serializable value.
      */
     inline fun <reified T> getSerializable(key: String): T? {
         val json = get(key) ?: return null

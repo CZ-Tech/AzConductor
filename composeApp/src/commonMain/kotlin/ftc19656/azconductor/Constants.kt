@@ -65,10 +65,12 @@ object UIConfig {
 
     const val PATH_CARD_SIZE_DIP = 120
 
+    const val RUN_MAP_HEIGHT_RATIO = 2f / 3f  // 运行页场地图高度占比
+
     const val K_VELOCITY_HANDLE = 5.0  // 速度向量手柄缩放系数
 
     // NodeEditorDialog 中 ControlNode 属性的显示顺序
-    val NODE_EDITOR_FIELD_ORDER = listOf("marker", "command", "heading", "dHeading", "duration", "delayAfterArrive", "x", "dx", "y", "dy")
+    val NODE_EDITOR_FIELD_ORDER = listOf("marker", "command", "commandParams", "heading", "dHeading", "duration", "delayAfterArrive", "x", "dx", "y", "dy")
 
     /**
      * 机器人组件触控容差系数
