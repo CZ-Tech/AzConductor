@@ -233,7 +233,6 @@ object RobotSyncService {
             while (isActive) {
                 delay(intervalMs)
                 val rs = remoteSave ?: continue
-                // Only poll position when an OpMode is active
                 if (!_opModeStatus.value.opModeActive) continue
                 try {
                     val result = rs.fetchPosition()
@@ -242,7 +241,6 @@ object RobotSyncService {
                         _robotPosition.value = parsed
                     }
                 } catch (_: Exception) {
-                    // Silently keep previous position on parse failure
                 }
             }
         }

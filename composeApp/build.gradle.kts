@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.composeHotReload)
-    kotlin("plugin.serialization") version "1.9.0"
+    alias(libs.plugins.kotlinSerialization)
 
 }
 
@@ -26,6 +26,7 @@ kotlin {
     
     sourceSets {
         commonMain.dependencies {
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
@@ -33,6 +34,7 @@ kotlin {
             implementation(libs.compose.components.resources)
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
+            implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation("com.russhwolf:multiplatform-settings-no-arg:1.3.0")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
             implementation(compose.materialIconsExtended)
@@ -43,6 +45,9 @@ kotlin {
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutinesSwing)
+            implementation("androidx.collection:collection:1.5.0")
+            implementation("androidx.navigationevent:navigationevent-desktop:1.0.2")
+            implementation("androidx.lifecycle:lifecycle-runtime-desktop:2.10.0")
         }
     }
 }

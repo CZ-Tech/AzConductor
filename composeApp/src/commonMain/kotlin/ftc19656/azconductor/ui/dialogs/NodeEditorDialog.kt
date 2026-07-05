@@ -18,7 +18,10 @@ import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.route.ControlNode
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.SerialKind
+import kotlinx.serialization.descriptors.StructureKind
 import kotlinx.serialization.descriptors.elementNames
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -83,8 +86,11 @@ fun NodeEditorDialog(
         // 使用配置好的 editorJson，确保默认值也会被转成字符串填充到输入框
         val jsonElement = AppContext.jsonConfig.encodeToJsonElement(serializer, node) as JsonObject
         jsonElement.forEach { (key, value) ->
-            // .jsonPrimitive.content 能把 20.0 或者 "hello" 都变成字符串 "20.0" 或 "hello"
-            mutableMap[key] = value.jsonPrimitive.content
+            mutableMap[key] = when (value) {
+                is JsonPrimitive -> value.content
+                is JsonArray -> value.joinToString(", ") { it.jsonPrimitive.content }
+                else -> value.toString()
+            }
         }
         mutableMap
     }
@@ -136,6 +142,12 @@ fun NodeEditorDialog(
                                 PrimitiveKind.BOOLEAN ->
                                     stringValue.toBooleanStrictOrNull()?.let { JsonPrimitive(it) }
                                         ?: throw IllegalArgumentException("Field $key must be a boolean")
+                                StructureKind.LIST -> {
+                                    val items = stringValue.split(",").map {
+                                        JsonPrimitive(it.trim())
+                                    }
+                                    JsonArray(items)
+                                }
                                 else -> JsonPrimitive(stringValue)
                             }
                         } else {

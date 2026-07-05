@@ -1,0 +1,47 @@
+[
+    {
+        "x": 57.07316970825195,
+        "dx": 50.0,
+        "y": -14.12513256072998,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "moveForward",
+        "commandParams": [
+            "0"
+        ],
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": 34.358428955078125,
+        "dx": 50.0,
+        "y": -38.44326400756836,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "turn",
+        "commandParams": [
+            "0"
+        ],
+        "delayAfterArrive": 0.0
+    },
+    {
+        "x": -8.665959358215332,
+        "dx": 50.0,
+        "y": -29.891834259033203,
+        "dy": 0.0,
+        "heading": 0.0,
+        "dHeading": 0.0,
+        "duration": 1.0,
+        "marker": "",
+        "command": "wait",
+        "commandParams": [
+            "0"
+        ],
+        "delayAfterArrive": 0.0
+    }
+]
