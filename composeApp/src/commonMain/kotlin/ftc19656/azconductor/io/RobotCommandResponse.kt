@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
  * Extra fields beyond [name], [params], and [ready] are silently ignored via ignoreUnknownKeys.
  */
 @Serializable
+//TODO:返回执行中函数
 data class RobotCommandItem(
     val name: String,
     val params: List<String> = emptyList(),
