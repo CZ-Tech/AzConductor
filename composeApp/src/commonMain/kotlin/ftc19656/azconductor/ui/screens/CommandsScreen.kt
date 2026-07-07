@@ -143,20 +143,6 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                 modifier = Modifier
                     .fillMaxSize()
             ) {
-                // ---- 左侧：路径点边栏（指令选择） ----
-                if (editableWaypoints.isNotEmpty()) {
-                    WaypointCommandSidebar(
-                        waypoints = editableWaypoints,
-                        availableCommands = availableCommands,
-                        onWaypointUpdate = { index, newPoint ->
-                            editableWaypoints[index] = newPoint
-                        },
-                        modifier = Modifier
-                            .width(320.dp)
-                            .fillMaxHeight()
-                    )
-                }
-
                 // ---- 右侧：地图 + 控制 ----
                 BoxWithConstraints(
                     modifier = Modifier
@@ -322,14 +308,26 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                         )
                     }
 
-                    // ---- 左对齐：菜单下方展示可执行任务条目 ----
-                    TaskListPanel(
-                        waypoints = editableWaypoints,
+                    // ---- 左对齐：路径点指令 + 任务列表 ----
+                    Row(
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(top = 100.dp, start = 4.dp)
+                            .padding(top = 100.dp, bottom = 50.dp)
                             .zIndex(1f)
-                    )
+                    ) {
+                        WaypointCommandSidebar(
+                            waypoints = editableWaypoints,
+                            availableCommands = availableCommands,
+                            onWaypointUpdate = { index, newPoint ->
+                                editableWaypoints[index] = newPoint
+                            },
+                            modifier = Modifier.padding(horizontal = 50.dp).width(700.dp).fillMaxHeight()
+                        )
+                        TaskListPanel(
+                            waypoints = editableWaypoints,
+                            modifier = Modifier.padding(horizontal = 50.dp).width(700.dp).fillMaxHeight()
+                        )
+                    }
 
                     // ---- 右下：路径误差—时间图 ----
                     val errorHistory = remember { mutableStateListOf<Double>() }
@@ -368,9 +366,9 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                         showLine = startTime == null && errorHistory.isNotEmpty(),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(end = 12.dp, bottom = 40.dp)
-                            .widthIn(max = 500.dp)
-                            .fillMaxHeight(0.3f)
+                            .padding(end = 12.dp, bottom = 40.dp ,top = 40.dp)
+                            .fillMaxWidth(0.35f)
+                            .aspectRatio(2f)
                             .zIndex(1f)
                     )
 
@@ -614,39 +612,43 @@ private fun TaskListPanel(
         waypoints.filter { it.command.isNotBlank() }
     }
     Surface(
-        modifier = modifier.width(280.dp),
+        modifier = modifier.width(600.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(
-                text = "任务列表",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant,
-                thickness = 0.5.dp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            if (tasks.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(10.dp).align(Alignment.TopStart)
+            ) {
                 Text(
-                    text = "暂无任务",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "任务列表",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
-            } else {
-                tasks.forEach { node ->
-                    val cmdText = if (node.commandParams.isEmpty()) node.command
-                        else "${node.command}(${node.commandParams.joinToString(", ")})"
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    thickness = 0.5.dp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (tasks.isEmpty()) {
                     Text(
-                        text = cmdText,
+                        text = "暂无任务",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                } else {
+                    tasks.forEach { node ->
+                        val cmdText = if (node.commandParams.isEmpty()) node.command
+                            else "${node.command}(${node.commandParams.joinToString(", ")})"
+                        Text(
+                            text = cmdText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
                 }
             }
         }
@@ -665,7 +667,7 @@ private fun WaypointCommandSidebar(
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        shape = RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(8.dp)
@@ -683,9 +685,10 @@ private fun WaypointCommandSidebar(
             )
             Spacer(modifier = Modifier.height(4.dp))
 
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.fillMaxSize()
+            if (waypoints.isNotEmpty()) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxSize()
             ) {
                 itemsIndexed(waypoints) { index, node ->
                     val isExpanded = expandedIndex == index
@@ -857,6 +860,7 @@ private fun WaypointCommandSidebar(
             }
         }
     }
+}
 }
 
 private fun isValidParamValue(value: String, typeName: String): Boolean {

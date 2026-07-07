@@ -65,7 +65,7 @@ object UIConfig {
 
     const val PATH_CARD_SIZE_DIP = 120
 
-    const val RUN_MAP_HEIGHT_RATIO = 2f / 3f  // 运行页场地图高度占比
+    const val RUN_MAP_HEIGHT_RATIO = 0.64f  // 运行页场地图高度占比
 
     const val K_VELOCITY_HANDLE = 5.0  // 速度向量手柄缩放系数
 
