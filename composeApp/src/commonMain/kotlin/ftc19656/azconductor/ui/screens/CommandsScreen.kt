@@ -309,6 +309,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                     }
 
                     // ---- 左对齐：路径点指令 + 任务列表 ----
+                    val panelWidth = maxWidth / 4f
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -321,11 +322,11 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                             onWaypointUpdate = { index, newPoint ->
                                 editableWaypoints[index] = newPoint
                             },
-                            modifier = Modifier.padding(horizontal = 50.dp).width(700.dp).fillMaxHeight()
+                            modifier = Modifier.padding(horizontal = 50.dp).width(panelWidth).fillMaxHeight()
                         )
                         TaskListPanel(
                             waypoints = editableWaypoints,
-                            modifier = Modifier.padding(horizontal = 50.dp).width(700.dp).fillMaxHeight()
+                            modifier = Modifier.padding(horizontal = 50.dp).width(panelWidth).fillMaxHeight()
                         )
                     }
 
@@ -361,24 +362,25 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                             errorHistory.add(error)
                         }
                     }
-                    ErrorTimeChart(
-                        xHistory = errorHistory,
-                        showLine = startTime == null && errorHistory.isNotEmpty(),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(end = 12.dp, bottom = 40.dp ,top = 40.dp)
-                            .fillMaxWidth(0.35f)
-                            .aspectRatio(2f)
-                            .zIndex(1f)
-                    )
-
                     // ---- 底部：机器人位置 + 执行状态反馈 ----
                     BottomInfoBar(
                         robotPosition = robotPosition,
                         executionStatus = executionStatus,
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth(0.67f)
                             .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .zIndex(1f)
+                    )
+
+                    ErrorTimeChart(
+                        xHistory = errorHistory,
+                        showLine = startTime == null && errorHistory.isNotEmpty(),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 4.dp)
+                            .fillMaxWidth(0.33f)
+                            .aspectRatio(2f)
                             .zIndex(1f)
                     )
                 }
@@ -612,7 +614,7 @@ private fun TaskListPanel(
         waypoints.filter { it.command.isNotBlank() }
     }
     Surface(
-        modifier = modifier.width(600.dp),
+        modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         shape = RoundedCornerShape(12.dp)
     ) {
