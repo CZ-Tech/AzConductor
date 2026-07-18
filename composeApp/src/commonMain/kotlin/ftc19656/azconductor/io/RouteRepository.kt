@@ -151,7 +151,7 @@ fun saveAll(routes: List<RouteData>) {
      * @return 可用于取消监听的 [Job]。
      */
     fun watchExternalChanges(
-        intervalMs: Long = TimingConfig.STORAGE_POLL_MS,
+        intervalMs: Long = TimingConfig.CROSS_TAB_POLL_MS,
         onChanged: (List<RouteData>) -> Unit
     ): Job {
         return configManager.watchPath(STORAGE_KEY, intervalMs) { newValue ->

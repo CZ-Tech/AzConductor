@@ -43,29 +43,19 @@ class RemoteSave(
      * preventing race conditions when multiple paths are pushed in
      * quick succession through the shared `/` memory slot.
      */
+    /**
+     * @throws RuntimeException if either Step 1 or Step 2 fails,
+     *         so callers can distinguish "fully saved" vs "not persisted".
+     */
     suspend fun send(jsonBody: String, pathName: String) {
-        try {
-            // Step 1: send the JSON payload to current memory
-            val uploadResult = httpPostJson("$baseUrl/", jsonBody)
-            if (uploadResult == null) {
-                onStatusChange("连接失败")
-                println("RemoteSave: failed to upload to $baseUrl/")
-                return
-            }
-
-            // Step 2: persist under the named path (no body needed)
-            val saveResult = httpPostJson("$baseUrl/save/$pathName", "")
-            if (saveResult == null) {
-                onStatusChange("已发送")
-                println("RemoteSave: failed to persist at $baseUrl/save/$pathName")
-            } else {
-                onStatusChange("已保存")
-                println("RemoteSave: successfully sent and saved to robot at $baseUrl")
-            }
-        } catch (e: Throwable) {
-            onStatusChange("连接失败")
-            println("RemoteSave: exception in send: ${e.message}")
-        }
+        // Step 1: send the JSON payload to current memory
+        val uploadResult = httpPostJson("$baseUrl/", jsonBody)
+            ?: throw RuntimeException("上传到机器人失败")
+        // Step 2: persist under the named path (no body needed)
+        val saveResult = httpPostJson("$baseUrl/save/$pathName", "")
+            ?: throw RuntimeException("上传成功但持久化失败")
+        onStatusChange("已保存")
+        println("RemoteSave: successfully sent and saved to robot at $baseUrl")
     }
 
     /**

@@ -217,8 +217,12 @@ class SyncManager(
             val remoteJson = syncService.pullRoute(route.name) ?: continue
             if (remoteJson.contains("\"status\":\"not_found\"")) continue
 
-            val localJson = jsonConfig.encodeToString(route.points)
-            if (localJson != remoteJson) {
+            val localPoints = route.points
+            val remotePoints = try {
+                jsonConfig.decodeFromString<List<ControlNode>>(remoteJson)
+            } catch (_: Exception) { null }
+            if (remotePoints == null || localPoints != remotePoints) {
+                val localJson = jsonConfig.encodeToString(route.points)
                 conflictQueue.add(
                     SyncConflictData(
                         pathName = route.name,
@@ -232,7 +236,30 @@ class SyncManager(
                 println("SyncManager: conflict detected for '${route.name}'")
             }
         }
+
+        // 3. Pull remote-only paths (exist on robot but not locally)
+        val localNames = localRoutes.map { it.name }.toSet()
+        for (pathName in remotePaths) {
+            if (pathName in localNames) continue
+            if (lastPulledRemotes.contains(pathName)) continue
+            val remoteJson = syncService.pullRoute(pathName) ?: continue
+            if (remoteJson.contains("\"status\":\"not_found\"")) continue
+            val points = try {
+                jsonConfig.decodeFromString<List<ControlNode>>(remoteJson)
+            } catch (_: Exception) { null }
+            if (points != null) {
+                routeRepo.save(RouteData(name = pathName, points = points))
+                lastPushedHashes[pathName] = points.hashCode()
+                lastPulledRemotes.add(pathName)
+                println("SyncManager: pulled remote-only path '$pathName' (${points.size} points)")
+                onDataChanged?.invoke()
+            }
+        }
     }
+
+    /** Tracks which remote-only paths have already been pulled to avoid
+     *  re-pulling every sync cycle. */
+    private val lastPulledRemotes = mutableSetOf<String>()
 
     // ---- Conflict resolution ----
 
@@ -249,12 +276,15 @@ class SyncManager(
                 try {
                     syncService.sendToRobot(json, conflict.pathName)
                     lastPushedHashes[conflict.pathName] = localRoute.points.hashCode()
+                    popNextConflict()
                 } catch (_: Exception) {
                     println("SyncManager: resolveKeepLocal push failed for '${conflict.pathName}'")
+                    popNextConflict()
                 }
             }
+        } else {
+            popNextConflict()
         }
-        popNextConflict()
     }
 
     /**

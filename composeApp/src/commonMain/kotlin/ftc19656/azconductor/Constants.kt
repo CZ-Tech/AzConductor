@@ -86,8 +86,10 @@ object UIConfig {
  * 定时器与轮询间隔配置
  */
 object TimingConfig {
-    /** 本地存储轮询间隔（自动保存检测 + 跨标签页同步） */
+    /** 本地存储轮询间隔（自动保存检测） */
     const val STORAGE_POLL_MS = 50L
+    /** 跨标签页同步轮询间隔 */
+    const val CROSS_TAB_POLL_MS = 200L
     /** 机器人同步间隔（冲突检测 + 指令列表刷新） */
     const val ROBOT_SYNC_INTERVAL_MS = 500L
     /** 时间线播放帧间隔 (~60fps) */
