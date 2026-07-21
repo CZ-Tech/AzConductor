@@ -182,7 +182,7 @@ class RemoteSave(
         return try {
             val result = httpPostJson("$baseUrl/clear/$pathName", "")
             if (result != null) {
-                onStatusChange("路径已从机器删除")
+                println("RemoteSave: successfully cleared '$pathName' from robot")
                 true
             } else {
                 false
