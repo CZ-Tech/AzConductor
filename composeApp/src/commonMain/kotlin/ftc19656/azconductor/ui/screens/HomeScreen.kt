@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import ftc19656.azconductor.UIConfig
+import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import kotlinx.coroutines.launch
 
@@ -44,6 +45,8 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
 
     // Delete confirmation dialog
     var deleteTarget by remember { mutableStateOf<String?>(null) }
+    var deleteFromRobot by remember { mutableStateOf(false) }
+    val connectionStatus by AppContext.syncManager.connectionStatus.collectAsState()
 
     // Drag state
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
@@ -234,7 +237,10 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                                     )
                                     // Delete button
                                     IconButton(
-                                        onClick = { deleteTarget = name },
+                                        onClick = {
+                                            deleteTarget = name
+                                            deleteFromRobot = false
+                                        },
                                         modifier = Modifier
                                             .align(Alignment.TopStart)
                                             .size(24.dp)
@@ -342,23 +348,51 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
 
     // Delete confirmation dialog
     if (deleteTarget != null) {
+        val isRobotConnected = connectionStatus !in listOf("未配置IP", "正在连接...", "连接失败")
         AlertDialog(
-            onDismissRequest = { deleteTarget = null },
+            onDismissRequest = {
+                deleteTarget = null
+                deleteFromRobot = false
+            },
             title = { Text("删除路径") },
-            text = { Text("确定要删除路径「${deleteTarget}」吗？此操作不可撤销。") },
+            text = {
+                Column {
+                    Text("确定要删除路径「${deleteTarget}」吗？此操作不可撤销。")
+                    if (isRobotConnected) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Checkbox(
+                                checked = deleteFromRobot,
+                                onCheckedChange = { deleteFromRobot = it }
+                            )
+                            Text(
+                                text = "从机器一同删除",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        route.deleteRoute(deleteTarget!!)
+                        route.deleteRoute(deleteTarget!!, alsoDeleteFromRobot = deleteFromRobot)
                         refreshRouteNames()
                         deleteTarget = null
+                        deleteFromRobot = false
                     }
                 ) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) {
+                TextButton(onClick = {
+                    deleteTarget = null
+                    deleteFromRobot = false
+                }) {
                     Text("取消")
                 }
             }

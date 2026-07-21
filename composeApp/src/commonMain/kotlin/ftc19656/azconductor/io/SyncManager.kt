@@ -63,7 +63,12 @@ class SyncManager(
         get() = configManager["robot_ip"] ?: "192.168.43.1"
         set(value) {
             configManager["robot_ip"] = value
+            // 清除追踪状态，允许从新机器人重新拉取路径
+            lastPushedHashes.clear()
+            lastPulledRemotes.clear()
             syncService.setRobotIp(value)
+            // 立即触发一次同步，不等 500ms 定时器
+            scope.launch { syncWithRobot() }
         }
 
     // ---- Conflict state (read by RouteConnector / UI) ----
@@ -176,6 +181,22 @@ class SyncManager(
      * Returns the raw response body (JSON), or null on failure.
      */
     suspend fun executeTempPath(jsonBody: String): String? = syncService.executeTempPath(jsonBody)
+
+    /**
+     * Delete a path from the robot and clear local tracking state.
+     * Safe to call even when the robot is unreachable — logs and returns.
+     */
+    suspend fun deleteFromRobot(pathName: String): Boolean {
+        val result = syncService.deleteFromRobot(pathName)
+        if (result) {
+            lastPushedHashes.remove(pathName)
+            lastPulledRemotes.remove(pathName)
+            println("SyncManager: deleted '$pathName' from robot")
+        } else {
+            println("SyncManager: failed to delete '$pathName' from robot (may be offline)")
+        }
+        return result
+    }
 
     // ---- Periodic sync with robot ----
 

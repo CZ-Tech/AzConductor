@@ -173,4 +173,23 @@ class RemoteSave(
             null
         }
     }
+
+    /**
+     * Delete a saved path from the robot via POST /clear/{pathName}.
+     * Returns true if the robot acknowledged the deletion, false on failure.
+     */
+    suspend fun clearPath(pathName: String): Boolean {
+        return try {
+            val result = httpPostJson("$baseUrl/clear/$pathName", "")
+            if (result != null) {
+                onStatusChange("路径已从机器删除")
+                true
+            } else {
+                false
+            }
+        } catch (e: Throwable) {
+            println("RemoteSave: exception in clearPath($pathName): ${e.message}")
+            false
+        }
+    }
 }

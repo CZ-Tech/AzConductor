@@ -6,10 +6,14 @@ import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
 import ftc19656.azconductor.io.RouteRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class RouteConnector(
     private val routeRepo: RouteRepository = AppContext.routeRepo,
@@ -30,6 +34,9 @@ class RouteConnector(
     val waypoints: StateFlow<List<ControlNode>> = _waypoints.asStateFlow()
 
     private val _allRoutes = MutableStateFlow(listOf(RouteData(name = "默认路径")))
+
+    /** Coroutine scope for fire-and-forget remote operations. */
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     /** Exposed for [SyncManager]'s local-routes provider callback. */
     internal val allRoutes: List<RouteData> get() = _allRoutes.value
@@ -96,7 +103,7 @@ class RouteConnector(
         _pathVersion.update { it + 1 }
     }
 
-    fun deleteRoute(name: String) {
+    fun deleteRoute(name: String, alsoDeleteFromRobot: Boolean = false) {
         _allRoutes.value = _allRoutes.value.filter { it.name != name }
         if (_allRoutes.value.isEmpty()) {
             _currentRouteName.value = ""
@@ -108,6 +115,17 @@ class RouteConnector(
             switchRoute(next.name)
         }
         // auto-saved by SyncManager timer
+
+        // 可选的远程删除（fire-and-forget，失败不影响本地结果）
+        if (alsoDeleteFromRobot) {
+            scope.launch {
+                try {
+                    AppContext.syncManager.deleteFromRobot(name)
+                } catch (e: Exception) {
+                    println("RouteConnector: remote delete failed for '$name': ${e.message}")
+                }
+            }
+        }
     }
 
     fun renameRoute(oldName: String, newName: String) {

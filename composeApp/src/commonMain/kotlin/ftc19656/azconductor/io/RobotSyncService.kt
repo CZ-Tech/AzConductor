@@ -129,6 +129,14 @@ object RobotSyncService {
         return remoteSave?.executeTempPath(jsonBody)
     }
 
+    /**
+     * Delete a named path from the robot via RemoteSave.clearPath.
+     * Returns true if the deletion was acknowledged, false if robot is unreachable.
+     */
+    suspend fun deleteFromRobot(pathName: String): Boolean {
+        return remoteSave?.clearPath(pathName) ?: false
+    }
+
     // ---- Internal ----
 
     /**
