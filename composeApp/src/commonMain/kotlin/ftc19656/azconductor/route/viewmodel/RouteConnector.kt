@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
 
 class RouteConnector(
     private val routeRepo: RouteRepository = AppContext.routeRepo,
@@ -128,13 +129,27 @@ class RouteConnector(
         }
     }
 
-    fun renameRoute(oldName: String, newName: String) {
+    fun renameRoute(oldName: String, newName: String, alsoRenameOnRobot: Boolean = false) {
         if (oldName == newName || _allRoutes.value.any { it.name == newName }) return
         _allRoutes.value = _allRoutes.value.map { if (it.name == oldName) it.copy(name = newName) else it }
         if (_currentRouteName.value == oldName) {
             _currentRouteName.value = newName
         }
         // auto-saved by SyncManager timer
+
+        // 可选的远程改名：保存新名 + 清除旧名
+        if (alsoRenameOnRobot) {
+            val renamedRoute = _allRoutes.value.find { it.name == newName } ?: return
+            scope.launch {
+                try {
+                    val pointsJson = AppContext.jsonConfig.encodeToString<List<ControlNode>>(renamedRoute.points)
+                    AppContext.syncManager.saveToRobot(newName, pointsJson)
+                    AppContext.syncManager.deleteFromRobot(oldName)
+                } catch (e: Exception) {
+                    println("RouteConnector: remote rename failed for '$oldName' -> '$newName': ${e.message}")
+                }
+            }
+        }
     }
 
     fun moveRouteOrder(fromIndex: Int, toIndex: Int) {

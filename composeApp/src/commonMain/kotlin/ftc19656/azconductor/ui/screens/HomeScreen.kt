@@ -42,6 +42,7 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
     // Rename dialog
     var renameTarget by remember { mutableStateOf<String?>(null) }
     var renameText by remember { mutableStateOf("") }
+    var renameOnRobot by remember { mutableStateOf(true) }
 
     // Delete confirmation dialog
     var deleteTarget by remember { mutableStateOf<String?>(null) }
@@ -255,6 +256,7 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                                         onClick = {
                                             renameTarget = name
                                             renameText = name
+                                            renameOnRobot = true
                                         },
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
@@ -313,23 +315,42 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
 
     // Rename dialog
     if (renameTarget != null) {
+        val isRobotConnected = connectionStatus !in listOf("未配置IP", "正在连接...", "连接失败")
         AlertDialog(
             onDismissRequest = { renameTarget = null },
             title = { Text("重命名路径") },
             text = {
-                OutlinedTextField(
-                    value = renameText,
-                    onValueChange = { renameText = it },
-                    singleLine = true,
-                    placeholder = { Text("输入新名称") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        placeholder = { Text("输入新名称") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (isRobotConnected) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Checkbox(
+                                checked = renameOnRobot,
+                                onCheckedChange = { renameOnRobot = it }
+                            )
+                            Text(
+                                text = "在机器上同步改名",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         if (renameText.isNotBlank()) {
-                            route.renameRoute(renameTarget!!, renameText)
+                            route.renameRoute(renameTarget!!, renameText, alsoRenameOnRobot = renameOnRobot)
                             refreshRouteNames()
                         }
                         renameTarget = null

@@ -183,6 +183,21 @@ class SyncManager(
     suspend fun executeTempPath(jsonBody: String): String? = syncService.executeTempPath(jsonBody)
 
     /**
+     * Push a route's points JSON to the robot and update tracking hash.
+     * Used for explicit save operations (e.g. rename-on-robot).
+     */
+    suspend fun saveToRobot(pathName: String, pointsJson: String) {
+        syncService.sendToRobot(pointsJson, pathName)
+        val points = try {
+            jsonConfig.decodeFromString<List<ControlNode>>(pointsJson)
+        } catch (_: Exception) { null }
+        if (points != null) {
+            lastPushedHashes[pathName] = points.hashCode()
+        }
+        println("SyncManager: saved '$pathName' to robot")
+    }
+
+    /**
      * Delete a path from the robot and clear local tracking state.
      * Safe to call even when the robot is unreachable — logs and returns.
      */

@@ -236,7 +236,7 @@ object RobotSyncService {
      * Only polls when an OpMode is active to avoid unnecessary requests.
      * Updates [robotPosition] StateFlow.
      */
-    private fun startPositionPolling(intervalMs: Long = 250L) {
+    private fun startPositionPolling(intervalMs: Long = TimingConfig.POSITION_POLL_INTERVAL_MS) {
         positionPollJob = scope.launch {
             while (isActive) {
                 delay(intervalMs)

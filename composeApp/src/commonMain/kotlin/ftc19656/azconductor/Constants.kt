@@ -92,6 +92,8 @@ object TimingConfig {
     const val CROSS_TAB_POLL_MS = 200L
     /** 机器人同步间隔（冲突检测 + 指令列表刷新） */
     const val ROBOT_SYNC_INTERVAL_MS = 500L
+    /** 机器人位置轮询间隔 (~60fps) */
+    const val POSITION_POLL_INTERVAL_MS = 16L
     /** 时间线播放帧间隔 (~60fps) */
     const val PLAYBACK_FRAME_MS = 16L
     /** 时间线播放每帧时间步长 (秒) */
