@@ -83,6 +83,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
     var importJsonText by remember { mutableStateOf("") }
 
     var isSidebarVisible by remember { mutableStateOf(true) }
+    var isSidebarOnRight by remember { mutableStateOf(true) }
 
     var showLeaveConfirmDialog by remember { mutableStateOf(false) }
 
@@ -382,35 +383,54 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(0.4f)
-                .align(Alignment.CenterEnd)
+                .align(if (isSidebarOnRight) Alignment.CenterEnd else Alignment.CenterStart)
         ) {
-            // 鍒囨崲鎸夐挳锛氫晶杈规爮鏀惰捣鍚庝粛鏄剧ず鍦ㄥ彸涓婅
-            IconButton(
-                onClick = { isSidebarVisible = !isSidebarVisible },
+            // 对换左右侧 + 收起/展开按钮
+            Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
-                    .size(40.dp)
                     .zIndex(1f),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = if (isSidebarVisible) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = if (isSidebarVisible) "收起侧栏" else "展开侧栏"
-                )
+                IconButton(
+                    onClick = { isSidebarOnRight = !isSidebarOnRight },
+                    modifier = Modifier.size(40.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SwapHoriz,
+                        contentDescription = "对换左右侧",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(
+                    onClick = { isSidebarVisible = !isSidebarVisible },
+                    modifier = Modifier.size(40.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (isSidebarVisible) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = if (isSidebarVisible) "收起侧栏" else "展开侧栏"
+                    )
+                }
             }
 
             AnimatedVisibility(
                 visible = isSidebarVisible,
                 enter = slideInHorizontally(
-                    initialOffsetX = { it },
+                    initialOffsetX = { if (isSidebarOnRight) it else -it },
                     animationSpec = tween(durationMillis = 300)
                 ),
                 exit = slideOutHorizontally(
-                    targetOffsetX = { it },
+                    targetOffsetX = { if (isSidebarOnRight) it else -it },
                     animationSpec = tween(durationMillis = 300)
                 ),
                 modifier = Modifier.fillMaxSize()
@@ -429,7 +449,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(end = 40.dp, bottom = 16.dp),
+                                .padding(end = 88.dp, bottom = 16.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -837,7 +857,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                 }
             },
             modifier = Modifier
-                .align(Alignment.TopStart)
+                .align(if (isSidebarOnRight) Alignment.TopStart else Alignment.TopEnd)
                 .padding(8.dp)
                 .size(40.dp)
                 .zIndex(2f)
@@ -856,7 +876,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                         Modifier
                             .width(40.dp)
                             .fillMaxHeight(0.8f)
-                            .align(Alignment.CenterStart)
+                            .align(if (isSidebarOnRight) Alignment.CenterStart else Alignment.CenterEnd)
                     } else {
                         Modifier
                             .height(40.dp)

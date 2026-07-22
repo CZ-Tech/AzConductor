@@ -34,4 +34,15 @@ data class ControlNode(
                 commandParams == other.commandParams &&
                 abs(delayAfterArrive - other.delayAfterArrive) < epsilon
     }
+
+    /**
+     * 沿 x 轴镜像（y 取反），用于将蓝方路径转换为红方路径。
+     * heading、dHeading、dy 也会取反以保持路径几何的对称性。
+     */
+    fun mirrorY(): ControlNode = copy(
+        y = -y,
+        dy = -dy,
+        heading = -heading,
+        dHeading = -dHeading
+    )
 }

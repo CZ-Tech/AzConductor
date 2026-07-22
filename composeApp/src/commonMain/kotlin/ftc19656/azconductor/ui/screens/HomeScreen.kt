@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,6 +49,10 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
     var deleteTarget by remember { mutableStateOf<String?>(null) }
     var deleteFromRobot by remember { mutableStateOf(false) }
     val connectionStatus by AppContext.syncManager.connectionStatus.collectAsState()
+
+    // Mirror route dialog
+    var mirrorTarget by remember { mutableStateOf<String?>(null) }
+    var mirrorName by remember { mutableStateOf("") }
 
     // Drag state
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
@@ -268,6 +273,22 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                                             modifier = Modifier.size(14.dp)
                                         )
                                     }
+                                    // Mirror button (bottom-right)
+                                    IconButton(
+                                        onClick = {
+                                            mirrorTarget = name
+                                            mirrorName = "$name(镜像)"
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.SwapHoriz,
+                                            contentDescription = "镜像到红方",
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -414,6 +435,45 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                     deleteTarget = null
                     deleteFromRobot = false
                 }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // Mirror route dialog
+    if (mirrorTarget != null) {
+        AlertDialog(
+            onDismissRequest = { mirrorTarget = null },
+            title = { Text("镜像路径") },
+            text = {
+                Column {
+                    Text("将「${mirrorTarget}」沿X轴镜像到红方，生成新路径。")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = mirrorName,
+                        onValueChange = { mirrorName = it },
+                        singleLine = true,
+                        label = { Text("新路径名称") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (mirrorName.isNotBlank()) {
+                            route.mirrorRoute(mirrorTarget!!, mirrorName)
+                            refreshRouteNames()
+                        }
+                        mirrorTarget = null
+                    }
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { mirrorTarget = null }) {
                     Text("取消")
                 }
             }

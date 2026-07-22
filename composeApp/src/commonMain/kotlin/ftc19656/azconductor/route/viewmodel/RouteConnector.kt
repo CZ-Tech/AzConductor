@@ -265,4 +265,23 @@ class RouteConnector(
         // auto-saved by SyncManager timer
         return true
     }
+
+    /**
+     * 将指定路径沿 x 轴镜像（y 取反），生成一条新的红方路径。
+     *
+     * @param routeName 源路径名称
+     * @param newName 新路径名称
+     * @return 是否成功（源路径不存在或新名称冲突时返回 false）
+     */
+    fun mirrorRoute(routeName: String, newName: String): Boolean {
+        val source = _allRoutes.value.find { it.name == routeName } ?: return false
+        if (_allRoutes.value.any { it.name == newName }) return false
+
+        val mirroredPoints = source.points.map { it.mirrorY() }
+        val newRoute = RouteData(name = newName, points = mirroredPoints)
+        _allRoutes.value = _allRoutes.value + newRoute
+        switchRoute(newName)
+        // auto-saved by SyncManager timer
+        return true
+    }
 }
