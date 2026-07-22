@@ -6,6 +6,7 @@ import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteData
 import kotlinx.coroutines.Job
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -73,14 +74,14 @@ class RouteRepository(
     fun loadAll(): List<RouteData> {
         val json = loadRouteData()
         if (!json.isNullOrBlank()) {
-            return try {
-                jsonConfig.decodeFromString<List<RobotRoutes>>(json)
+            try {
+                return jsonConfig.decodeFromString<List<RobotRoutes>>(json)
                     .flatMap { it.routes }
             } catch (_: Exception) {
-                emptyList()
+                // 新格式解析失败，降级到旧版回退
             }
         }
-        // 旧版兼容：从 Settings 读取旧格式
+        // 旧版兼容：从 Settings 读取旧格式（裸 List<ControlNode>）
         val legacyJson = settingsStorage.getString(LEGACY_KEY, "")
         if (legacyJson.isNotBlank()) {
             return try {
@@ -117,18 +118,20 @@ fun saveAll(routes: List<RouteData>) {
 
     /** 从 JSON 字符串解析路径列表，失败返回 null。兼容新旧两种格式 */
     fun importJson(jsonText: String): List<RouteData>? {
+        // 先试旧版（裸 List<ControlNode>）：因为 ignoreUnknownKeys 会让旧版 json 被
+        // List<RobotRoutes> 静默解析为空列表（所有字段走默认值），导致导入无反馈。
+        try {
+            val points = jsonConfig.decodeFromString<List<ControlNode>>(jsonText)
+            return listOf(RouteData(name = "导入路径", points = points))
+        } catch (_: SerializationException) {
+            // 不是旧版格式，继续尝试新版
+        }
         return try {
             val robots = jsonConfig.decodeFromString<List<RobotRoutes>>(jsonText)
             robots.flatMap { it.routes }
-        } catch (_: Exception) {
-            // 旧版格式回退：直接是 List<ControlNode>
-            try {
-                val points = jsonConfig.decodeFromString<List<ControlNode>>(jsonText)
-                listOf(RouteData(name = "导入路径", points = points))
-            } catch (e2: Exception) {
-                println("RouteRepository: import failed: ${e2.message}")
-                null
-            }
+        } catch (e: Exception) {
+            println("RouteRepository: import failed: ${e.message}")
+            null
         }
     }
 

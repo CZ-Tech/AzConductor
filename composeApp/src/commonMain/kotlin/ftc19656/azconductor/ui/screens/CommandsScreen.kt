@@ -368,8 +368,8 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                         executionStatus = executionStatus,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .fillMaxWidth(0.67f)
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .fillMaxWidth(0.63f)
+                            .padding(horizontal = 50.dp, vertical = 4.dp)
                             .zIndex(1f)
                     )
 
@@ -379,7 +379,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(end = 12.dp, bottom = 4.dp)
-                            .fillMaxWidth(0.33f)
+                            .fillMaxWidth(0.37f)
                             .aspectRatio(2f)
                             .zIndex(1f)
                     )
