@@ -14,13 +14,27 @@ kotlin {
     jvm()
     
     js {
-        browser()
+        browser {
+            testTask {
+                useKarma {
+                    useChromeHeadless()
+                    useFirefox()
+                }
+            }
+        }
         binaries.executable()
     }
     
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
-        browser()
+        browser {
+            testTask {
+                useKarma {
+                    useChromeHeadless()
+                    useFirefox()
+                }
+            }
+        }
         binaries.executable()
     }
     

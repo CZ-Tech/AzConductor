@@ -24,9 +24,19 @@ jobs:
           
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Firefox for browser contract tests
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Export Firefox path for Karma
+        shell: bash
+        run: echo "FIREFOX_BIN=$(command -v firefox)" >> "$GITHUB_ENV"
         
       - name: Make gradlew executable
         run: chmod +x gradlew
+
+      - name: Verify robot API contract
+        run: ./gradlew :composeApp:jvmTest :composeApp:jsBrowserTest :composeApp:wasmJsBrowserTest
         
       - name: Build with Gradle
         # 使用 WasmJS 目标进行构建
