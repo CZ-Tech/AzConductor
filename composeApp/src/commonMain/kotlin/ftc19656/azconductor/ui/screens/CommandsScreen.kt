@@ -71,7 +71,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
     var pathDropdownExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
-    // ---- OpMode status & robot position (auto-polled by RobotSyncService) ----
+    // ---- OpMode status & robot position (pushed by Network V2 SSE) ----
     val opModeStatus by commandsViewModel.opModeStatus.collectAsState()
     val robotPosition by commandsViewModel.robotPosition.collectAsState()
     val executionStatus by commandsViewModel.executionStatus.collectAsState()
