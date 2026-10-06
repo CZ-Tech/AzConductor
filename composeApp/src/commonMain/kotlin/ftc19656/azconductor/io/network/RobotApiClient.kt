@@ -8,6 +8,7 @@ class RobotApiClient(
     robotIp: String,
     private val json: Json,
     private val port: Int = 8888,
+    private val transport: RobotTransport = PlatformRobotTransport,
 ) {
     private var baseUrl: String = baseUrl(robotIp, port)
     private var sessionToken: String? = null
@@ -128,7 +129,7 @@ class RobotApiClient(
         headers.putAll(extraHeaders)
 
         return try {
-            val response = platformHttpRequest(
+            val response = transport.request(
                 method = method,
                 url = baseUrl + path,
                 body = body,

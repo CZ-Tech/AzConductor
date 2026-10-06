@@ -10,6 +10,7 @@ class RobotConnection(
     private val json: Json,
     private val clientName: String = "AzConductor",
     port: Int = 8888,
+    private val transport: RobotTransport = PlatformRobotTransport,
 ) {
     sealed interface State {
         data object Disconnected : State
@@ -19,7 +20,7 @@ class RobotConnection(
         data class Failed(val message: String) : State
     }
 
-    private val api = RobotApiClient(robotIp, json, port)
+    private val api = RobotApiClient(robotIp, json, port, transport)
     private var eventHandle: NetworkEventHandle? = null
 
     private val _state = MutableStateFlow<State>(State.Disconnected)
@@ -98,7 +99,7 @@ class RobotConnection(
     }
 
     private fun openEvents(url: String) {
-        eventHandle = platformOpenEventStream(
+        eventHandle = transport.openEventStream(
             url = url,
             eventNames = EVENT_NAMES,
             onOpen = {},
