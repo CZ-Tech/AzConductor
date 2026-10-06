@@ -24,7 +24,13 @@ data class RobotRoutePayload(val name: String, val revision: Long, val json: Str
     val path: String? = null,
     val trajectory: JsonElement? = null,
 )
-@Serializable data class QueuedRequestResponse(val requestId: Long, val state: String)
+@Serializable data class QueuedRequestResponse(
+    val accepted: Boolean = true,
+    val requestId: Long = 0,
+    val state: String = "",
+    val dropped: Boolean = false,
+    val reason: String? = null,
+)
 @Serializable data class ExecutionSnapshotDto(
     val state: String,
     val requestId: Long = 0,

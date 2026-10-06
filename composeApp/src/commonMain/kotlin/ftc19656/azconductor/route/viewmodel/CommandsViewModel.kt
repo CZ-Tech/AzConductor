@@ -2,34 +2,32 @@ package ftc19656.azconductor.route.viewmodel
 
 import androidx.lifecycle.ViewModel
 import ftc19656.azconductor.AppContext
-import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.io.OpModeStatusResponse
 import ftc19656.azconductor.io.RobotPositionResponse
 import ftc19656.azconductor.io.SyncManager
+import ftc19656.azconductor.io.network.ApiResult
+import ftc19656.azconductor.io.network.QueuedRequestResponse
 import ftc19656.azconductor.route.ControlNode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 
 class CommandsViewModel(
     private val syncManager: SyncManager,
-    private val refreshIntervalMs: Long = TimingConfig.ROBOT_SYNC_INTERVAL_MS
 ) : ViewModel() {
 
     private val _robotPaths = MutableStateFlow<List<String>>(emptyList())
     val robotPaths: StateFlow<List<String>> = _robotPaths.asStateFlow()
 
-    /** Delegates to [SyncManager.opModeStatus] — auto-updated by RobotSyncService polling. */
+    /** SSE-backed OpMode/runtime state. */
     val opModeStatus: StateFlow<OpModeStatusResponse> get() = syncManager.opModeStatus
 
-    /** Delegates to [SyncManager.robotPosition] — auto-updated by RobotSyncService polling. */
+    /** 60 Hz SSE robot pose stream. */
     val robotPosition: StateFlow<RobotPositionResponse?> get() = syncManager.robotPosition
 
     private val _executionStatus = MutableStateFlow<String?>(null)
@@ -42,20 +40,14 @@ class CommandsViewModel(
 
     init {
         scope.launch {
-            while (isActive) {
-                try {
-                    _robotPaths.value = syncManager.listRobotPaths()
-                } catch (_: Exception) {
-                    _robotPaths.value = emptyList()
+            refresh()
+            syncManager.routeRevision
+                .collect { revision ->
+                    if (revision > 0) refresh()
                 }
-                delay(refreshIntervalMs)
-            }
         }
     }
 
-    /**
-     * Manually refresh the robot path list immediately.
-     */
     suspend fun refresh() {
         try {
             _robotPaths.value = syncManager.listRobotPaths()
@@ -64,15 +56,12 @@ class CommandsViewModel(
         }
     }
 
-    /**
-     * Fetch the waypoints JSON for a named path from the robot
-     * and decode into [ControlNode] list for on-map rendering.
-     */
     suspend fun fetchPathData(pathName: String) {
         try {
-            val json = syncManager.pullRoute(pathName)
-            if (json != null) {
-                val points = AppContext.jsonConfig.decodeFromString<List<ControlNode>>(json)
+            val routeJson = syncManager.pullRoute(pathName)
+            if (routeJson != null) {
+                val points =
+                    AppContext.jsonConfig.decodeFromString<List<ControlNode>>(routeJson)
                 _fetchedWaypoints.value = points
             } else {
                 _fetchedWaypoints.value = emptyList()
@@ -82,56 +71,46 @@ class CommandsViewModel(
         }
     }
 
-    /**
-     * Execute a saved path on the robot via POST /run/saved/{pathName}.
-     * Updates [executionStatus] with the result.
-     */
     suspend fun executeSavedPath(pathName: String) {
         _executionStatus.value = "正在执行..."
         val result = try {
             syncManager.executeSavedPath(pathName)
-        } catch (_: Exception) {
-            null
+        } catch (t: Throwable) {
+            ApiResult.NetworkError(t.message ?: "网络错误", t)
         }
-        _executionStatus.value = when {
-            result == null -> "执行失败：无法连接机器人"
-            result.contains("\"status\":\"ok\"") -> "执行成功"
-            result.contains("\"status\":\"error\"") -> "执行失败：${extractErrorMessage(result)}"
-            else -> "执行已触发"
-        }
+        _executionStatus.value = executionMessage(result)
     }
 
-    /**
-     * Execute a temporary path JSON on the robot via POST /run/temp.
-     * Updates [executionStatus] with the result.
-     */
     suspend fun executeTempPath(json: String) {
         _executionStatus.value = "正在执行..."
         val result = try {
             syncManager.executeTempPath(json)
-        } catch (_: Exception) {
-            null
+        } catch (t: Throwable) {
+            ApiResult.NetworkError(t.message ?: "网络错误", t)
         }
-        _executionStatus.value = when {
-            result == null -> "执行失败：无法连接机器人"
-            result.contains("\"status\":\"ok\"") -> "执行已触发"
-            result.contains("\"status\":\"error\"") -> "执行失败：${extractErrorMessage(result)}"
-            else -> "执行已触发"
-        }
+        _executionStatus.value = executionMessage(result)
     }
 
-    /** Clear the execution status, e.g. after the user dismisses it. */
     fun clearExecutionStatus() {
         _executionStatus.value = null
     }
 
-    /** Extract a human-readable error message from a JSON error response. */
-    private fun extractErrorMessage(json: String): String {
-        val msgKey = "\"message\":\""
-        val idx = json.indexOf(msgKey)
-        if (idx < 0) return "未知错误"
-        val start = idx + msgKey.length
-        val end = json.indexOf("\"", start)
-        return if (end > start) json.substring(start, end) else "未知错误"
-    }
+    private fun executionMessage(result: ApiResult<QueuedRequestResponse>): String =
+        when (result) {
+            is ApiResult.Ok -> when {
+                result.value.accepted -> "执行已触发"
+                result.value.dropped &&
+                    result.value.reason == "no_active_opmode" ->
+                    "已丢弃：机器人没有活动 OpMode"
+                result.value.dropped -> "已丢弃"
+                else -> "未执行"
+            }
+
+            is ApiResult.HttpError -> {
+                val detail = result.message?.let { " - " + it } ?: ""
+                "执行失败：HTTP " + result.status + detail
+            }
+
+            is ApiResult.NetworkError -> "执行失败：" + result.message
+        }
 }

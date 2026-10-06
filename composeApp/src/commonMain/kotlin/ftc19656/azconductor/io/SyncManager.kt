@@ -1,7 +1,15 @@
 package ftc19656.azconductor.io
 
 import ftc19656.azconductor.TimingConfig
-import ftc19656.azconductor.route.ControlNode
+import ftc19656.azconductor.io.network.ApiResult
+import ftc19656.azconductor.io.network.ConfigRouteSyncBaselineStore
+import ftc19656.azconductor.io.network.LocalRouteRecord
+import ftc19656.azconductor.io.network.QueuedRequestResponse
+import ftc19656.azconductor.io.network.RobotConnection
+import ftc19656.azconductor.io.network.RouteRepositorySyncAdapter
+import ftc19656.azconductor.io.network.RouteSyncBaseline
+import ftc19656.azconductor.io.network.RouteSyncConflict
+import ftc19656.azconductor.io.network.RouteSyncEngine
 import ftc19656.azconductor.route.RouteData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,377 +19,403 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 
 /**
- * Coordinates synchronisation between local [RouteRepository] and remote
- * [RobotSyncService].
+ * UI-facing synchronization facade backed entirely by Network V2.
  *
- * This is the **only** class that talks to [RobotSyncService].  It owns the
- * periodic conflict-detection loop, the conflict queue, the three resolution
- * strategies, and robot-IP lifecycle.  [RouteConnector] reads UI-facing
- * state from here but never touches the network directly.
- *
- * This is a pure data/sync-layer service — it has no Compose or UI
- * dependencies.
+ * Robot state arrives through the long-lived SSE connection. Route synchronization runs
+ * only after connection, a local persisted change, or a robot "routes" revision event;
+ * there is no periodic robot polling.
  */
 class SyncManager(
     private val jsonConfig: Json,
     private val configManager: ConfigManager,
     private val routeRepo: RouteRepository,
-    private val syncService: RobotSyncService
+    private val connection: RobotConnection,
 ) {
-
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val localAdapter = RouteRepositorySyncAdapter(routeRepo, jsonConfig)
+    private val baselineStore = ConfigRouteSyncBaselineStore(configManager)
+    private val syncMutex = Mutex()
+    private val conflictMutex = Mutex()
 
-    // ---- Network state (delegated from RobotSyncService) ----
+    private var routeSyncEngine = createSyncEngine(robotIp)
 
-    /** Delegates directly to [RobotSyncService.connectionStatus]. */
-    val connectionStatus: StateFlow<String> get() = syncService.connectionStatus
+    private val _connectionStatus = MutableStateFlow("未连接")
+    val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
 
-    /** Delegates directly to [RobotSyncService.availableCommands]. */
-    val availableCommands: StateFlow<List<RobotCommandItem>> get() = syncService.availableCommands
+    private val _availableCommands = MutableStateFlow<List<RobotCommandItem>>(emptyList())
+    val availableCommands: StateFlow<List<RobotCommandItem>> = _availableCommands.asStateFlow()
 
-    /** Delegates directly to [RobotSyncService.opModeStatus]. */
-    val opModeStatus: StateFlow<OpModeStatusResponse> get() = syncService.opModeStatus
+    private val _opModeStatus = MutableStateFlow(OpModeStatusResponse())
+    val opModeStatus: StateFlow<OpModeStatusResponse> = _opModeStatus.asStateFlow()
 
-    /** Delegates directly to [RobotSyncService.robotPosition]. */
-    val robotPosition: StateFlow<RobotPositionResponse?> get() = syncService.robotPosition
-
-    // ---- Robot IP ----
-
-    /**
-     * The robot's IP address.  Writing persists to [configManager] and
-     * immediately activates the new connection — the periodic sync timer
-     * will start probing the new address.
-     */
-    var robotIp: String
-        get() = configManager["robot_ip"] ?: "192.168.43.1"
-        set(value) {
-            configManager["robot_ip"] = value
-            // 清除追踪状态，允许从新机器人重新拉取路径
-            lastPushedHashes.clear()
-            lastPulledRemotes.clear()
-            syncService.setRobotIp(value)
-            // 立即触发一次同步，不等 500ms 定时器
-            scope.launch { syncWithRobot() }
-        }
-
-    // ---- Conflict state (read by RouteConnector / UI) ----
+    private val _robotPosition = MutableStateFlow<RobotPositionResponse?>(null)
+    val robotPosition: StateFlow<RobotPositionResponse?> = _robotPosition.asStateFlow()
+    val routeRevision: StateFlow<Long> get() = connection.routeRevision
 
     private val _conflictState = MutableStateFlow<SyncConflictData?>(null)
     val conflictState: StateFlow<SyncConflictData?> = _conflictState.asStateFlow()
 
-    private val conflictQueue = mutableListOf<SyncConflictData>()
+    private val conflictQueue = mutableListOf<RouteSyncConflict>()
+    private var activeConflict: RouteSyncConflict? = null
 
-    /**
-     * Called on any thread whenever [routeRepo] is mutated by a resolution
-     * strategy.  The UI layer should reload its derived state from the
-     * repository.
-     */
     var onDataChanged: (() -> Unit)? = null
-
-    /**
-     * Set by [RouteConnector] during init.  Provides the current in-memory
-     * route list so the auto-save timer can detect changes.
-     */
     var localRoutesProvider: (() -> List<RouteData>)? = null
 
-    /** Per-route hash of points last pushed to the robot.  Used to
-     * avoid redundant pushes during periodic sync. */
-    private val lastPushedHashes = mutableMapOf<String, Int>()
-
-    // ---- Lifecycle ----
-
-    private var conflictJob: Job? = null
+    private val jobs = mutableListOf<Job>()
     private var autoSaveJob: Job? = null
     private var crossTabJob: Job? = null
 
-    init {
-        val storedIp = configManager["robot_ip"] ?: "192.168.43.1"
-        if (storedIp.isNotBlank()) {
-            syncService.setRobotIp(storedIp)
+    var robotIp: String
+        get() = configManager["robot_ip"] ?: "192.168.43.1"
+        set(value) {
+            configManager["robot_ip"] = value
+            scope.launch { reconnect(value) }
         }
-    }
 
-    /**
-     * Start all periodic loops:
-     * - 50ms auto-save: high-frequency hash check → persist locally on change
-     * - 5s conflict detection: compare local vs remote → fire conflict
-     * - Cross-tab watch: reload when another tab mutates storage
-     *
-     * Safe to call multiple times — any previous loops are cancelled first.
-     */
-    fun start(
-        autoSaveIntervalMs: Long = TimingConfig.STORAGE_POLL_MS,
-        conflictIntervalMs: Long = TimingConfig.ROBOT_SYNC_INTERVAL_MS
-    ) {
-        stop()
+    fun start(autoSaveIntervalMs: Long = TimingConfig.STORAGE_POLL_MS) {
+        stopJobs()
+        installConnectionCollectors()
 
-        // 1. Auto-save: poll in-memory routes for changes, persist locally
         autoSaveJob = scope.launch {
             while (isActive) {
                 delay(autoSaveIntervalMs)
                 val provider = localRoutesProvider ?: continue
-                routeRepo.saveIfChanged(provider())
+                if (routeRepo.saveIfChanged(provider())) {
+                    syncWithRobot()
+                }
             }
         }
 
-        // 2. Robot sync: push local changes + detect remote conflicts
-        println("SyncManager: starting robot sync (interval=${conflictIntervalMs}ms)")
-        conflictJob = scope.launch {
-            while (isActive) {
-                delay(conflictIntervalMs)
-                syncWithRobot()
-            }
-        }
-
-        // 3. Cross-tab sync: another tab mutated storage → reload
-        crossTabJob = routeRepo.watchExternalChanges { _ ->
+        crossTabJob = routeRepo.watchExternalChanges {
             onDataChanged?.invoke()
+            scope.launch { syncWithRobot() }
         }
+
+        scope.launch { reconnect(robotIp) }
     }
 
-    /** Cancel all periodic loops.  Idempotent. */
     fun stop() {
-        conflictJob?.cancel()
-        conflictJob = null
+        stopJobs()
+        _connectionStatus.value = "未连接"
+        _opModeStatus.value = OpModeStatusResponse()
+        _robotPosition.value = null
+        scope.launch { connection.disconnect() }
+    }
+
+    private fun stopJobs() {
+        jobs.forEach { it.cancel() }
+        jobs.clear()
         autoSaveJob?.cancel()
         autoSaveJob = null
         crossTabJob?.cancel()
         crossTabJob = null
     }
 
-    // ---- Robot path listing ----
-
-    /**
-     * Fetch the list of saved path names from the robot via GET /list.
-     * Returns an empty list on failure or if the robot is unreachable.
-     */
-    suspend fun listRobotPaths(): List<String> = syncService.listRobotPaths()
-
-    /**
-     * Fetch the raw JSON for a single named path from the robot
-     * via GET /{pathName}.  Returns null on failure.
-     */
-    suspend fun pullRoute(pathName: String): String? = syncService.pullRoute(pathName)
-
-    /**
-     * Queue a saved path for execution on the robot via POST /run/saved/{pathName}.
-     * Returns the raw response body (JSON), or null on failure.
-     */
-    suspend fun executeSavedPath(pathName: String): String? = syncService.executeSavedPath(pathName)
-
-    /**
-     * Queue a temporary path JSON for execution on the robot via POST /run/temp.
-     * Returns the raw response body (JSON), or null on failure.
-     */
-    suspend fun executeTempPath(jsonBody: String): String? = syncService.executeTempPath(jsonBody)
-
-    /**
-     * Push a route's points JSON to the robot and update tracking hash.
-     * Used for explicit save operations (e.g. rename-on-robot).
-     */
-    suspend fun saveToRobot(pathName: String, pointsJson: String) {
-        syncService.sendToRobot(pointsJson, pathName)
-        val points = try {
-            jsonConfig.decodeFromString<List<ControlNode>>(pointsJson)
-        } catch (_: Exception) { null }
-        if (points != null) {
-            lastPushedHashes[pathName] = points.hashCode()
-        }
-        println("SyncManager: saved '$pathName' to robot")
-    }
-
-    /**
-     * Delete a path from the robot and clear local tracking state.
-     * Safe to call even when the robot is unreachable — logs and returns.
-     */
-    suspend fun deleteFromRobot(pathName: String): Boolean {
-        val result = syncService.deleteFromRobot(pathName)
-        if (result) {
-            lastPushedHashes.remove(pathName)
-            lastPulledRemotes.remove(pathName)
-            println("SyncManager: deleted '$pathName' from robot")
-        } else {
-            println("SyncManager: failed to delete '$pathName' from robot (may be offline)")
-        }
-        return result
-    }
-
-    // ---- Periodic sync with robot ----
-
-    /**
-     * Each cycle:
-     * 1. Push any local routes whose points hash differs from the last push.
-     * 2. For routes where we haven't changed, compare with the robot version
-     *    and fire a conflict if they differ.
-     */
-    private suspend fun syncWithRobot() {
-        val remotePaths = syncService.listRobotPaths()
-        val provider = localRoutesProvider ?: return
-        val localRoutes = provider()
-
-        for (route in localRoutes) {
-            val currentHash = route.points.hashCode()
-
-            // 1. Push local changes to robot (await completion to avoid
-            //    race condition on robot's shared POST / memory slot)
-            if (currentHash != lastPushedHashes[route.name]) {
-                try {
-                    syncService.sendToRobot(
-                        jsonConfig.encodeToString(route.points),
-                        route.name
-                    )
-                    lastPushedHashes[route.name] = currentHash
-                    println("SyncManager: pushed '${route.name}' to robot")
-                } catch (_: Exception) {
-                    println("SyncManager: push '${route.name}' failed, will retry next cycle")
+    private fun installConnectionCollectors() {
+        jobs += scope.launch {
+            connection.state.collect { state ->
+                _connectionStatus.value = when (state) {
+                    RobotConnection.State.Disconnected -> "未连接"
+                    RobotConnection.State.Connecting -> "正在连接..."
+                    is RobotConnection.State.Connected -> "已连接"
+                    is RobotConnection.State.Rejected ->
+                        if (state.owner.isNullOrBlank()) "机器人已连接到其他电脑"
+                        else "机器人已连接到 ${state.owner}"
+                    is RobotConnection.State.Failed -> "连接失败"
                 }
-                continue
+                if (state !is RobotConnection.State.Connected) {
+                    _opModeStatus.value = OpModeStatusResponse()
+                    _robotPosition.value = null
+                }
             }
+        }
 
-            // 2. Conflict detection (robot may have changed independently)
-            if (conflictQueue.any { it.pathName == route.name }) continue
-            if (_conflictState.value?.pathName == route.name) continue
-            if (route.name !in remotePaths) continue
+        jobs += scope.launch {
+            connection.pose.collect { pose ->
+                _robotPosition.value = pose?.let {
+                    RobotPositionResponse(
+                        x = it.x,
+                        y = it.y,
+                        heading = it.heading,
+                    )
+                }
+            }
+        }
 
-            val remoteJson = syncService.pullRoute(route.name) ?: continue
-            if (remoteJson.contains("\"status\":\"not_found\"")) continue
+        jobs += scope.launch {
+            combine(
+                connection.runtime,
+                connection.execution,
+                _availableCommands,
+            ) { runtime, execution, commands ->
+                val active = runtime?.opModeActive == true
+                OpModeStatusResponse(
+                    opModeActive = active,
+                    executionReady = active,
+                    isExecuting = execution?.state == "RUNNING",
+                    activeOpModeName = runtime?.opModeName,
+                    commandCount = commands.size,
+                    commandsReady = if (active) commands.size else 0,
+                )
+            }.collect { _opModeStatus.value = it }
+        }
 
-            val localPoints = route.points
-            val remotePoints = try {
-                jsonConfig.decodeFromString<List<ControlNode>>(remoteJson)
-            } catch (_: Exception) { null }
-            if (remotePoints == null || localPoints != remotePoints) {
-                val localJson = jsonConfig.encodeToString(route.points)
-                conflictQueue.add(
-                    SyncConflictData(
-                        pathName = route.name,
-                        localJson = localJson,
-                        remoteJson = remoteJson
+        jobs += scope.launch {
+            connection.routeRevision.collect { revision ->
+                if (revision > 0 && connection.state.value is RobotConnection.State.Connected) {
+                    syncWithRobot()
+                }
+            }
+        }
+
+        jobs += scope.launch {
+            connection.commandRevision.collect { revision ->
+                if (revision > 0 && connection.state.value is RobotConnection.State.Connected) {
+                    refreshCommands()
+                }
+            }
+        }
+    }
+
+    private suspend fun reconnect(ip: String) {
+        connection.disconnect()
+        clearConflicts()
+
+        if (ip.isBlank()) {
+            connection.updateRobotIp(ip)
+            _connectionStatus.value = "未配置IP"
+            return
+        }
+
+        connection.updateRobotIp(ip)
+        routeSyncEngine = createSyncEngine(ip)
+
+        when (connection.connect()) {
+            is ApiResult.Ok -> {
+                refreshCommands()
+                syncWithRobot()
+            }
+            is ApiResult.HttpError,
+            is ApiResult.NetworkError -> Unit
+        }
+    }
+
+    private fun createSyncEngine(robotKey: String): RouteSyncEngine =
+        RouteSyncEngine(
+            robotKey = robotKey,
+            api = connection.apiClient(),
+            local = localAdapter,
+            baselines = baselineStore,
+        )
+
+    suspend fun listRobotPaths(): List<String> =
+        when (val result = connection.apiClient().listRoutes()) {
+            is ApiResult.Ok -> result.value.routes.map { it.name }
+            else -> emptyList()
+        }
+
+    suspend fun pullRoute(pathName: String): String? =
+        when (val result = connection.apiClient().getRoute(pathName)) {
+            is ApiResult.Ok -> result.value.json
+            else -> null
+        }
+
+    suspend fun executeSavedPath(pathName: String): ApiResult<QueuedRequestResponse> =
+        connection.apiClient().executeSavedPath(pathName)
+
+    suspend fun executeTempPath(jsonBody: String): ApiResult<QueuedRequestResponse> =
+        try {
+            connection.apiClient().executeInlinePath(
+                jsonConfig.parseToJsonElement(jsonBody)
+            )
+        } catch (t: Throwable) {
+            ApiResult.NetworkError("Invalid trajectory JSON", t)
+        }
+
+    suspend fun saveToRobot(pathName: String, pointsJson: String) {
+        val api = connection.apiClient()
+        val manifest = api.listRoutes()
+        val expected = if (manifest is ApiResult.Ok) {
+            manifest.value.routes.firstOrNull { it.name == pathName }?.revision ?: 0
+        } else {
+            throw IllegalStateException("Unable to read robot route manifest")
+        }
+
+        when (val result = api.putRoute(pathName, pointsJson, expected)) {
+            is ApiResult.Ok -> {
+                baselineStore.put(
+                    robotIp,
+                    RouteSyncBaseline(
+                        routeName = pathName,
+                        localFingerprint = LocalRouteRecord(pathName, pointsJson).fingerprint,
+                        remoteRevision = result.value.revision,
                     )
                 )
-                if (_conflictState.value == null) {
-                    _conflictState.value = conflictQueue.removeAt(0)
-                }
-                println("SyncManager: conflict detected for '${route.name}'")
             }
+            is ApiResult.HttpError ->
+                throw IllegalStateException(
+                    "Robot rejected route write: HTTP " + result.status
+                )
+            is ApiResult.NetworkError -> throw IllegalStateException(result.message)
         }
+    }
 
-        // 3. Pull remote-only paths (exist on robot but not locally)
-        val localNames = localRoutes.map { it.name }.toSet()
-        for (pathName in remotePaths) {
-            if (pathName in localNames) continue
-            if (lastPulledRemotes.contains(pathName)) continue
-            val remoteJson = syncService.pullRoute(pathName) ?: continue
-            if (remoteJson.contains("\"status\":\"not_found\"")) continue
-            val points = try {
-                jsonConfig.decodeFromString<List<ControlNode>>(remoteJson)
-            } catch (_: Exception) { null }
-            if (points != null) {
-                routeRepo.save(RouteData(name = pathName, points = points))
-                lastPushedHashes[pathName] = points.hashCode()
-                lastPulledRemotes.add(pathName)
-                println("SyncManager: pulled remote-only path '$pathName' (${points.size} points)")
+    suspend fun deleteFromRobot(pathName: String): Boolean {
+        val api = connection.apiClient()
+        val manifest = api.listRoutes()
+        if (manifest !is ApiResult.Ok) return false
+        val revision = manifest.value.routes.firstOrNull { it.name == pathName }?.revision
+            ?: return true
+
+        return when (api.deleteRoute(pathName, revision)) {
+            is ApiResult.Ok -> {
+                baselineStore.remove(robotIp, pathName)
+                true
+            }
+            else -> false
+        }
+    }
+
+    private suspend fun refreshCommands() {
+        when (val result = connection.apiClient().commandCatalog()) {
+            is ApiResult.Ok -> {
+                _availableCommands.value = result.value.commands.map { command ->
+                    RobotCommandItem(
+                        name = command.name,
+                        params = command.paramTypes,
+                        paramNames = command.paramNames,
+                        ready = true,
+                    )
+                }
+            }
+            else -> Unit
+        }
+    }
+
+    private suspend fun syncWithRobot() {
+        if (connection.state.value !is RobotConnection.State.Connected) return
+
+        syncMutex.withLock {
+            val report = routeSyncEngine.syncOnce()
+            if (report.pulled.isNotEmpty()) {
                 onDataChanged?.invoke()
+            }
+            if (report.conflicts.isNotEmpty()) {
+                queueConflicts(report.conflicts)
+            }
+            if (report.failures.isNotEmpty()) {
+                println("SyncManager: " + report.failures.joinToString("; "))
             }
         }
     }
 
-    /** Tracks which remote-only paths have already been pulled to avoid
-     *  re-pulling every sync cycle. */
-    private val lastPulledRemotes = mutableSetOf<String>()
+    private suspend fun queueConflicts(conflicts: List<RouteSyncConflict>) {
+        conflictMutex.withLock {
+            for (conflict in conflicts) {
+                if (activeConflict?.routeName == conflict.routeName) continue
+                if (conflictQueue.any { it.routeName == conflict.routeName }) continue
+                conflictQueue += conflict
+            }
+            showNextConflictLocked()
+        }
+    }
 
-    // ---- Conflict resolution ----
-
-    /**
-     * Keep the local version, discard the remote version.
-     * Pushes the local JSON to the robot so the conflict won't reappear.
-     */
     fun resolveKeepLocal() {
-        val conflict = _conflictState.value ?: return
-        val localRoute = routeRepo.load(conflict.pathName)
-        if (localRoute != null) {
-            val json = jsonConfig.encodeToString(localRoute.points)
-            scope.launch {
-                try {
-                    syncService.sendToRobot(json, conflict.pathName)
-                    lastPushedHashes[conflict.pathName] = localRoute.points.hashCode()
-                    popNextConflict()
-                } catch (_: Exception) {
-                    println("SyncManager: resolveKeepLocal push failed for '${conflict.pathName}'")
-                    popNextConflict()
-                }
+        val conflict = activeConflict ?: return
+        scope.launch {
+            when (routeSyncEngine.resolveKeepLocal(conflict)) {
+                is ApiResult.Ok -> removeResolvedConflict(conflict)
+                else -> Unit
             }
-        } else {
-            popNextConflict()
         }
     }
 
-    /**
-     * Replace the local route with the remote version.
-     * Persists to [routeRepo] and fires [onDataChanged].
-     */
     fun resolveKeepRemote() {
-        val conflict = _conflictState.value ?: return
-        try {
-            val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
-            val existing = routeRepo.load(conflict.pathName)
-            if (existing != null) {
-                routeRepo.save(existing.copy(points = points))
-                onDataChanged?.invoke()
+        val conflict = activeConflict ?: return
+        scope.launch {
+            when (routeSyncEngine.resolveKeepRemote(conflict)) {
+                is ApiResult.Ok -> {
+                    onDataChanged?.invoke()
+                    removeResolvedConflict(conflict)
+                }
+                else -> Unit
             }
-        } catch (_: Exception) {
-            println("SyncManager: failed to apply remote version for '${conflict.pathName}'")
         }
-        popNextConflict()
     }
 
-    /**
-     * Keep both versions: rename the local copy (e.g. "默认路径(电脑端)")
-     * and add the robot version under the original name.
-     * Persists to [routeRepo] and fires [onDataChanged].
-     */
     fun resolveKeepBoth() {
-        val conflict = _conflictState.value ?: return
-        try {
-            val allRoutes = routeRepo.loadAll()
-
-            // 1. Generate a unique name for the local version
-            var localNewName = "${conflict.pathName}(电脑端)"
-            var suffix = 1
-            while (allRoutes.any { it.name == localNewName }) {
-                suffix++
-                localNewName = "${conflict.pathName}(电脑端$suffix)"
-            }
-
-            // 2. Rename the local route
-            val localRoute = allRoutes.find { it.name == conflict.pathName }
-            if (localRoute != null) {
-                routeRepo.save(localRoute.copy(name = localNewName))
-            }
-
-            // 3. Add the robot version under the original name
-            val points = jsonConfig.decodeFromString<List<ControlNode>>(conflict.remoteJson)
-            routeRepo.save(RouteData(name = conflict.pathName, points = points))
-            lastPushedHashes[conflict.pathName] = points.hashCode()
-
-            onDataChanged?.invoke()
-        } catch (_: Exception) {
-            println("SyncManager: failed to keep both versions for '${conflict.pathName}'")
+        val conflict = activeConflict ?: return
+        if (conflict.localJson == null) {
+            resolveKeepRemote()
+            return
         }
-        popNextConflict()
+        if (conflict.remoteJson == null) {
+            resolveKeepLocal()
+            return
+        }
+
+        scope.launch {
+            val allRoutes = routeRepo.loadAll()
+            var renamed = conflict.routeName + "(电脑端)"
+            var suffix = 1
+            while (allRoutes.any { it.name == renamed }) {
+                suffix++
+                renamed = conflict.routeName + "(电脑端" + suffix + ")"
+            }
+
+            val localRoute = routeRepo.load(conflict.routeName)
+            if (localRoute != null) {
+                routeRepo.delete(conflict.routeName)
+                routeRepo.save(localRoute.copy(name = renamed))
+            }
+
+            when (routeSyncEngine.resolveKeepRemote(conflict)) {
+                is ApiResult.Ok -> {
+                    onDataChanged?.invoke()
+                    removeResolvedConflict(conflict)
+                    syncWithRobot()
+                }
+                else -> Unit
+            }
+        }
     }
 
-    // ---- Internal ----
+    private suspend fun removeResolvedConflict(conflict: RouteSyncConflict) {
+        conflictMutex.withLock {
+            if (activeConflict?.routeName == conflict.routeName) {
+                activeConflict = null
+                _conflictState.value = null
+            }
+            conflictQueue.removeAll { it.routeName == conflict.routeName }
+            showNextConflictLocked()
+        }
+    }
 
-    private fun popNextConflict() {
-        _conflictState.value =
-            if (conflictQueue.isNotEmpty()) conflictQueue.removeAt(0) else null
+    private fun showNextConflictLocked() {
+        if (activeConflict != null || conflictQueue.isEmpty()) return
+        val next = conflictQueue.removeAt(0)
+        activeConflict = next
+        _conflictState.value = SyncConflictData(
+            pathName = next.routeName,
+            localJson = next.localJson,
+            remoteJson = next.remoteJson,
+            reason = next.reason.name,
+        )
+    }
+
+    private suspend fun clearConflicts() {
+        conflictMutex.withLock {
+            conflictQueue.clear()
+            activeConflict = null
+            _conflictState.value = null
+        }
     }
 }

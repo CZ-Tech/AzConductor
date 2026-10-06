@@ -38,8 +38,9 @@ data class RobotPathListResponse(
  */
 data class SyncConflictData(
     val pathName: String,
-    val localJson: String,
-    val remoteJson: String
+    val localJson: String?,
+    val remoteJson: String?,
+    val reason: String = ""
 )
 
 /**

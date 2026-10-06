@@ -1,9 +1,9 @@
 package ftc19656.azconductor
 
 import ftc19656.azconductor.io.ConfigManager
-import ftc19656.azconductor.io.RobotSyncService
 import ftc19656.azconductor.io.RouteRepository
 import ftc19656.azconductor.io.SyncManager
+import ftc19656.azconductor.io.network.RobotConnection
 import kotlinx.serialization.json.Json
 
 /**
@@ -25,5 +25,15 @@ object AppContext {
 
     val routeRepo = RouteRepository(jsonConfig, configManager)
 
-    val syncManager = SyncManager(jsonConfig, configManager, routeRepo, RobotSyncService)
+    val robotConnection = RobotConnection(
+        robotIp = configManager["robot_ip"] ?: "192.168.43.1",
+        json = jsonConfig,
+    )
+
+    val syncManager = SyncManager(
+        jsonConfig = jsonConfig,
+        configManager = configManager,
+        routeRepo = routeRepo,
+        connection = robotConnection,
+    )
 }
