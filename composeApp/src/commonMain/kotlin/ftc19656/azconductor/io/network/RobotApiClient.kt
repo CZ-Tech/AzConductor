@@ -106,17 +106,6 @@ class RobotApiClient(
     suspend fun commandCatalog(): ApiResult<CommandCatalogResponse> =
         decode(request("GET", "/api/v2/commands"))
 
-    suspend fun invokeCommand(
-        name: String,
-        args: List<JsonElement>,
-    ): ApiResult<QueuedRequestResponse> = decode(
-        request(
-            "POST",
-            "/api/v2/commands/" + pathSegment(name),
-            json.encodeToString(CommandInvokeRequest(args)),
-        )
-    )
-
     fun eventUrl(): String? {
         val value = sessionToken ?: return null
         return baseUrl + "/api/v2/events?session=" + pathSegment(value)

@@ -46,7 +46,6 @@ data class RobotRoutePayload(val name: String, val revision: Long, val json: Str
     val revision: Long = 0,
     val commands: List<CommandDescriptorDto> = emptyList(),
 )
-@Serializable data class CommandInvokeRequest(val args: List<JsonElement> = emptyList())
 @Serializable data class PoseEvent(
     val seq: Long,
     val tNanos: Long,
