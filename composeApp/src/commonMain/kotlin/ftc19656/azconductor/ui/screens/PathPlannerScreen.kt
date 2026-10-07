@@ -1,4 +1,4 @@
-﻿package ftc19656.azconductor.ui.screens
+package ftc19656.azconductor.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -46,6 +46,8 @@ import ftc19656.azconductor.core.math.CoordinateMapper
 import ftc19656.azconductor.core.math.RectBounds
 import ftc19656.azconductor.ui.components.*
 import ftc19656.azconductor.ui.dialogs.*
+import ftc19656.azconductor.ui.coerceInDp
+import ftc19656.azconductor.ui.responsiveLayout
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.painterResource
 import kotlin.math.roundToInt
@@ -180,7 +182,11 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
     Box(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val isLandscape = maxWidth > maxHeight
+        val responsive = responsiveLayout(maxWidth, maxHeight)
+        val isCompactLayout = responsive.compact || (responsive.shortHeight && maxWidth < 980.dp)
+        val isLandscape = maxWidth > maxHeight && !isCompactLayout
+        val sidebarWidth = (maxWidth * 0.36f).coerceInDp(300.dp, 520.dp)
+        val compactSidebarHeight = (maxHeight * 0.48f).coerceInDp(260.dp, 440.dp)
         val playbackState = rememberPlaybackState(route.getTotalTime().toFloat())
         val totalTime = route.getTotalTime().toFloat()
 
@@ -381,9 +387,19 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
         // 鍙充晶杈规爮涓庡垏鎹㈡寜閽?
         Box(
             modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(0.4f)
-                .align(if (isSidebarOnRight) Alignment.CenterEnd else Alignment.CenterStart)
+                .then(
+                    if (isCompactLayout) {
+                        Modifier
+                            .fillMaxWidth()
+                            .height(compactSidebarHeight)
+                            .align(Alignment.BottomCenter)
+                    } else {
+                        Modifier
+                            .width(sidebarWidth)
+                            .fillMaxHeight()
+                            .align(if (isSidebarOnRight) Alignment.CenterEnd else Alignment.CenterStart)
+                    }
+                )
         ) {
             // 对换左右侧 + 收起/展开按钮
             Row(
@@ -393,21 +409,23 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                     .zIndex(1f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = { isSidebarOnRight = !isSidebarOnRight },
-                    modifier = Modifier.size(40.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SwapHoriz,
-                        contentDescription = "对换左右侧",
-                        modifier = Modifier.size(20.dp)
-                    )
+                if (!isCompactLayout) {
+                    IconButton(
+                        onClick = { isSidebarOnRight = !isSidebarOnRight },
+                        modifier = Modifier.size(40.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SwapHoriz,
+                            contentDescription = "对换左右侧",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
                 }
-                Spacer(modifier = Modifier.width(4.dp))
                 IconButton(
                     onClick = { isSidebarVisible = !isSidebarVisible },
                     modifier = Modifier.size(40.dp),
@@ -425,14 +443,22 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
 
             AnimatedVisibility(
                 visible = isSidebarVisible,
-                enter = slideInHorizontally(
-                    initialOffsetX = { if (isSidebarOnRight) it else -it },
-                    animationSpec = tween(durationMillis = 300)
-                ),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { if (isSidebarOnRight) it else -it },
-                    animationSpec = tween(durationMillis = 300)
-                ),
+                enter = if (isCompactLayout) {
+                    androidx.compose.animation.fadeIn(animationSpec = tween(durationMillis = 180))
+                } else {
+                    slideInHorizontally(
+                        initialOffsetX = { if (isSidebarOnRight) it else -it },
+                        animationSpec = tween(durationMillis = 300)
+                    )
+                },
+                exit = if (isCompactLayout) {
+                    androidx.compose.animation.fadeOut(animationSpec = tween(durationMillis = 180))
+                } else {
+                    slideOutHorizontally(
+                        targetOffsetX = { if (isSidebarOnRight) it else -it },
+                        animationSpec = tween(durationMillis = 300)
+                    )
+                },
                 modifier = Modifier.fillMaxSize()
             ) {
                 Surface(
@@ -444,18 +470,25 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(16.dp)
+                            .padding(if (isCompactLayout) 10.dp else 16.dp)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(end = 88.dp, bottom = 16.dp),
+                                .padding(
+                                    end = if (isCompactLayout) 48.dp else 88.dp,
+                                    bottom = if (isCompactLayout) 8.dp else 16.dp
+                                ),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = "节点列表",
-                                style = MaterialTheme.typography.titleLarge
+                                style = if (isCompactLayout) {
+                                    MaterialTheme.typography.titleMedium
+                                } else {
+                                    MaterialTheme.typography.titleLarge
+                                }
                             )
                             Text(
                                 text = "总时长: ${pv.let { route.getTotalTime().toFixed(2) }}s",
@@ -464,7 +497,9 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                             )
                         }
                         
-                        HorizontalDivider(modifier = Modifier.padding(bottom = 16.dp))
+                        HorizontalDivider(
+                            modifier = Modifier.padding(bottom = if (isCompactLayout) 8.dp else 16.dp)
+                        )
                         
                         Text(
                             text = "控制点",
@@ -857,7 +892,10 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                 }
             },
             modifier = Modifier
-                .align(if (isSidebarOnRight) Alignment.TopStart else Alignment.TopEnd)
+                .align(
+                    if (isCompactLayout || isSidebarOnRight) Alignment.TopStart
+                    else Alignment.TopEnd
+                )
                 .padding(8.dp)
                 .size(40.dp)
                 .zIndex(2f)
@@ -880,8 +918,14 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                     } else {
                         Modifier
                             .height(40.dp)
-                            .fillMaxWidth(0.8f)
-                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth(if (isCompactLayout) 0.72f else 0.8f)
+                            .align(
+                                if (isCompactLayout && isSidebarVisible) Alignment.TopCenter
+                                else Alignment.BottomCenter
+                            )
+                            .padding(
+                                top = if (isCompactLayout && isSidebarVisible) 8.dp else 0.dp
+                            )
                     }
                 ),
             contentAlignment = Alignment.Center

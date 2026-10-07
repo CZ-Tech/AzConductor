@@ -65,27 +65,30 @@ fun App(route: RouteConnector = RouteConnector()) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(24.dp),
+                    .heightIn(min = 32.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 tonalElevation = 2.dp
             ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Settings,
                         contentDescription = "设置",
                         modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .padding(start = 4.dp)
-                            .size(16.dp)
+                            .size(20.dp)
                             .clickable { showSettingsDialog = true },
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = connectionStatus,
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2,
                         color = when (connectionStatus) {
                             "连接失败", "未配置IP", "加载失败" -> Color.Red
                             "已保存", "已加载", "已连接" -> Color(0xFF4CAF50)
