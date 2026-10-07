@@ -119,7 +119,7 @@ class RouteSyncEngineTest {
     }
 
     @Test
-    fun localDeletionWithUnchangedRemoteDeletesRobotCopy() = runTest {
+    fun localAbsenceDoesNotImplyDeletionAndPullsRemoteCopy() = runTest {
         val fixture = fixture(localRoutes = mapOf("Auto" to J1))
         fixture.server.seedRoute("Auto", J1, revision = 1)
         fixture.engine.syncOnce()
@@ -127,13 +127,14 @@ class RouteSyncEngineTest {
 
         val report = fixture.engine.syncOnce()
 
-        assertEquals(listOf("Auto"), report.deletedRemote)
-        assertFalse(fixture.server.routes.containsKey("Auto"))
-        assertNull(fixture.baselines.get(ROBOT_KEY, "Auto"))
+        assertEquals(listOf("Auto"), report.pulled)
+        assertTrue(report.conflicts.isEmpty())
+        assertEquals(J1, fixture.local.get("Auto")?.json)
+        assertTrue(fixture.server.routes.containsKey("Auto"))
     }
 
     @Test
-    fun remoteDeletionNeverSilentlyDeletesExistingLocalCopy() = runTest {
+    fun remoteAbsenceDoesNotImplyDeletionAndRecreatesLocalCopy() = runTest {
         val fixture = fixture(localRoutes = mapOf("Auto" to J1))
         fixture.server.seedRoute("Auto", J1, revision = 1)
         fixture.engine.syncOnce()
@@ -141,14 +142,14 @@ class RouteSyncEngineTest {
 
         val report = fixture.engine.syncOnce()
 
-        val conflict = report.conflicts.single()
-        assertEquals(RouteConflictReason.REMOTE_DELETED, conflict.reason)
+        assertEquals(listOf("Auto"), report.pushed)
+        assertTrue(report.conflicts.isEmpty())
         assertEquals(J1, fixture.local.get("Auto")?.json)
-        assertFalse(fixture.server.routes.containsKey("Auto"))
+        assertEquals(J1, fixture.server.routes["Auto"]?.body)
     }
 
     @Test
-    fun localDeletionConflictsIfRemoteChangedSinceBaseline() = runTest {
+    fun localAbsenceWithChangedRemotePullsChangedRemoteCopy() = runTest {
         val fixture = fixture(localRoutes = mapOf("Auto" to J1))
         fixture.server.seedRoute("Auto", J1, revision = 1)
         fixture.engine.syncOnce()
@@ -157,11 +158,40 @@ class RouteSyncEngineTest {
 
         val report = fixture.engine.syncOnce()
 
-        val conflict = report.conflicts.single()
-        assertEquals(RouteConflictReason.LOCAL_DELETED_REMOTE_CHANGED, conflict.reason)
-        assertNull(conflict.localJson)
-        assertEquals(J2, conflict.remoteJson)
+        assertEquals(listOf("Auto"), report.pulled)
+        assertTrue(report.conflicts.isEmpty())
+        assertEquals(J2, fixture.local.get("Auto")?.json)
         assertTrue(fixture.server.routes.containsKey("Auto"))
+    }
+
+    @Test
+    fun differentRouteNamesNeverConflictEvenWithOldBaselines() = runTest {
+        val fixture = fixture(localRoutes = mapOf("Local Auto" to J1))
+        fixture.server.seedRoute("Robot Auto", J2, revision = 7)
+        fixture.baselines.put(
+            ROBOT_KEY,
+            RouteSyncBaseline(
+                routeName = "Local Auto",
+                localFingerprint = LocalRouteRecord("Local Auto", J1).fingerprint,
+                remoteRevision = 3,
+            ),
+        )
+        fixture.baselines.put(
+            ROBOT_KEY,
+            RouteSyncBaseline(
+                routeName = "Robot Auto",
+                localFingerprint = LocalRouteRecord("Robot Auto", J3).fingerprint,
+                remoteRevision = 6,
+            ),
+        )
+
+        val report = fixture.engine.syncOnce()
+
+        assertTrue(report.conflicts.isEmpty())
+        assertEquals(listOf("Local Auto"), report.pushed)
+        assertEquals(listOf("Robot Auto"), report.pulled)
+        assertEquals(J1, fixture.server.routes["Local Auto"]?.body)
+        assertEquals(J2, fixture.local.get("Robot Auto")?.json)
     }
 
     @Test

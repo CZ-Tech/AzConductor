@@ -161,6 +161,21 @@ class RouteConnector(
         // auto-saved by SyncManager timer
     }
 
+    /**
+     * Explicitly pushes one local route to the connected robot.
+     *
+     * This uses Network V2's revision-aware PUT path through [SyncManager], so it
+     * updates the robot's saved copy only; it does not start executing the route.
+     */
+    suspend fun uploadRouteToRobot(name: String): Result<Unit> {
+        val localRoute = _allRoutes.value.find { it.name == name }
+            ?: return Result.failure(IllegalArgumentException("Route '$name' does not exist"))
+        val pointsJson = AppContext.jsonConfig.encodeToString<List<ControlNode>>(localRoute.points)
+        return runCatching {
+            AppContext.syncManager.saveToRobot(name, pointsJson)
+        }
+    }
+
     // ---- In-memory sync ----
     // Persistence is handled externally by SyncManager's auto-save timer.
 

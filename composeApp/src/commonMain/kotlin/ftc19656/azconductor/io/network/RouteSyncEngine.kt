@@ -121,52 +121,28 @@ class RouteSyncEngine(
 
             when {
                 localRoute != null && remoteMeta == null -> {
-                    if (baseline == null) {
-                        when (val put = api.putRoute(name, localRoute.json, expectedRevision = 0)) {
-                            is ApiResult.Ok -> {
-                                pushed += name
-                                remember(name, localRoute.json, put.value.revision)
-                            }
-                            else -> failures += "Failed to create remote route '" + name + "'"
+                    // Absence is not a deletion tombstone. A missing remote route can
+                    // equally mean a fresh robot, reset storage, or a different route
+                    // set. Treat local-only names as independent routes and create them.
+                    when (val put = api.putRoute(name, localRoute.json, expectedRevision = 0)) {
+                        is ApiResult.Ok -> {
+                            pushed += name
+                            remember(name, localRoute.json, put.value.revision)
                         }
-                    } else {
-                        conflicts += RouteSyncConflict(
-                            routeName = name,
-                            reason = RouteConflictReason.REMOTE_DELETED,
-                            localJson = localRoute.json,
-                            remoteJson = null,
-                            remoteRevision = null,
-                        )
+                        else -> failures += "Failed to create remote route '" + name + "'"
                     }
                 }
 
                 localRoute == null && remoteMeta != null -> {
-                    if (baseline == null) {
-                        when (val remote = api.getRoute(name)) {
-                            is ApiResult.Ok -> {
-                                local.put(name, remote.value.json)
-                                pulled += name
-                                remember(name, remote.value.json, remote.value.revision)
-                            }
-                            else -> failures += "Failed to pull new remote route '" + name + "'"
+                    // Likewise, a remote-only name is simply another route. We cannot
+                    // infer that the local user deleted it without an explicit tombstone.
+                    when (val remote = api.getRoute(name)) {
+                        is ApiResult.Ok -> {
+                            local.put(name, remote.value.json)
+                            pulled += name
+                            remember(name, remote.value.json, remote.value.revision)
                         }
-                    } else if (remoteMeta.revision == baseline.remoteRevision) {
-                        when (api.deleteRoute(name, remoteMeta.revision)) {
-                            is ApiResult.Ok -> {
-                                deletedRemote += name
-                                baselines.remove(robotKey, name)
-                            }
-                            else -> failures += "Failed to propagate local deletion for '" + name + "'"
-                        }
-                    } else {
-                        val remote = (api.getRoute(name) as? ApiResult.Ok)?.value
-                        conflicts += RouteSyncConflict(
-                            routeName = name,
-                            reason = RouteConflictReason.LOCAL_DELETED_REMOTE_CHANGED,
-                            localJson = null,
-                            remoteJson = remote?.json,
-                            remoteRevision = remote?.revision ?: remoteMeta.revision,
-                        )
+                        else -> failures += "Failed to pull new remote route '" + name + "'"
                     }
                 }
 

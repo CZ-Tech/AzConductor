@@ -18,6 +18,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -30,6 +32,7 @@ import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.ui.components.AppDestination
 import ftc19656.azconductor.ui.components.AppNavigationDrawer
 import ftc19656.azconductor.ui.responsiveLayout
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +63,11 @@ fun HomeScreen(
     var mirrorTarget by remember { mutableStateOf<String?>(null) }
     var mirrorName by remember { mutableStateOf("") }
 
+    // Per-route context menu / explicit robot upload
+    var contextMenuRoute by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val uiScope = rememberCoroutineScope()
+
     // Drag state
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
@@ -87,6 +95,7 @@ fun HomeScreen(
         onNavigate = onNavigate
     ) { openDrawer ->
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
                     title = { Text("路径管理") },
@@ -172,6 +181,20 @@ fun HomeScreen(
                                         right = pos.x + size.width,
                                         bottom = pos.y + size.height
                                     ))
+                                }
+                                .pointerInput(name) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            if (
+                                                event.type == PointerEventType.Press
+                                                && event.buttons.isSecondaryPressed
+                                            ) {
+                                                contextMenuRoute = name
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                        }
+                                    }
                                 }
                                 .pointerInput(index) {
                                     detectDragGesturesAfterLongPress(
@@ -271,6 +294,38 @@ fun HomeScreen(
                                         )
                                     }
                                 }
+                            }
+
+                            DropdownMenu(
+                                expanded = contextMenuRoute == name,
+                                onDismissRequest = {
+                                    if (contextMenuRoute == name) contextMenuRoute = null
+                                },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("上传到机器") },
+                                    enabled = connectionStatus !in listOf(
+                                        "未配置IP",
+                                        "正在连接...",
+                                        "连接失败",
+                                    ),
+                                    onClick = {
+                                        contextMenuRoute = null
+                                        uiScope.launch {
+                                            val result = route.uploadRouteToRobot(name)
+                                            snackbarHostState.showSnackbar(
+                                                result.fold(
+                                                    onSuccess = {
+                                                        "已上传“$name”到机器（仅保存，不执行）"
+                                                    },
+                                                    onFailure = {
+                                                        "上传“$name”失败：${it.message ?: "未知错误"}"
+                                                    },
+                                                )
+                                            )
+                                        }
+                                    },
+                                )
                             }
                         }
                     }
