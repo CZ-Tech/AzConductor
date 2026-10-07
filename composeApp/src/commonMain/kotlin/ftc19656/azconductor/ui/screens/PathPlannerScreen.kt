@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import azconductor.composeapp.generated.resources.FTC_MAP26
+import azconductor.composeapp.generated.resources.FTC_MAP27
 import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.FieldConfig
@@ -62,7 +62,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
     val availableCommands by AppContext.syncManager.availableCommands.collectAsState()
     val pv by route.pathVersion.collectAsState()
 
-    val painter = painterResource(Res.drawable.FTC_MAP26)
+    val painter = painterResource(Res.drawable.FTC_MAP27)
     var canvasPhysicalSize by remember { mutableStateOf(IntSize.Zero) }
     val rotationDegrees = UIConfig.CANVAS_ROTATE_DEG
 
@@ -937,7 +937,9 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                 isPlaying = playbackState.isPlaying,
                 onPlayPauseToggle = playbackState.onTogglePlayPause,
                 isVertical = isLandscape,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                speed = playbackState.speed,
+                onSpeedChange = playbackState.onSpeedChange
             )
         }
         }

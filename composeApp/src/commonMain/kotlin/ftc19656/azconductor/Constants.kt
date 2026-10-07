@@ -43,7 +43,7 @@ object FieldConfig {
 object RobotConfig {
     // 机器人逻辑尺寸 (英寸)
     const val ROBOT_LOGICAL_WIDTH = 18f
-    const val ROBOT_LOGICAL_HEIGHT = 9f
+    const val ROBOT_LOGICAL_HEIGHT = 18f
 }
 
 /**
@@ -98,4 +98,12 @@ object TimingConfig {
     const val PLAYBACK_FRAME_MS = 16L
     /** 时间线播放每帧时间步长 (秒) */
     const val PLAYBACK_FRAME_STEP = 0.016f
+    /** 时间线播放默认倍速 */
+    const val PLAYBACK_SPEED_DEFAULT = 1f
+    /** 时间线播放最小倍速 */
+    const val PLAYBACK_SPEED_MIN = 0.25f
+    /** 时间线播放最大倍速 */
+    const val PLAYBACK_SPEED_MAX = 4f
+    /** 时间线播放可选倍速档位 */
+    val PLAYBACK_SPEED_PRESETS = listOf(0.25f, 0.5f, 1f, 2f, 3f, 4f)
 }

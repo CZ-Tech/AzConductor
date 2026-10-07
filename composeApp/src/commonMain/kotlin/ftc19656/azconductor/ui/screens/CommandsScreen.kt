@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
@@ -39,7 +38,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import azconductor.composeapp.generated.resources.FTC_MAP26
+import azconductor.composeapp.generated.resources.FTC_MAP27
 import azconductor.composeapp.generated.resources.Res
 import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.FieldConfig
@@ -54,6 +53,8 @@ import ftc19656.azconductor.io.network.OpModeDescriptorDto
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.viewmodel.CommandsViewModel
+import ftc19656.azconductor.ui.components.AppDestination
+import ftc19656.azconductor.ui.components.AppNavigationDrawer
 import ftc19656.azconductor.ui.components.RobotComponent
 import ftc19656.azconductor.ui.coerceInDp
 import ftc19656.azconductor.ui.responsiveLayout
@@ -67,9 +68,11 @@ import kotlin.time.TimeSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommandsScreen(syncManager: SyncManager, onNavigateBack: () -> Unit) {
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    var selectedDrawerItem by remember { mutableStateOf("运行") }
+fun CommandsScreen(
+    syncManager: SyncManager,
+    selectedDestination: AppDestination,
+    onNavigate: (AppDestination) -> Unit,
+) {
     val scope = rememberCoroutineScope()
 
     // ---- Commands-scoped ViewModel (robot path list) ----
@@ -105,42 +108,10 @@ fun CommandsScreen(syncManager: SyncManager, onNavigateBack: () -> Unit) {
     }
 
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "导航",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp))
-                Spacer(modifier = Modifier.height(8.dp))
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-                    label = { Text("路径") },
-                    selected = selectedDrawerItem == "路径",
-                    onClick = {
-                        selectedDrawerItem = "路径"
-                        scope.launch { drawerState.close() }
-                        onNavigateBack()
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                    label = { Text("运行") },
-                    selected = selectedDrawerItem == "运行",
-                    onClick = {
-                        selectedDrawerItem = "运行"
-                        scope.launch { drawerState.close() }
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-            }
-        }
-    ) {
+    AppNavigationDrawer(
+        selected = selectedDestination,
+        onNavigate = onNavigate
+    ) { openDrawer ->
         Scaffold { paddingValues ->
             BoxWithConstraints(
                 modifier = Modifier
@@ -214,7 +185,7 @@ fun CommandsScreen(syncManager: SyncManager, onNavigateBack: () -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 IconButton(
-                                    onClick = { scope.launch { drawerState.open() } },
+                                    onClick = openDrawer,
                                     modifier = Modifier.size(36.dp)
                                 ) {
                                     Icon(
@@ -401,7 +372,7 @@ private fun RunFieldMap(
                 .onSizeChanged(onMapPixelSizeChanged)
         ) {
             Image(
-                painter = painterResource(Res.drawable.FTC_MAP26),
+                painter = painterResource(Res.drawable.FTC_MAP27),
                 contentDescription = "场地地图",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.matchParentSize()

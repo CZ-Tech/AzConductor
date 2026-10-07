@@ -10,7 +10,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,12 +27,18 @@ import androidx.compose.ui.zIndex
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.route.viewmodel.RouteConnector
+import ftc19656.azconductor.ui.components.AppDestination
+import ftc19656.azconductor.ui.components.AppNavigationDrawer
 import ftc19656.azconductor.ui.responsiveLayout
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigateToCommands: () -> Unit = {}) {
+fun HomeScreen(
+    route: RouteConnector,
+    selectedDestination: AppDestination,
+    onNavigate: (AppDestination) -> Unit,
+    onNavigateToPlanner: () -> Unit,
+) {
     val pv by route.pathVersion.collectAsState()
     var routeNames by remember(pv) { mutableStateOf(route.getRouteNames()) }
 
@@ -60,11 +65,6 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
     var itemRects by remember { mutableStateOf(mapOf<Int, Rect>()) }
 
-    // Drawer state
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    var selectedDrawerItem by remember { mutableStateOf("运行") }
-    val scope = rememberCoroutineScope()
-
     fun refreshRouteNames() {
         routeNames = route.getRouteNames()
     }
@@ -82,48 +82,16 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
             ?.key
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "导航",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp))
-                Spacer(modifier = Modifier.height(8.dp))
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-                    label = { Text("路径") },
-                    selected = selectedDrawerItem == "路径",
-                    onClick = {
-                        selectedDrawerItem = "路径"
-                        scope.launch { drawerState.close() }
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                    label = { Text("运行") },
-                    selected = selectedDrawerItem == "运行",
-                    onClick = {
-                        selectedDrawerItem = "运行"
-                        scope.launch { drawerState.close() }
-                        onNavigateToCommands()
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-            }
-        }
-    ) {
+    AppNavigationDrawer(
+        selected = selectedDestination,
+        onNavigate = onNavigate
+    ) { openDrawer ->
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = { Text("路径管理") },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        IconButton(onClick = openDrawer) {
                             Icon(Icons.Default.Menu, contentDescription = "菜单")
                         }
                     }

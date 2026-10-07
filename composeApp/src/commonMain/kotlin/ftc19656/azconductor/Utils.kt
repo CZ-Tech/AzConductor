@@ -29,3 +29,16 @@ fun Double.toFixed(decimals: Int): String {
 }
 
 fun Float.toTimeString(): String = this.toDouble().toFixed(1) + "s"
+
+/**
+ * 播放倍速的显示文本，例如 `1x`、`0.5x`、`1.5x`。
+ * 整数倍速不显示小数位，非整数倍速最多保留两位小数并去掉末尾的 0。
+ */
+fun Float.toSpeedLabel(): String {
+    val text = if (this == toInt().toFloat()) {
+        toInt().toString()
+    } else {
+        toDouble().toFixed(2).trimEnd('0').trimEnd('.')
+    }
+    return text + "x"
+}

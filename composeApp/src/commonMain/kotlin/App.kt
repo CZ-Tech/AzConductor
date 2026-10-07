@@ -12,10 +12,20 @@ import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.ui.dialogs.SyncConflictDialog
+import ftc19656.azconductor.ui.components.AppDestination
 import ftc19656.azconductor.ui.screens.CommandsScreen
 import ftc19656.azconductor.ui.screens.HomeScreen
 import ftc19656.azconductor.ui.screens.PathPlannerScreen
 import ftc19656.azconductor.ui.theme.AzConductorTheme
+
+/**
+ * 导航抽屉目的地与页面路由之间的唯一映射。
+ * 新增目的地时 `when` 必须补全，避免路由字符串散落在多个页面里。
+ */
+private fun AppDestination.toRoute(): String = when (this) {
+    AppDestination.Paths -> "home"
+    AppDestination.Run -> "commands"
+}
 
 @Composable
 @Preview
@@ -23,6 +33,12 @@ fun App(route: RouteConnector = RouteConnector()) {
     var currentScreen by remember { mutableStateOf("home") }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var dialogIpInput by remember { mutableStateOf(AppContext.syncManager.robotIp) }
+
+    // 由当前路由反推抽屉选中项，页面不再各自维护 selectedDrawerItem。
+    val currentDestination = when (currentScreen) {
+        "commands" -> AppDestination.Run
+        else -> AppDestination.Paths
+    }
 
     val connectionStatus by AppContext.syncManager.connectionStatus.collectAsState()
     val syncConflict by AppContext.syncManager.conflictState.collectAsState()
@@ -46,8 +62,9 @@ fun App(route: RouteConnector = RouteConnector()) {
                 when (currentScreen) {
                     "home" -> HomeScreen(
                         route = route,
-                        onNavigateToPlanner = { currentScreen = "pathPlanner" },
-                        onNavigateToCommands = { currentScreen = "commands" }
+                        selectedDestination = currentDestination,
+                        onNavigate = { currentScreen = it.toRoute() },
+                        onNavigateToPlanner = { currentScreen = "pathPlanner" }
                     )
                     "pathPlanner" -> PathPlannerScreen(
                         route,
@@ -55,7 +72,8 @@ fun App(route: RouteConnector = RouteConnector()) {
                     )
                     "commands" -> CommandsScreen(
                         syncManager = AppContext.syncManager,
-                        onNavigateBack = { currentScreen = "home" }
+                        selectedDestination = currentDestination,
+                        onNavigate = { currentScreen = it.toRoute() },
                     )
                 }
             }
