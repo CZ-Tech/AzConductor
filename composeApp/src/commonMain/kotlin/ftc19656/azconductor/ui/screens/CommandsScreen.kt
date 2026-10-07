@@ -77,7 +77,6 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
     // ---- OpMode status & robot position (pushed by Network V2 SSE) ----
     val opModeStatus by commandsViewModel.opModeStatus.collectAsState()
     val robotPosition by commandsViewModel.robotPosition.collectAsState()
-    val executionStatus by commandsViewModel.executionStatus.collectAsState()
     val opModeActionStatus by commandsViewModel.opModeActionStatus.collectAsState()
 
     // 地图像素尺寸（onSizeChanged 回调更新）
@@ -90,14 +89,6 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
 
     LaunchedEffect(opModeStatus.activeOpModeName) {
         opModeStatus.activeOpModeName?.let { selectedOpMode = it }
-    }
-
-    // Auto-clear execution status after 5 seconds on success
-    LaunchedEffect(executionStatus) {
-        if (executionStatus != null && executionStatus != "正在执行...") {
-            delay(5000)
-            commandsViewModel.clearExecutionStatus()
-        }
     }
 
     LaunchedEffect(opModeActionStatus) {
@@ -173,38 +164,49 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
                                 .padding(horizontal = 4.dp, vertical = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(
-                                onClick = { scope.launch { drawerState.open() } },
-                                modifier = Modifier.size(36.dp)
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    Icons.Default.Menu,
-                                    contentDescription = "菜单",
-                                    modifier = Modifier.size(20.dp)
+                                IconButton(
+                                    onClick = { scope.launch { drawerState.open() } },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Menu,
+                                        contentDescription = "菜单",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                OpModeLifecycleControls(
+                                    status = opModeStatus,
+                                    opModes = opModes,
+                                    selectedName = selectedOpMode,
+                                    actionStatus = opModeActionStatus,
+                                    onSelected = { selectedOpMode = it },
+                                    onInit = {
+                                        scope.launch { commandsViewModel.initOpMode(selectedOpMode) }
+                                    },
+                                    onStart = {
+                                        scope.launch { commandsViewModel.startOpMode() }
+                                    },
+                                    onStop = {
+                                        scope.launch { commandsViewModel.stopOpMode() }
+                                    },
+                                    modifier = Modifier
                                 )
                             }
 
-                            OpModeLifecycleControls(
-                                status = opModeStatus,
-                                opModes = opModes,
-                                selectedName = selectedOpMode,
-                                actionStatus = opModeActionStatus,
-                                onSelected = { selectedOpMode = it },
-                                onInit = {
-                                    scope.launch { commandsViewModel.initOpMode(selectedOpMode) }
-                                },
-                                onStart = {
-                                    scope.launch { commandsViewModel.startOpMode() }
-                                },
-                                onStop = {
-                                    scope.launch { commandsViewModel.stopOpMode() }
-                                },
-                                modifier = Modifier
+                            PositionReadout(
+                                robotPosition = robotPosition,
+                                modifier = Modifier.padding(start = 10.dp, end = 4.dp)
                             )
                         }
                     }
@@ -228,11 +230,6 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                         FieldConfig.CANVAS_LOGICAL_WIDTH /
                                             FieldConfig.CANVAS_LOGICAL_HEIGHT
                                     )
-                            )
-                            BottomInfoBar(
-                                robotPosition = robotPosition,
-                                executionStatus = executionStatus,
-                                modifier = Modifier.fillMaxWidth()
                             )
                             WaypointCommandSidebar(
                                 waypoints = editableWaypoints,
@@ -318,11 +315,6 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                     )
                                 }
 
-                                BottomInfoBar(
-                                    robotPosition = robotPosition,
-                                    executionStatus = executionStatus,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
                             }
 
                             if (responsive.expanded) {
@@ -651,66 +643,44 @@ private fun OpModeLifecycleControls(
     }
 }
 
-/**
- * Bottom bar showing robot position readout and execution status feedback.
- */
 @Composable
-private fun BottomInfoBar(
+private fun PositionReadout(
     robotPosition: RobotPositionResponse?,
-    executionStatus: String?,
-    modifier: Modifier = Modifier
-    ) {
-        Row(
-            modifier = modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // --- Robot position readout ---
         if (robotPosition != null && robotPosition.status == "ok") {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     "X: ${robotPosition.x.toFixed(1)}",
-                    color = Color.White,
-                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     "Y: ${robotPosition.y.toFixed(1)}",
-                    color = Color.White,
-                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     "H: ${robotPosition.heading.toFixed(1)}°",
-                    color = Color.White,
-                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
         } else {
             Text(
                 "位置: --",
-                color = Color.White.copy(alpha = 0.5f),
-                fontSize = 12.sp
-            )
-        }
-
-        // --- Execution status feedback ---
-        if (executionStatus != null) {
-            val statusColor = when {
-                executionStatus.contains("失败") -> Color(0xFFFF5252)
-                executionStatus == "正在执行..." -> Color(0xFF2196F3)
-                else -> Color(0xFF4CAF50)
-            }
-            Text(
-                executionStatus,
-                color = statusColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp
             )
         }
     }
