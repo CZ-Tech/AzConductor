@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -17,7 +18,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,29 +71,20 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
 
     // ---- Commands-scoped ViewModel (robot path list) ----
     val commandsViewModel = remember { CommandsViewModel(syncManager) }
-    val robotPaths by commandsViewModel.robotPaths.collectAsState()
     val opModes by commandsViewModel.opModes.collectAsState()
-    var selectedRobotPath by remember { mutableStateOf("") }
     var selectedOpMode by remember { mutableStateOf("") }
-    var pathDropdownExpanded by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
 
     // ---- OpMode status & robot position (pushed by Network V2 SSE) ----
     val opModeStatus by commandsViewModel.opModeStatus.collectAsState()
     val robotPosition by commandsViewModel.robotPosition.collectAsState()
     val executionStatus by commandsViewModel.executionStatus.collectAsState()
     val opModeActionStatus by commandsViewModel.opModeActionStatus.collectAsState()
-    val fetchedWaypoints by commandsViewModel.fetchedWaypoints.collectAsState()
 
     // 地图像素尺寸（onSizeChanged 回调更新）
     var mapPixelSize by remember { mutableStateOf(IntSize.Zero) }
 
     // 可编辑的本地路径点副本，切换路径时重置
     val editableWaypoints = remember { mutableStateListOf<ControlNode>() }
-    LaunchedEffect(selectedRobotPath, fetchedWaypoints) {
-        editableWaypoints.clear()
-        editableWaypoints.addAll(fetchedWaypoints)
-    }
 
     val availableCommands by AppContext.syncManager.availableCommands.collectAsState()
 
@@ -117,10 +108,6 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
         }
     }
 
-    val filteredPaths = remember(robotPaths, searchQuery) {
-        if (searchQuery.isBlank()) robotPaths
-        else robotPaths.filter { it.contains(searchQuery, ignoreCase = true) }
-    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -172,32 +159,6 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                 val chartWidth = (maxWidth * 0.24f).coerceInDp(250.dp, 360.dp)
 
                 val errorHistory = remember { mutableStateListOf<Double>() }
-                val routeCore = remember(fetchedWaypoints) {
-                    RouteCore().apply { setWaypoints(fetchedWaypoints) }
-                }
-                var startTime by remember { mutableStateOf<kotlin.time.TimeMark?>(null) }
-
-                LaunchedEffect(opModeStatus.isExecuting) {
-                    if (opModeStatus.isExecuting) {
-                        errorHistory.clear()
-                        startTime = kotlin.time.TimeSource.Monotonic.markNow()
-                    } else if (startTime != null) {
-                        delay(30000)
-                        startTime = null
-                    }
-                }
-                LaunchedEffect(Unit) {
-                    while (true) {
-                        val s = startTime ?: run { delay(250); continue }
-                        delay(250)
-                        val elapsed = s.elapsedNow().inWholeSeconds.toDouble()
-                        val pos = robotPosition ?: continue
-                        val expected = routeCore.getPointAtTime(elapsed) ?: continue
-                        val dx = pos.x - expected.x
-                        val dy = pos.y - expected.y
-                        errorHistory.add(kotlin.math.sqrt(dx * dx + dy * dy))
-                    }
-                }
 
                 Column(
                     modifier = Modifier
@@ -207,24 +168,24 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                 ) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        FlowRow(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 6.dp, vertical = 5.dp),
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            itemVerticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(
                                 onClick = { scope.launch { drawerState.open() } },
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(
                                     Icons.Default.Menu,
                                     contentDescription = "菜单",
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
@@ -243,100 +204,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                 onStop = {
                                     scope.launch { commandsViewModel.stopOpMode() }
                                 },
-                                modifier = Modifier.width(
-                                    if (responsive.compact) 280.dp else 330.dp
-                                )
-                            )
-
-                            ExposedDropdownMenuBox(
-                                expanded = pathDropdownExpanded,
-                                onExpandedChange = { pathDropdownExpanded = it }
-                            ) {
-                                OutlinedTextField(
-                                    value = searchQuery,
-                                    onValueChange = {
-                                        searchQuery = it
-                                        pathDropdownExpanded = true
-                                    },
-                                    placeholder = {
-                                        Text("选择路径", style = MaterialTheme.typography.bodyMedium)
-                                    },
-                                    singleLine = true,
-                                    trailingIcon = {
-                                        ExposedDropdownMenuDefaults.TrailingIcon(
-                                            expanded = pathDropdownExpanded
-                                        )
-                                    },
-                                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                        focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    textStyle = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier
-                                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
-                                        .width(if (responsive.compact) 210.dp else 190.dp)
-                                )
-
-                                ExposedDropdownMenu(
-                                    expanded = pathDropdownExpanded,
-                                    onDismissRequest = { pathDropdownExpanded = false }
-                                ) {
-                                    if (filteredPaths.isEmpty()) {
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    "无可用路径",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            },
-                                            onClick = { pathDropdownExpanded = false },
-                                            enabled = false
-                                        )
-                                    } else {
-                                        filteredPaths.forEach { pathName ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        pathName,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedRobotPath = pathName
-                                                    searchQuery = pathName
-                                                    pathDropdownExpanded = false
-                                                    scope.launch {
-                                                        commandsViewModel.fetchPathData(pathName)
-                                                    }
-                                                },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        Icons.AutoMirrored.Filled.List,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            OpModeStatusBadge(
-                                status = opModeStatus,
-                                selectedPath = selectedRobotPath,
-                                onExecute = {
-                                    scope.launch {
-                                        commandsViewModel.executeSavedPath(selectedRobotPath)
-                                    }
-                                }
+                                modifier = Modifier
                             )
                         }
                     }
@@ -384,7 +252,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                             )
                             ErrorTimeChart(
                                 xHistory = errorHistory,
-                                showLine = startTime == null && errorHistory.isNotEmpty(),
+                                showLine = errorHistory.isNotEmpty(),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(220.dp)
@@ -440,7 +308,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                 if (!responsive.expanded) {
                                     ErrorTimeChart(
                                         xHistory = errorHistory,
-                                        showLine = startTime == null && errorHistory.isNotEmpty(),
+                                        showLine = errorHistory.isNotEmpty(),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(
@@ -466,7 +334,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                 ) {
                                     ErrorTimeChart(
                                         xHistory = errorHistory,
-                                        showLine = startTime == null && errorHistory.isNotEmpty(),
+                                        showLine = errorHistory.isNotEmpty(),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(
@@ -646,203 +514,139 @@ private fun OpModeLifecycleControls(
         else -> "STOPPED"
     }
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = modifier,
     ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = {
+                if (status.controllerAvailable) expanded = it
+            },
         ) {
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = {
-                    if (status.controllerAvailable) expanded = it
+            OutlinedTextField(
+                value = selectedName,
+                onValueChange = {},
+                readOnly = true,
+                enabled = status.controllerAvailable,
+                placeholder = {
+                    Text(
+                        "选择 Autonomous",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                    .width(220.dp),
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
             ) {
-                OutlinedTextField(
-                    value = selectedName,
-                    onValueChange = {},
-                    readOnly = true,
-                    enabled = status.controllerAvailable,
-                    placeholder = { Text("选择 Autonomous", fontSize = 11.sp) },
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                    },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier
-                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                        .width(150.dp),
-                )
-                ExposedDropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                ) {
-                    if (opModes.isEmpty()) {
+                if (opModes.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("无可用 Autonomous") },
+                        enabled = false,
+                        onClick = {},
+                    )
+                } else {
+                    opModes.forEach { opMode ->
                         DropdownMenuItem(
-                            text = { Text("无可用 Autonomous") },
-                            enabled = false,
-                            onClick = {},
-                        )
-                    } else {
-                        opModes.forEach { opMode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(opMode.name)
-                                        if (opMode.group.isNotBlank()) {
-                                            Text(
-                                                opMode.group,
-                                                fontSize = 9.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
+                            text = {
+                                Column {
+                                    Text(opMode.name)
+                                    if (opMode.group.isNotBlank()) {
+                                        Text(
+                                            opMode.group,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
                                     }
-                                },
-                                onClick = {
-                                    onSelected(opMode.name)
-                                    expanded = false
-                                },
-                            )
-                        }
+                                }
+                            },
+                            onClick = {
+                                onSelected(opMode.name)
+                                expanded = false
+                            },
+                        )
                     }
                 }
             }
-
-            Button(
-                onClick = onInit,
-                enabled = status.controllerAvailable
-                    && status.phase == "STOPPED"
-                    && selectedIsAutonomous,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(28.dp),
-            ) {
-                Text("INIT", fontSize = 10.sp)
-            }
-
-            Button(
-                onClick = onStart,
-                enabled = status.controllerAvailable
-                    && status.phase == "INIT"
-                    && activeIsAutonomous
-                    && status.activeOpModeName == selectedName,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(28.dp),
-            ) {
-                Text("START", fontSize = 10.sp)
-            }
-
-            Button(
-                onClick = onStop,
-                enabled = status.controllerAvailable
-                    && status.phase != "STOPPED"
-                    && activeIsAutonomous
-                    && status.activeOpModeName != null,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(28.dp),
-            ) {
-                Text("STOP", fontSize = 10.sp)
-            }
         }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Button(
+            onClick = onInit,
+            enabled = status.controllerAvailable
+                && status.phase == "STOPPED"
+                && selectedIsAutonomous,
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            modifier = Modifier.height(40.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(phaseColor.copy(alpha = 0.15f))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-            ) {
-                Icon(
-                    Icons.Default.Circle,
-                    contentDescription = null,
-                    tint = phaseColor,
-                    modifier = Modifier.size(8.dp),
-                )
-                Text(
-                    if (status.controllerAvailable) phaseText else "OpMode 控制不可用",
-                    color = phaseColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-            actionStatus?.let {
-                Text(
-                    it,
-                    fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text("INIT")
         }
-    }
-}
 
-/**
- * 就绪状态指示（上）+ 运行按钮（下），垂直排列在路径选择框右侧。
- */
-@Composable
-private fun OpModeStatusBadge(
-    status: OpModeStatusResponse,
-    selectedPath: String,
-    onExecute: () -> Unit
-) {
-    val canExecute = status.executionReady && selectedPath.isNotBlank()
+        Button(
+            onClick = onStart,
+            enabled = status.controllerAvailable
+                && status.phase == "INIT"
+                && activeIsAutonomous
+                && status.activeOpModeName == selectedName,
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            modifier = Modifier.height(40.dp),
+        ) {
+            Text("START")
+        }
 
-    // Path execution status is deliberately separate from FTC OpMode lifecycle.
-    val (chipColor, chipText) = when {
-        status.isExecuting -> Color(0xFF2196F3) to "路径执行中"
-        status.executionReady -> Color(0xFF4CAF50) to "路径执行就绪"
-        else -> Color(0xFF9E9E9E) to "路径执行不可用"
-    }
+        Button(
+            onClick = onStop,
+            enabled = status.controllerAvailable
+                && status.phase != "STOPPED"
+                && activeIsAutonomous
+                && status.activeOpModeName != null,
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            modifier = Modifier.height(40.dp),
+        ) {
+            Text("STOP")
+        }
 
-    Column(
-        horizontalAlignment = Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        // 就绪状态指示
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
-                .background(chipColor.copy(alpha = 0.15f))
-                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .background(phaseColor.copy(alpha = 0.15f))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             Icon(
                 Icons.Default.Circle,
                 contentDescription = null,
-                tint = chipColor,
-                modifier = Modifier.size(8.dp)
+                tint = phaseColor,
+                modifier = Modifier.size(8.dp),
             )
             Text(
-                chipText,
-                color = chipColor,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
+                if (status.controllerAvailable) phaseText else "OpMode 控制不可用",
+                color = phaseColor,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
             )
         }
 
-        // 运行按钮
-        Button(
-            onClick = onExecute,
-            enabled = canExecute,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-            modifier = Modifier.height(28.dp)
-        ) {
-            Icon(
-                Icons.Default.PlayArrow,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp)
+        actionStatus?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(2.dp))
-            Text("运行", fontSize = 11.sp)
         }
     }
 }
