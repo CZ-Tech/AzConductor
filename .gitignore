@@ -18,6 +18,8 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
 web_deploy/
+.stfolder/
+.stversions/
 *.sync-conflict-*
 *.class
 .env
