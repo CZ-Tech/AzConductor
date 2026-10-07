@@ -2,6 +2,7 @@ package ftc19656.azconductor.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,6 +62,9 @@ import ftc19656.azconductor.toFixed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
+import kotlin.math.ceil
+import kotlin.math.hypot
+import kotlin.time.TimeSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,8 +86,14 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
     // 地图像素尺寸（onSizeChanged 回调更新）
     var mapPixelSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // 可编辑的本地路径点副本，切换路径时重置
+    val routeWaypoints by route.waypoints.collectAsState()
+
+    // 运行页使用当前本地路径作为参考轨迹；机器人只需回传实际坐标。
     val editableWaypoints = remember { mutableStateListOf<ControlNode>() }
+    LaunchedEffect(routeWaypoints) {
+        editableWaypoints.clear()
+        editableWaypoints.addAll(routeWaypoints)
+    }
 
     val availableCommands by AppContext.syncManager.availableCommands.collectAsState()
 
@@ -149,7 +159,36 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                 val sideWidth = (maxWidth * 0.24f).coerceInDp(230.dp, 330.dp)
                 val chartWidth = (maxWidth * 0.24f).coerceInDp(250.dp, 360.dp)
 
-                val errorHistory = remember { mutableStateListOf<Double>() }
+                val errorHistory = remember { mutableStateListOf<ErrorSample>() }
+                val referenceRoute = remember(editableWaypoints.toList()) {
+                    RouteCore().apply { setWaypoints(editableWaypoints) }
+                }
+                val latestRobotPosition by rememberUpdatedState(robotPosition)
+
+                LaunchedEffect(opModeStatus.phase, referenceRoute) {
+                    if (opModeStatus.phase != "RUNNING" || referenceRoute.waypoints.size < 2) {
+                        return@LaunchedEffect
+                    }
+
+                    errorHistory.clear()
+                    val startedAt = TimeSource.Monotonic.markNow()
+                    while (true) {
+                        val position = latestRobotPosition
+                        if (position != null && position.status == "ok") {
+                            errorHistory.add(
+                                ErrorSample(
+                                    seconds = startedAt.elapsedNow().inWholeMilliseconds / 1000.0,
+                                    error = nearestPathError(
+                                        route = referenceRoute,
+                                        x = position.x,
+                                        y = position.y,
+                                    ),
+                                )
+                            )
+                        }
+                        delay(100)
+                    }
+                }
 
                 Column(
                     modifier = Modifier
@@ -248,8 +287,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                     .height(190.dp)
                             )
                             ErrorTimeChart(
-                                xHistory = errorHistory,
-                                showLine = errorHistory.isNotEmpty(),
+                                samples = errorHistory,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(220.dp)
@@ -304,8 +342,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
 
                                 if (!responsive.expanded) {
                                     ErrorTimeChart(
-                                        xHistory = errorHistory,
-                                        showLine = errorHistory.isNotEmpty(),
+                                        samples = errorHistory,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(
@@ -325,8 +362,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                     verticalArrangement = Arrangement.Bottom
                                 ) {
                                     ErrorTimeChart(
-                                        xHistory = errorHistory,
-                                        showLine = errorHistory.isNotEmpty(),
+                                        samples = errorHistory,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(
@@ -517,27 +553,39 @@ private fun OpModeLifecycleControls(
                 if (status.controllerAvailable) expanded = it
             },
         ) {
-            OutlinedTextField(
-                value = selectedName,
-                onValueChange = {},
-                readOnly = true,
-                enabled = status.controllerAvailable,
-                placeholder = {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(7.dp),
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+                ),
+                modifier = Modifier
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                    .width(205.dp)
+                    .height(36.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 10.dp, end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        "选择 Autonomous",
+                        selectedName.ifBlank { "选择 Autonomous" },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (selectedName.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                },
-                trailingIcon = {
                     ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                    .width(220.dp),
-            )
+                }
+            }
             ExposedDropdownMenu(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
@@ -578,10 +626,10 @@ private fun OpModeLifecycleControls(
             enabled = status.controllerAvailable
                 && status.phase == "STOPPED"
                 && selectedIsAutonomous,
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            modifier = Modifier.height(40.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp),
+            modifier = Modifier.height(34.dp),
         ) {
-            Text("INIT")
+            Text("INIT", style = MaterialTheme.typography.labelMedium)
         }
 
         Button(
@@ -590,10 +638,10 @@ private fun OpModeLifecycleControls(
                 && status.phase == "INIT"
                 && activeIsAutonomous
                 && status.activeOpModeName == selectedName,
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            modifier = Modifier.height(40.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp),
+            modifier = Modifier.height(34.dp),
         ) {
-            Text("START")
+            Text("START", style = MaterialTheme.typography.labelMedium)
         }
 
         Button(
@@ -602,10 +650,10 @@ private fun OpModeLifecycleControls(
                 && status.phase != "STOPPED"
                 && activeIsAutonomous
                 && status.activeOpModeName != null,
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            modifier = Modifier.height(40.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp),
+            modifier = Modifier.height(34.dp),
         ) {
-            Text("STOP")
+            Text("STOP", style = MaterialTheme.typography.labelMedium)
         }
 
         Row(
@@ -614,7 +662,7 @@ private fun OpModeLifecycleControls(
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
                 .background(phaseColor.copy(alpha = 0.15f))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 3.dp),
         ) {
             Icon(
                 Icons.Default.Circle,
@@ -652,7 +700,7 @@ private fun PositionReadout(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (robotPosition != null && robotPosition.status == "ok") {
@@ -959,15 +1007,49 @@ private fun isValidParamValue(value: String, typeName: String): Boolean {
     }
 }
 
+private data class ErrorSample(
+    val seconds: Double,
+    val error: Double,
+)
+
+private fun nearestPathError(
+    route: RouteCore,
+    x: Double,
+    y: Double,
+): Double {
+    if (route.waypoints.isEmpty()) return 0.0
+    if (route.waypoints.size == 1 || route.totalTime <= 0.0) {
+        val p = route.waypoints.first()
+        return hypot(x - p.x, y - p.y)
+    }
+
+    var minimum = Double.POSITIVE_INFINITY
+    val samples = 360
+    for (i in 0..samples) {
+        val t = route.totalTime * i / samples.toDouble()
+        val point = route.getPointAtTime(t) ?: continue
+        val distance = hypot(x - point.x, y - point.y)
+        if (distance < minimum) minimum = distance
+    }
+    return if (minimum.isFinite()) minimum else 0.0
+}
+
 @Composable
-private fun ErrorTimeChart(xHistory: List<Double>, showLine: Boolean = false, modifier: Modifier = Modifier) {
+private fun ErrorTimeChart(
+    samples: List<ErrorSample>,
+    modifier: Modifier = Modifier,
+) {
     val textColor = MaterialTheme.colorScheme.onSurface
     val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
     val axisColor = textColor.copy(alpha = 0.6f)
     val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
 
-    val yLabels = listOf("5", "4", "3", "2", "1", "0")
-    val xLabels = listOf("0", "5", "10", "15", "20", "25", "30")
+    val latestSeconds = samples.lastOrNull()?.seconds ?: 0.0
+    val xMax = maxOf(30.0, ceil(latestSeconds / 5.0) * 5.0)
+    val maxError = samples.maxOfOrNull { it.error } ?: 0.0
+    val yMax = maxOf(5.0, ceil(maxError))
+    val xLabels = (0..6).map { xMax * it / 6.0 }
+    val yLabels = (0..5).map { yMax * (5 - it) / 5.0 }
 
     Surface(
         modifier = modifier,
@@ -977,112 +1059,102 @@ private fun ErrorTimeChart(xHistory: List<Double>, showLine: Boolean = false, mo
         Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
             Text(
                 text = "路径误差(in) — 时间(s)",
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = textColor
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            Row(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(28.dp)
-                        .padding(bottom = 16.dp, top = 2.dp)
-                ) {
-                    yLabels.forEach { label ->
-                        Text(
-                            text = label,
+            Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(34.dp)
+                            .padding(end = 4.dp)
+                    ) {
+                        yLabels.forEach { label ->
+                            Text(
+                                text = label.toInt().toString(),
+                                color = axisColor,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+
+                    Canvas(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        val w = size.width
+                        val h = size.height
+
+                        for (i in 0..10) {
+                            val y = h * i / 10f
+                            drawLine(
+                                color = gridColor,
+                                start = Offset(0f, y),
+                                end = Offset(w, y),
+                                strokeWidth = 0.5f
+                            )
+                        }
+                        for (i in 0..12) {
+                            val x = w * i / 12f
+                            drawLine(
+                                color = gridColor,
+                                start = Offset(x, 0f),
+                                end = Offset(x, h),
+                                strokeWidth = 0.5f
+                            )
+                        }
+
+                        drawLine(
                             color = axisColor,
-                            fontSize = 8.sp
+                            start = Offset(0f, h),
+                            end = Offset(w, h),
+                            strokeWidth = 1f
                         )
+                        drawLine(
+                            color = axisColor,
+                            start = Offset(0f, 0f),
+                            end = Offset(0f, h),
+                            strokeWidth = 1f
+                        )
+
+                        if (samples.size >= 2) {
+                            val points = samples.map { sample ->
+                                val px = (sample.seconds / xMax * w).toFloat().coerceIn(0f, w)
+                                val py = (h - sample.error / yMax * h).toFloat().coerceIn(0f, h)
+                                Offset(px, py)
+                            }
+                            for (i in 0 until points.lastIndex) {
+                                drawLine(
+                                    color = Color(0xFF4FC3F7),
+                                    start = points[i],
+                                    end = points[i + 1],
+                                    strokeWidth = 2f,
+                                    cap = StrokeCap.Round,
+                                )
+                            }
+                        }
                     }
                 }
 
-                Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    ) {
-                        Canvas(modifier = Modifier.matchParentSize()) {
-                            val w = size.width
-                            val h = size.height
-
-                            // horizontal grid lines (0.2in intervals)
-                            val ySteps = 30
-                            for (i in 0..ySteps) {
-                                val y = h * i / ySteps
-                                drawLine(
-                                    color = gridColor,
-                                    start = Offset(0f, y),
-                                    end = Offset(w, y),
-                                    strokeWidth = 0.5f
-                                )
-                            }
-
-                            // vertical grid lines (30s intervals)
-                            val xSteps = 120
-                            for (i in 0..xSteps) {
-                                val x = w * i / xSteps
-                                drawLine(
-                                    color = gridColor,
-                                    start = Offset(x, 0f),
-                                    end = Offset(x, h),
-                                    strokeWidth = 0.5f
-                                )
-                            }
-
-                            // X axis
-                            drawLine(
-                                color = axisColor,
-                                start = Offset(0f, h),
-                                end = Offset(w, h),
-                                strokeWidth = 1f
-                            )
-
-                            // Y axis
-                            drawLine(
-                                color = axisColor,
-                                start = Offset(0f, 0f),
-                                end = Offset(0f, h),
-                                strokeWidth = 1f
-                            )
-
-                            // data line (only shown after collection is complete)
-                            if (showLine && xHistory.size >= 2) {
-                                val points = xHistory.mapIndexed { i, v ->
-                                    val px = w * i / (xHistory.size - 1).coerceAtLeast(1)
-                                    val py = (h - h * (v.toFloat() / 5f)).coerceIn(0f, h)
-                                    Offset(px, py)
-                                }
-                                for (i in 0 until points.size - 1) {
-                                    drawLine(
-                                        color = androidx.compose.ui.graphics.Color(0xFF4FC3F7),
-                                        start = points[i],
-                                        end = points[i + 1],
-                                        strokeWidth = 2f
-                                    )
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            xLabels.forEach { label ->
-                                Text(
-                                    text = label,
-                                    color = axisColor,
-                                    fontSize = 8.sp
-                                )
-                            }
-                        }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 34.dp, top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    xLabels.forEach { label ->
+                        Text(
+                            text = label.toInt().toString(),
+                            color = axisColor,
+                            fontSize = 9.sp
+                        )
                     }
                 }
             }
