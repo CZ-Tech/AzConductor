@@ -54,7 +54,6 @@ import ftc19656.azconductor.io.network.OpModeDescriptorDto
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.viewmodel.CommandsViewModel
-import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.ui.components.RobotComponent
 import ftc19656.azconductor.ui.coerceInDp
 import ftc19656.azconductor.ui.responsiveLayout
@@ -68,7 +67,7 @@ import kotlin.time.TimeSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBack: () -> Unit) {
+fun CommandsScreen(syncManager: SyncManager, onNavigateBack: () -> Unit) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var selectedDrawerItem by remember { mutableStateOf("运行") }
     val scope = rememberCoroutineScope()
@@ -86,14 +85,10 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
     // 地图像素尺寸（onSizeChanged 回调更新）
     var mapPixelSize by remember { mutableStateOf(IntSize.Zero) }
 
-    val routeWaypoints by route.waypoints.collectAsState()
-
-    // 运行页使用当前本地路径作为参考轨迹；机器人只需回传实际坐标。
+    // 运行页的路径必须来自当前 OpMode 的运行上下文。
+    // 现阶段通用 OpMode lifecycle API 尚未提供 route/plan snapshot，
+    // 因此这里保持为空，绝不复用路径编辑器当前选中的路径。
     val editableWaypoints = remember { mutableStateListOf<ControlNode>() }
-    LaunchedEffect(routeWaypoints) {
-        editableWaypoints.clear()
-        editableWaypoints.addAll(routeWaypoints)
-    }
 
     val availableCommands by AppContext.syncManager.availableCommands.collectAsState()
 
@@ -160,6 +155,11 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                 val chartWidth = (maxWidth * 0.24f).coerceInDp(250.dp, 360.dp)
 
                 val errorHistory = remember { mutableStateListOf<ErrorSample>() }
+                val routeContextMessage = when {
+                    !opModeStatus.controllerAvailable -> "未连接机器人"
+                    opModeStatus.phase == "STOPPED" -> "请选择并 INIT Autonomous"
+                    else -> "当前 OpMode 未提供路径数据"
+                }
                 val referenceRoute = remember(editableWaypoints.toList()) {
                     RouteCore().apply { setWaypoints(editableWaypoints) }
                 }
@@ -273,6 +273,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                             WaypointCommandSidebar(
                                 waypoints = editableWaypoints,
                                 availableCommands = availableCommands,
+                                emptyMessage = routeContextMessage,
                                 onWaypointUpdate = { index, newPoint ->
                                     editableWaypoints[index] = newPoint
                                 },
@@ -282,6 +283,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                             )
                             TaskListPanel(
                                 waypoints = editableWaypoints,
+                                emptyMessage = routeContextMessage,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(190.dp)
@@ -309,6 +311,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                 WaypointCommandSidebar(
                                     waypoints = editableWaypoints,
                                     availableCommands = availableCommands,
+                                    emptyMessage = routeContextMessage,
                                     onWaypointUpdate = { index, newPoint ->
                                         editableWaypoints[index] = newPoint
                                     },
@@ -318,6 +321,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                                 )
                                 TaskListPanel(
                                     waypoints = editableWaypoints,
+                                    emptyMessage = routeContextMessage,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .weight(0.38f)
@@ -737,6 +741,7 @@ private fun PositionReadout(
 @Composable
 private fun TaskListPanel(
     waypoints: List<ControlNode> = emptyList(),
+    emptyMessage: String = "暂无任务",
     modifier: Modifier = Modifier
 ) {
     val tasks = remember(waypoints) {
@@ -765,7 +770,7 @@ private fun TaskListPanel(
                 Spacer(modifier = Modifier.height(8.dp))
                 if (tasks.isEmpty()) {
                     Text(
-                        text = "暂无任务",
+                        text = if (waypoints.isEmpty()) emptyMessage else "暂无任务",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -790,6 +795,7 @@ private fun TaskListPanel(
 private fun WaypointCommandSidebar(
     waypoints: MutableList<ControlNode>,
     availableCommands: List<RobotCommandItem>,
+    emptyMessage: String,
     onWaypointUpdate: (Int, ControlNode) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -988,10 +994,17 @@ private fun WaypointCommandSidebar(
                         }
                     }
                 }
+                }
+            } else {
+                Text(
+                    text = emptyMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(4.dp)
+                )
             }
         }
     }
-}
 }
 
 private fun isValidParamValue(value: String, typeName: String): Boolean {

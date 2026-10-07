@@ -54,7 +54,6 @@ fun App(route: RouteConnector = RouteConnector()) {
                         onNavigateBack = { currentScreen = "home" }
                     )
                     "commands" -> CommandsScreen(
-                        route = route,
                         syncManager = AppContext.syncManager,
                         onNavigateBack = { currentScreen = "home" }
                     )
