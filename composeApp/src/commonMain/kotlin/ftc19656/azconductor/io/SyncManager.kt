@@ -4,7 +4,6 @@ import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.io.network.ApiResult
 import ftc19656.azconductor.io.network.ConfigRouteSyncBaselineStore
 import ftc19656.azconductor.io.network.LocalRouteRecord
-import ftc19656.azconductor.io.network.QueuedRequestResponse
 import ftc19656.azconductor.io.network.RobotConnection
 import ftc19656.azconductor.io.network.OpModeActionResponse
 import ftc19656.azconductor.io.network.OpModeDescriptorDto
@@ -235,18 +234,6 @@ class SyncManager(
         when (val result = connection.apiClient().getRoute(pathName)) {
             is ApiResult.Ok -> result.value.json
             else -> null
-        }
-
-    suspend fun executeSavedPath(pathName: String): ApiResult<QueuedRequestResponse> =
-        connection.apiClient().executeSavedPath(pathName)
-
-    suspend fun executeTempPath(jsonBody: String): ApiResult<QueuedRequestResponse> =
-        try {
-            connection.apiClient().executeInlinePath(
-                jsonConfig.parseToJsonElement(jsonBody)
-            )
-        } catch (t: Throwable) {
-            ApiResult.NetworkError("Invalid trajectory JSON", t)
         }
 
     suspend fun listOpModes(): ApiResult<List<OpModeDescriptorDto>> =

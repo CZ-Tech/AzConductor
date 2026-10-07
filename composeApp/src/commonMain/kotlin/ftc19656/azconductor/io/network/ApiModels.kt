@@ -1,7 +1,6 @@
 package ftc19656.azconductor.io.network
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 
 @Serializable data class SessionOpenRequest(val client: String)
 @Serializable data class SessionOpenResponse(val token: String, val expiresInMs: Long)
@@ -19,18 +18,6 @@ import kotlinx.serialization.json.JsonElement
 )
 data class RobotRoutePayload(val name: String, val revision: Long, val json: String)
 @Serializable data class RouteWriteResponse(val name: String, val revision: Long)
-@Serializable data class ExecutionRequestDto(
-    val type: String,
-    val path: String? = null,
-    val trajectory: JsonElement? = null,
-)
-@Serializable data class QueuedRequestResponse(
-    val accepted: Boolean = true,
-    val requestId: Long = 0,
-    val state: String = "",
-    val dropped: Boolean = false,
-    val reason: String? = null,
-)
 @Serializable data class ExecutionSnapshotDto(
     val state: String,
     val requestId: Long = 0,

@@ -2,7 +2,6 @@ package ftc19656.azconductor.io.network
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 class RobotApiClient(
     robotIp: String,
@@ -83,26 +82,6 @@ class RobotApiClient(
 
     suspend fun executionState(): ApiResult<ExecutionSnapshotDto> =
         decode(request("GET", "/api/v2/execution"))
-
-    suspend fun executeSavedPath(pathName: String): ApiResult<QueuedRequestResponse> =
-        decode(
-            request(
-                "POST",
-                "/api/v2/executions",
-                json.encodeToString(ExecutionRequestDto(type = "saved", path = pathName)),
-            )
-        )
-
-    suspend fun executeInlinePath(trajectory: JsonElement): ApiResult<QueuedRequestResponse> =
-        decode(
-            request(
-                "POST",
-                "/api/v2/executions",
-                json.encodeToString(
-                    ExecutionRequestDto(type = "inline", trajectory = trajectory)
-                ),
-            )
-        )
 
     suspend fun commandCatalog(): ApiResult<CommandCatalogResponse> =
         decode(request("GET", "/api/v2/commands"))

@@ -6,7 +6,6 @@ import ftc19656.azconductor.io.OpModeStatusResponse
 import ftc19656.azconductor.io.RobotPositionResponse
 import ftc19656.azconductor.io.SyncManager
 import ftc19656.azconductor.io.network.ApiResult
-import ftc19656.azconductor.io.network.QueuedRequestResponse
 import ftc19656.azconductor.io.network.OpModeActionResponse
 import ftc19656.azconductor.io.network.OpModeDescriptorDto
 import ftc19656.azconductor.route.ControlNode
@@ -35,9 +34,6 @@ class CommandsViewModel(
     /** 60 Hz SSE robot pose stream. */
     val robotPosition: StateFlow<RobotPositionResponse?> get() = syncManager.robotPosition
 
-    private val _executionStatus = MutableStateFlow<String?>(null)
-    val executionStatus: StateFlow<String?> = _executionStatus.asStateFlow()
-
     private val _opModeActionStatus = MutableStateFlow<String?>(null)
     val opModeActionStatus: StateFlow<String?> = _opModeActionStatus.asStateFlow()
 
@@ -52,7 +48,10 @@ class CommandsViewModel(
             refreshOpModes()
             syncManager.routeRevision
                 .collect { revision ->
-                    if (revision > 0) refresh()
+                    if (revision > 0) {
+                        refresh()
+                        refreshOpModes()
+                    }
                 }
         }
         scope.launch {
@@ -122,52 +121,9 @@ class CommandsViewModel(
         )
     }
 
-    suspend fun executeSavedPath(pathName: String) {
-        _executionStatus.value = "正在执行..."
-        val result = try {
-            syncManager.executeSavedPath(pathName)
-        } catch (t: Throwable) {
-            ApiResult.NetworkError(t.message ?: "网络错误", t)
-        }
-        _executionStatus.value = executionMessage(result)
-    }
-
-    suspend fun executeTempPath(json: String) {
-        _executionStatus.value = "正在执行..."
-        val result = try {
-            syncManager.executeTempPath(json)
-        } catch (t: Throwable) {
-            ApiResult.NetworkError(t.message ?: "网络错误", t)
-        }
-        _executionStatus.value = executionMessage(result)
-    }
-
-    fun clearExecutionStatus() {
-        _executionStatus.value = null
-    }
-
     fun clearOpModeActionStatus() {
         _opModeActionStatus.value = null
     }
-
-    private fun executionMessage(result: ApiResult<QueuedRequestResponse>): String =
-        when (result) {
-            is ApiResult.Ok -> when {
-                result.value.accepted -> "执行已触发"
-                result.value.dropped &&
-                    result.value.reason == "no_active_opmode" ->
-                    "已丢弃：机器人没有活动 OpMode"
-                result.value.dropped -> "已丢弃"
-                else -> "未执行"
-            }
-
-            is ApiResult.HttpError -> {
-                val detail = result.message?.let { " - " + it } ?: ""
-                "执行失败：HTTP " + result.status + detail
-            }
-
-            is ApiResult.NetworkError -> "执行失败：" + result.message
-        }
 
     private fun opModeActionMessage(
         result: ApiResult<OpModeActionResponse>,

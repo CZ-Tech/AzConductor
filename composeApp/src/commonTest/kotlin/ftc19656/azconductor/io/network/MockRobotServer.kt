@@ -46,7 +46,6 @@ internal class MockRobotServer(
     var beforeNextPut: (() -> Unit)? = null
 
     private var routeChangeRevision = 1L
-    private var nextRequestId = 1L
     private var eventCallback: ((String, String, String?) -> Unit)? = null
     private var eventError: ((String) -> Unit)? = null
 
@@ -124,10 +123,6 @@ internal class MockRobotServer(
             return handleOpModeAction(path.removePrefix("/api/v2/opmode/"), body)
         }
 
-        if (path == "/api/v2/executions" && method == "POST") {
-            return handleExecution(body)
-        }
-
         if (path == "/api/v2/commands" && method == "GET") {
             return jsonResponse(200, "{\"revision\":1,\"commands\":[]}")
         }
@@ -136,7 +131,8 @@ internal class MockRobotServer(
             return jsonResponse(
                 200,
                 "{\"runtime\":{\"seq\":1,\"opModeActive\":" + opModeActive
-                    + ",\"opModeName\":" + if (opModeActive) "\"HttpAuto\"" else "null"
+                    + ",\"opModeName\":"
+                    + if (opModeActive) "\"" + escape(activeOpModeName.orEmpty()) + "\"" else "null"
                     + "},\"pose\":{\"seq\":1,\"tNanos\":1,\"x\":0,\"y\":0,\"heading\":0}}",
             )
         }
@@ -309,37 +305,6 @@ internal class MockRobotServer(
         }
 
         return jsonResponse(405, "{\"error\":\"method_not_allowed\"}")
-    }
-
-    private fun handleExecution(body: String?): NetworkHttpResponse {
-        val request = body?.let { json.decodeFromString<ExecutionRequestDto>(it) }
-            ?: return jsonResponse(400, "{\"error\":\"invalid_execution_type\"}")
-
-        if (request.type == "saved") {
-            val path = request.path.orEmpty()
-            if (!routes.containsKey(path)) {
-                return jsonResponse(404, "{\"error\":\"route_not_found\"}")
-            }
-        } else if (request.type == "inline") {
-            if (request.trajectory == null) {
-                return jsonResponse(400, "{\"error\":\"missing_trajectory\"}")
-            }
-        } else {
-            return jsonResponse(400, "{\"error\":\"invalid_execution_type\"}")
-        }
-
-        if (!opModeActive) {
-            return jsonResponse(
-                200,
-                "{\"accepted\":false,\"dropped\":true,\"reason\":\"no_active_opmode\"}",
-            )
-        }
-
-        val id = nextRequestId++
-        return jsonResponse(
-            202,
-            "{\"accepted\":true,\"requestId\":" + id + ",\"state\":\"QUEUED\"}",
-        )
     }
 
     private fun handleOpModeAction(action: String, body: String?): NetworkHttpResponse {

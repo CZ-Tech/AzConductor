@@ -132,62 +132,6 @@ class RobotApiClientContractTest {
     }
 
     @Test
-    fun inactiveExecutionResponseIsDecodedAsAcknowledgedDrop() = runTest {
-        val server = MockRobotServer(json)
-        server.seedRoute("Auto", "[]")
-        server.opModeActive = false
-        val client = connectedClient(server)
-
-        val result = client.executeSavedPath("Auto")
-
-        val ok = assertIs<ApiResult.Ok<QueuedRequestResponse>>(result)
-        assertFalse(ok.value.accepted)
-        assertTrue(ok.value.dropped)
-        assertEquals("no_active_opmode", ok.value.reason)
-        assertEquals(0, ok.value.requestId)
-    }
-
-    @Test
-    fun activeExecutionResponseIsDecodedAsQueued() = runTest {
-        val server = MockRobotServer(json)
-        server.seedRoute("Auto", "[]")
-        server.opModeActive = true
-        val client = connectedClient(server)
-
-        val result = client.executeSavedPath("Auto")
-
-        val ok = assertIs<ApiResult.Ok<QueuedRequestResponse>>(result)
-        assertTrue(ok.value.accepted)
-        assertFalse(ok.value.dropped)
-        assertEquals("QUEUED", ok.value.state)
-        assertEquals(1, ok.value.requestId)
-
-        val request = server.requests.last()
-        assertEquals("POST", request.method)
-        assertTrue(request.url.endsWith("/api/v2/executions"))
-        val decoded = json.decodeFromString<ExecutionRequestDto>(request.body!!)
-        assertEquals("saved", decoded.type)
-        assertEquals("Auto", decoded.path)
-    }
-
-    @Test
-    fun inlineExecutionSendsJsonTrajectoryNotQuotedJsonString() = runTest {
-        val server = MockRobotServer(json)
-        server.opModeActive = true
-        val client = connectedClient(server)
-        val trajectory = json.parseToJsonElement("[{\"x\":1,\"y\":2}]")
-
-        val result = client.executeInlinePath(trajectory)
-
-        assertIs<ApiResult.Ok<QueuedRequestResponse>>(result)
-        val decoded = json.decodeFromString<ExecutionRequestDto>(
-            server.requests.last().body!!
-        )
-        assertEquals("inline", decoded.type)
-        assertEquals(trajectory, decoded.trajectory)
-    }
-
-    @Test
     fun opModeLifecycleUsesRevisionGuardedV2Endpoints() = runTest {
         val server = MockRobotServer(json)
         val client = connectedClient(server)
