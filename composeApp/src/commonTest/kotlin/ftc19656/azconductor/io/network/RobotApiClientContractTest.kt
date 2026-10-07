@@ -188,6 +188,58 @@ class RobotApiClientContractTest {
     }
 
     @Test
+    fun opModeLifecycleUsesRevisionGuardedV2Endpoints() = runTest {
+        val server = MockRobotServer(json)
+        val client = connectedClient(server)
+
+        val listed = assertIs<ApiResult.Ok<OpModeListResponse>>(client.listOpModes())
+        assertEquals(listOf("Auto A", "Auto B"), listed.value.opModes.map { it.name })
+
+        val initial = assertIs<ApiResult.Ok<OpModeSnapshotDto>>(client.opModeState())
+        assertEquals("STOPPED", initial.value.phase)
+
+        assertIs<ApiResult.Ok<OpModeActionResponse>>(
+            client.initOpMode("Auto A", initial.value.revision)
+        )
+        val initRequest = server.requests.last()
+        assertTrue(initRequest.url.endsWith("/api/v2/opmode/init"))
+        assertEquals(
+            OpModeActionRequest("Auto A", initial.value.revision),
+            json.decodeFromString<OpModeActionRequest>(initRequest.body!!),
+        )
+
+        val initState = assertIs<ApiResult.Ok<OpModeSnapshotDto>>(client.opModeState())
+        assertEquals("INIT", initState.value.phase)
+        assertEquals("Auto A", initState.value.activeName)
+
+        assertIs<ApiResult.Ok<OpModeActionResponse>>(
+            client.startOpMode("Auto A", initState.value.revision)
+        )
+        val running = assertIs<ApiResult.Ok<OpModeSnapshotDto>>(client.opModeState())
+        assertEquals("RUNNING", running.value.phase)
+
+        assertIs<ApiResult.Ok<OpModeActionResponse>>(
+            client.stopOpMode("Auto A", running.value.revision)
+        )
+        val stopped = assertIs<ApiResult.Ok<OpModeSnapshotDto>>(client.opModeState())
+        assertEquals("STOPPED", stopped.value.phase)
+    }
+
+    @Test
+    fun staleOpModeRevisionRemainsConflictInsteadOfBeingRetried() = runTest {
+        val server = MockRobotServer(json)
+        val client = connectedClient(server)
+        val stale = server.opModeRevision
+        server.opModeRevision += 1
+
+        val result = client.initOpMode("Auto A", stale)
+
+        val error = assertIs<ApiResult.HttpError>(result)
+        assertEquals(409, error.status)
+        assertEquals("state_changed", error.code)
+    }
+
+    @Test
     fun sessionConflictPreserves409AndOwnerDetails() = runTest {
         val server = MockRobotServer(json)
         val first = RobotApiClient("192.168.43.1", json, transport = server)

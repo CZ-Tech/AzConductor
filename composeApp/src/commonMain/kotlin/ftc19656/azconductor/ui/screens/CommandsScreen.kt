@@ -47,6 +47,7 @@ import ftc19656.azconductor.io.OpModeStatusResponse
 import ftc19656.azconductor.io.RobotCommandItem
 import ftc19656.azconductor.io.RobotPositionResponse
 import ftc19656.azconductor.io.SyncManager
+import ftc19656.azconductor.io.network.OpModeDescriptorDto
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.viewmodel.CommandsViewModel
@@ -67,7 +68,9 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
     // ---- Commands-scoped ViewModel (robot path list) ----
     val commandsViewModel = remember { CommandsViewModel(syncManager) }
     val robotPaths by commandsViewModel.robotPaths.collectAsState()
+    val opModes by commandsViewModel.opModes.collectAsState()
     var selectedRobotPath by remember { mutableStateOf("") }
+    var selectedOpMode by remember { mutableStateOf("") }
     var pathDropdownExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -75,6 +78,7 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
     val opModeStatus by commandsViewModel.opModeStatus.collectAsState()
     val robotPosition by commandsViewModel.robotPosition.collectAsState()
     val executionStatus by commandsViewModel.executionStatus.collectAsState()
+    val opModeActionStatus by commandsViewModel.opModeActionStatus.collectAsState()
     val fetchedWaypoints by commandsViewModel.fetchedWaypoints.collectAsState()
 
     // 地图像素尺寸（onSizeChanged 回调更新）
@@ -89,11 +93,23 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
 
     val availableCommands by AppContext.syncManager.availableCommands.collectAsState()
 
+    LaunchedEffect(opModeStatus.activeOpModeName) {
+        opModeStatus.activeOpModeName?.let { selectedOpMode = it }
+    }
+
     // Auto-clear execution status after 5 seconds on success
     LaunchedEffect(executionStatus) {
         if (executionStatus != null && executionStatus != "正在执行...") {
             delay(5000)
             commandsViewModel.clearExecutionStatus()
+        }
+    }
+
+    LaunchedEffect(opModeActionStatus) {
+        val message = opModeActionStatus
+        if (message != null && !message.startsWith("正在")) {
+            delay(5000)
+            commandsViewModel.clearOpModeActionStatus()
         }
     }
 
@@ -216,6 +232,25 @@ fun CommandsScreen(route: RouteConnector, syncManager: SyncManager, onNavigateBa
                         }
 
                         Spacer(modifier = Modifier.width(4.dp))
+
+                        OpModeLifecycleControls(
+                            status = opModeStatus,
+                            opModes = opModes,
+                            selectedName = selectedOpMode,
+                            actionStatus = opModeActionStatus,
+                            onSelected = { selectedOpMode = it },
+                            onInit = {
+                                scope.launch { commandsViewModel.initOpMode(selectedOpMode) }
+                            },
+                            onStart = {
+                                scope.launch { commandsViewModel.startOpMode() }
+                            },
+                            onStop = {
+                                scope.launch { commandsViewModel.stopOpMode() }
+                            },
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
 
                         ExposedDropdownMenuBox(
                             expanded = pathDropdownExpanded,
@@ -473,6 +508,171 @@ private fun RobotPositionOverlay(
 
 // ---- Supporting composables ----
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OpModeLifecycleControls(
+    status: OpModeStatusResponse,
+    opModes: List<OpModeDescriptorDto>,
+    selectedName: String,
+    actionStatus: String?,
+    onSelected: (String) -> Unit,
+    onInit: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedIsAutonomous = opModes.any { it.name == selectedName }
+    val activeIsAutonomous = opModes.any { it.name == status.activeOpModeName }
+
+    val phaseColor = when (status.phase) {
+        "RUNNING" -> Color(0xFF4CAF50)
+        "INIT" -> Color(0xFFFFC107)
+        else -> Color(0xFF9E9E9E)
+    }
+    val phaseText = when (status.phase) {
+        "RUNNING" -> (status.activeOpModeName ?: "?") + " · RUNNING"
+        "INIT" -> (status.activeOpModeName ?: "?") + " · INIT"
+        else -> "STOPPED"
+    }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+        modifier = Modifier.width(310.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = {
+                    if (status.controllerAvailable) expanded = it
+                },
+            ) {
+                OutlinedTextField(
+                    value = selectedName,
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = status.controllerAvailable,
+                    placeholder = { Text("选择 Autonomous", fontSize = 11.sp) },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                    },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                        .width(150.dp),
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                ) {
+                    if (opModes.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("无可用 Autonomous") },
+                            enabled = false,
+                            onClick = {},
+                        )
+                    } else {
+                        opModes.forEach { opMode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(opMode.name)
+                                        if (opMode.group.isNotBlank()) {
+                                            Text(
+                                                opMode.group,
+                                                fontSize = 9.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    onSelected(opMode.name)
+                                    expanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = onInit,
+                enabled = status.controllerAvailable
+                    && status.phase == "STOPPED"
+                    && selectedIsAutonomous,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.height(28.dp),
+            ) {
+                Text("INIT", fontSize = 10.sp)
+            }
+
+            Button(
+                onClick = onStart,
+                enabled = status.controllerAvailable
+                    && status.phase == "INIT"
+                    && activeIsAutonomous
+                    && status.activeOpModeName == selectedName,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.height(28.dp),
+            ) {
+                Text("START", fontSize = 10.sp)
+            }
+
+            Button(
+                onClick = onStop,
+                enabled = status.controllerAvailable
+                    && status.phase != "STOPPED"
+                    && activeIsAutonomous
+                    && status.activeOpModeName != null,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.height(28.dp),
+            ) {
+                Text("STOP", fontSize = 10.sp)
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(phaseColor.copy(alpha = 0.15f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                Icon(
+                    Icons.Default.Circle,
+                    contentDescription = null,
+                    tint = phaseColor,
+                    modifier = Modifier.size(8.dp),
+                )
+                Text(
+                    if (status.controllerAvailable) phaseText else "OpMode 控制不可用",
+                    color = phaseColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            actionStatus?.let {
+                Text(
+                    it,
+                    fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 /**
  * 就绪状态指示（上）+ 运行按钮（下），垂直排列在路径选择框右侧。
  */
@@ -482,17 +682,13 @@ private fun OpModeStatusBadge(
     selectedPath: String,
     onExecute: () -> Unit
 ) {
-    val canExecute = status.executionReady && selectedPath.isNotBlank() && !status.isExecuting
+    val canExecute = status.executionReady && selectedPath.isNotBlank()
 
-    // Status indicator chip
+    // Path execution status is deliberately separate from FTC OpMode lifecycle.
     val (chipColor, chipText) = when {
-        status.isExecuting -> Color(0xFF2196F3) to "执行中..."
-        status.executionReady -> {
-            val name = status.activeOpModeName ?: "未知OpMode"
-            Color(0xFF4CAF50) to "$name 就绪"
-        }
-        status.opModeActive -> Color(0xFFFFC107) to "等待就绪..."
-        else -> Color(0xFF9E9E9E) to "无活跃 OpMode"
+        status.isExecuting -> Color(0xFF2196F3) to "路径执行中"
+        status.executionReady -> Color(0xFF4CAF50) to "路径执行就绪"
+        else -> Color(0xFF9E9E9E) to "路径执行不可用"
     }
 
     Column(

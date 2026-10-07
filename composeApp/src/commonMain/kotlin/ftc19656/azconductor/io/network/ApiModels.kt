@@ -60,3 +60,30 @@ data class RobotRoutePayload(val name: String, val revision: Long, val json: Str
 )
 @Serializable data class RevisionEvent(val revision: Long)
 @Serializable data class HeartbeatEvent(val t: Long)
+
+@Serializable data class OpModeDescriptorDto(
+    val name: String,
+    val group: String = "",
+)
+
+@Serializable data class OpModeListResponse(
+    val opModes: List<OpModeDescriptorDto> = emptyList(),
+)
+
+@Serializable data class OpModeSnapshotDto(
+    val revision: Long = 0,
+    val controllerAvailable: Boolean = false,
+    val phase: String = "STOPPED",
+    val activeName: String? = null,
+)
+
+@Serializable data class OpModeActionRequest(
+    val name: String,
+    val expectedRevision: Long,
+)
+
+@Serializable data class OpModeActionResponse(
+    val accepted: Boolean = false,
+    val action: String = "",
+    val name: String = "",
+)

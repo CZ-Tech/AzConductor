@@ -27,6 +27,13 @@ internal class MockRobotServer(
     val routes = linkedMapOf<String, Route>()
 
     var opModeActive: Boolean = false
+    var opModeRevision: Long = 1
+    var opModePhase: String = "STOPPED"
+    var activeOpModeName: String? = null
+    val opModes = mutableListOf(
+        OpModeDescriptorDto("Auto A", "Auto"),
+        OpModeDescriptorDto("Auto B", "Auto"),
+    )
     var sessionOwner: String? = null
         private set
     var sessionToken: String? = null
@@ -97,6 +104,24 @@ internal class MockRobotServer(
                 200,
                 "{\"state\":\"IDLE\",\"requestId\":0,\"subject\":null,\"revision\":1}",
             )
+        }
+
+        if (path == "/api/v2/opmodes" && method == "GET") {
+            return jsonResponse(
+                200,
+                json.encodeToString(OpModeListResponse(opModes.toList())),
+            )
+        }
+
+        if (path == "/api/v2/opmode" && method == "GET") {
+            return jsonResponse(
+                200,
+                json.encodeToString(opModeSnapshot()),
+            )
+        }
+
+        if (path.startsWith("/api/v2/opmode/") && method == "POST") {
+            return handleOpModeAction(path.removePrefix("/api/v2/opmode/"), body)
         }
 
         if (path == "/api/v2/executions" && method == "POST") {
@@ -316,6 +341,71 @@ internal class MockRobotServer(
             "{\"accepted\":true,\"requestId\":" + id + ",\"state\":\"QUEUED\"}",
         )
     }
+
+    private fun handleOpModeAction(action: String, body: String?): NetworkHttpResponse {
+        val request = body?.let { json.decodeFromString<OpModeActionRequest>(it) }
+            ?: return jsonResponse(400, "{\"error\":\"missing_opmode_name\"}")
+
+        if (request.expectedRevision != opModeRevision) {
+            return jsonResponse(
+                409,
+                "{\"error\":\"state_changed\",\"message\":\"Robot state changed\"}",
+            )
+        }
+
+        if (request.name !in opModes.map { it.name }) {
+            return jsonResponse(404, "{\"error\":\"opmode_not_found\"}")
+        }
+
+        when (action) {
+            "init" -> {
+                if (opModePhase != "STOPPED") {
+                    return jsonResponse(409, "{\"error\":\"opmode_not_stopped\"}")
+                }
+                opModePhase = "INIT"
+                activeOpModeName = request.name
+                opModeActive = true
+            }
+            "start" -> {
+                if (opModePhase != "INIT" || activeOpModeName != request.name) {
+                    return jsonResponse(409, "{\"error\":\"opmode_not_initialized\"}")
+                }
+                opModePhase = "RUNNING"
+                opModeActive = true
+            }
+            "stop" -> {
+                if (opModePhase == "STOPPED") {
+                    // idempotent
+                } else if (activeOpModeName != request.name) {
+                    return jsonResponse(409, "{\"error\":\"opmode_mismatch\"}")
+                } else {
+                    opModePhase = "STOPPED"
+                    activeOpModeName = null
+                    opModeActive = false
+                }
+            }
+            else -> return jsonResponse(404, "{\"error\":\"not_found\"}")
+        }
+        opModeRevision += 1
+
+        return jsonResponse(
+            202,
+            json.encodeToString(
+                OpModeActionResponse(
+                    accepted = true,
+                    action = action,
+                    name = request.name,
+                )
+            ),
+        )
+    }
+
+    private fun opModeSnapshot() = OpModeSnapshotDto(
+        revision = opModeRevision,
+        controllerAvailable = true,
+        phase = opModePhase,
+        activeName = activeOpModeName,
+    )
 
     private fun authorized(headers: Map<String, String>): Boolean =
         sessionToken != null && headers["X-Az-Session"] == sessionToken

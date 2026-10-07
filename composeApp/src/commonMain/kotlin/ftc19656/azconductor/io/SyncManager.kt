@@ -6,6 +6,8 @@ import ftc19656.azconductor.io.network.ConfigRouteSyncBaselineStore
 import ftc19656.azconductor.io.network.LocalRouteRecord
 import ftc19656.azconductor.io.network.QueuedRequestResponse
 import ftc19656.azconductor.io.network.RobotConnection
+import ftc19656.azconductor.io.network.OpModeActionResponse
+import ftc19656.azconductor.io.network.OpModeDescriptorDto
 import ftc19656.azconductor.io.network.RouteRepositorySyncAdapter
 import ftc19656.azconductor.io.network.RouteSyncBaseline
 import ftc19656.azconductor.io.network.RouteSyncConflict
@@ -152,16 +154,23 @@ class SyncManager(
 
         jobs += scope.launch {
             combine(
-                connection.runtime,
+                connection.opMode,
                 connection.execution,
                 _availableCommands,
-            ) { runtime, execution, commands ->
-                val active = runtime?.opModeActive == true
+            ) { opMode, execution, commands ->
+                val phase = opMode?.phase ?: "STOPPED"
+                val active = phase != "STOPPED"
                 OpModeStatusResponse(
+                    revision = opMode?.revision ?: 0,
+                    controllerAvailable = opMode?.controllerAvailable == true,
+                    phase = phase,
                     opModeActive = active,
-                    executionReady = active,
+                    executionReady =
+                        phase == "RUNNING"
+                            && execution != null
+                            && execution.state != "NOT_READY",
                     isExecuting = execution?.state == "RUNNING",
-                    activeOpModeName = runtime?.opModeName,
+                    activeOpModeName = opMode?.activeName,
                     commandCount = commands.size,
                     commandsReady = if (active) commands.size else 0,
                 )
@@ -239,6 +248,31 @@ class SyncManager(
         } catch (t: Throwable) {
             ApiResult.NetworkError("Invalid trajectory JSON", t)
         }
+
+    suspend fun listOpModes(): ApiResult<List<OpModeDescriptorDto>> =
+        when (val result = connection.apiClient().listOpModes()) {
+            is ApiResult.Ok -> ApiResult.Ok(result.value.opModes, result.status)
+            is ApiResult.HttpError -> result
+            is ApiResult.NetworkError -> result
+        }
+
+    suspend fun initOpMode(
+        name: String,
+        expectedRevision: Long,
+    ): ApiResult<OpModeActionResponse> =
+        connection.apiClient().initOpMode(name, expectedRevision)
+
+    suspend fun startOpMode(
+        name: String,
+        expectedRevision: Long,
+    ): ApiResult<OpModeActionResponse> =
+        connection.apiClient().startOpMode(name, expectedRevision)
+
+    suspend fun stopOpMode(
+        name: String,
+        expectedRevision: Long,
+    ): ApiResult<OpModeActionResponse> =
+        connection.apiClient().stopOpMode(name, expectedRevision)
 
     suspend fun saveToRobot(pathName: String, pointsJson: String) {
         val api = connection.apiClient()

@@ -35,6 +35,9 @@ class RobotConnection(
     private val _execution = MutableStateFlow<ExecutionSnapshotDto?>(null)
     val execution: StateFlow<ExecutionSnapshotDto?> = _execution.asStateFlow()
 
+    private val _opMode = MutableStateFlow<OpModeSnapshotDto?>(null)
+    val opMode: StateFlow<OpModeSnapshotDto?> = _opMode.asStateFlow()
+
     private val _routeRevision = MutableStateFlow(0L)
     val routeRevision: StateFlow<Long> = _routeRevision.asStateFlow()
 
@@ -119,6 +122,8 @@ class RobotConnection(
                 "runtime" -> _runtime.value = json.decodeFromString<RuntimeEvent>(data)
                 "execution" -> _execution.value =
                     json.decodeFromString<ExecutionSnapshotDto>(data)
+                "opmode" -> _opMode.value =
+                    json.decodeFromString<OpModeSnapshotDto>(data)
                 "routes" -> _routeRevision.value =
                     json.decodeFromString<RevisionEvent>(data).revision
                 "commands" -> _commandRevision.value =
@@ -137,6 +142,7 @@ class RobotConnection(
         _pose.value = null
         _runtime.value = null
         _execution.value = null
+        _opMode.value = null
         _routeRevision.value = 0
         _commandRevision.value = 0
         _lastHeartbeatMs.value = null
@@ -148,6 +154,7 @@ class RobotConnection(
             "pose",
             "runtime",
             "execution",
+            "opmode",
             "routes",
             "commands",
             "heartbeat",
