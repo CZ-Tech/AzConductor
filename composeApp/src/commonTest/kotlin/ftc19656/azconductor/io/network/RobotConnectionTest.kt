@@ -55,6 +55,11 @@ class RobotConnectionTest {
             "{\"state\":\"RUNNING\",\"requestId\":9,"
                 + "\"subject\":\"Auto\",\"revision\":4}",
         )
+        server.emit(
+            "opmode",
+            "{\"revision\":8,\"controllerAvailable\":true,"
+                + "\"phase\":\"INIT\",\"activeName\":\"Auto A\"}",
+        )
         server.emit("routes", "{\"revision\":12}")
         server.emit("commands", "{\"revision\":3}")
         server.emit("heartbeat", "{\"t\":4567}")
@@ -66,6 +71,9 @@ class RobotConnectionTest {
         assertTrue(connection.runtime.value?.opModeActive == true)
         assertEquals("HttpAuto", connection.runtime.value?.opModeName)
         assertEquals("RUNNING", connection.execution.value?.state)
+        assertEquals("INIT", connection.opMode.value?.phase)
+        assertEquals("Auto A", connection.opMode.value?.activeName)
+        assertEquals(8, connection.opMode.value?.revision)
         assertEquals(9, connection.execution.value?.requestId)
         assertEquals(12, connection.routeRevision.value)
         assertEquals(3, connection.commandRevision.value)

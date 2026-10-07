@@ -7,6 +7,8 @@ import ftc19656.azconductor.io.RobotPositionResponse
 import ftc19656.azconductor.io.SyncManager
 import ftc19656.azconductor.io.network.ApiResult
 import ftc19656.azconductor.io.network.QueuedRequestResponse
+import ftc19656.azconductor.io.network.OpModeActionResponse
+import ftc19656.azconductor.io.network.OpModeDescriptorDto
 import ftc19656.azconductor.route.ControlNode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +26,9 @@ class CommandsViewModel(
     private val _robotPaths = MutableStateFlow<List<String>>(emptyList())
     val robotPaths: StateFlow<List<String>> = _robotPaths.asStateFlow()
 
+    private val _opModes = MutableStateFlow<List<OpModeDescriptorDto>>(emptyList())
+    val opModes: StateFlow<List<OpModeDescriptorDto>> = _opModes.asStateFlow()
+
     /** SSE-backed OpMode/runtime state. */
     val opModeStatus: StateFlow<OpModeStatusResponse> get() = syncManager.opModeStatus
 
@@ -33,6 +38,9 @@ class CommandsViewModel(
     private val _executionStatus = MutableStateFlow<String?>(null)
     val executionStatus: StateFlow<String?> = _executionStatus.asStateFlow()
 
+    private val _opModeActionStatus = MutableStateFlow<String?>(null)
+    val opModeActionStatus: StateFlow<String?> = _opModeActionStatus.asStateFlow()
+
     private val _fetchedWaypoints = MutableStateFlow<List<ControlNode>>(emptyList())
     val fetchedWaypoints: StateFlow<List<ControlNode>> = _fetchedWaypoints.asStateFlow()
 
@@ -41,10 +49,16 @@ class CommandsViewModel(
     init {
         scope.launch {
             refresh()
+            refreshOpModes()
             syncManager.routeRevision
                 .collect { revision ->
                     if (revision > 0) refresh()
                 }
+        }
+        scope.launch {
+            syncManager.opModeStatus.collect { status ->
+                if (status.controllerAvailable) refreshOpModes()
+            }
         }
     }
 
@@ -71,6 +85,43 @@ class CommandsViewModel(
         }
     }
 
+    suspend fun refreshOpModes() {
+        when (val result = syncManager.listOpModes()) {
+            is ApiResult.Ok -> _opModes.value = result.value
+            is ApiResult.HttpError,
+            is ApiResult.NetworkError -> Unit
+        }
+    }
+
+    suspend fun initOpMode(name: String) {
+        val status = opModeStatus.value
+        _opModeActionStatus.value = "正在 INIT..."
+        _opModeActionStatus.value = opModeActionMessage(
+            syncManager.initOpMode(name, status.revision),
+            "INIT 请求已接受",
+        )
+    }
+
+    suspend fun startOpMode() {
+        val status = opModeStatus.value
+        val name = status.activeOpModeName ?: return
+        _opModeActionStatus.value = "正在 START..."
+        _opModeActionStatus.value = opModeActionMessage(
+            syncManager.startOpMode(name, status.revision),
+            "START 请求已接受",
+        )
+    }
+
+    suspend fun stopOpMode() {
+        val status = opModeStatus.value
+        val name = status.activeOpModeName ?: return
+        _opModeActionStatus.value = "正在 STOP..."
+        _opModeActionStatus.value = opModeActionMessage(
+            syncManager.stopOpMode(name, status.revision),
+            "STOP 请求已接受",
+        )
+    }
+
     suspend fun executeSavedPath(pathName: String) {
         _executionStatus.value = "正在执行..."
         val result = try {
@@ -95,6 +146,10 @@ class CommandsViewModel(
         _executionStatus.value = null
     }
 
+    fun clearOpModeActionStatus() {
+        _opModeActionStatus.value = null
+    }
+
     private fun executionMessage(result: ApiResult<QueuedRequestResponse>): String =
         when (result) {
             is ApiResult.Ok -> when {
@@ -113,4 +168,16 @@ class CommandsViewModel(
 
             is ApiResult.NetworkError -> "执行失败：" + result.message
         }
+
+    private fun opModeActionMessage(
+        result: ApiResult<OpModeActionResponse>,
+        acceptedText: String,
+    ): String = when (result) {
+        is ApiResult.Ok -> acceptedText
+        is ApiResult.HttpError -> {
+            val detail = result.message?.let { " - " + it } ?: ""
+            "OpMode 操作失败：HTTP " + result.status + detail
+        }
+        is ApiResult.NetworkError -> "OpMode 操作失败：" + result.message
+    }
 }

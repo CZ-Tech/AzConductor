@@ -50,6 +50,9 @@ data class SyncConflictData(
 @Serializable
 data class OpModeStatusResponse(
     val status: String = "ok",
+    val revision: Long = 0,
+    val controllerAvailable: Boolean = false,
+    val phase: String = "STOPPED",
     val opModeActive: Boolean = false,
     val executionReady: Boolean = false,
     val isExecuting: Boolean = false,

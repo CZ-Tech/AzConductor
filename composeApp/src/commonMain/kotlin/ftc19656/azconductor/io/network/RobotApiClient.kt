@@ -107,10 +107,47 @@ class RobotApiClient(
     suspend fun commandCatalog(): ApiResult<CommandCatalogResponse> =
         decode(request("GET", "/api/v2/commands"))
 
+    suspend fun listOpModes(): ApiResult<OpModeListResponse> =
+        decode(request("GET", "/api/v2/opmodes"))
+
+    suspend fun opModeState(): ApiResult<OpModeSnapshotDto> =
+        decode(request("GET", "/api/v2/opmode"))
+
+    suspend fun initOpMode(
+        name: String,
+        expectedRevision: Long,
+    ): ApiResult<OpModeActionResponse> =
+        opModeAction("init", name, expectedRevision)
+
+    suspend fun startOpMode(
+        name: String,
+        expectedRevision: Long,
+    ): ApiResult<OpModeActionResponse> =
+        opModeAction("start", name, expectedRevision)
+
+    suspend fun stopOpMode(
+        name: String,
+        expectedRevision: Long,
+    ): ApiResult<OpModeActionResponse> =
+        opModeAction("stop", name, expectedRevision)
+
     fun eventUrl(): String? {
         val value = sessionToken ?: return null
         return baseUrl + "/api/v2/events?session=" + pathSegment(value)
     }
+
+    private suspend fun opModeAction(
+        action: String,
+        name: String,
+        expectedRevision: Long,
+    ): ApiResult<OpModeActionResponse> =
+        decode(
+            request(
+                "POST",
+                "/api/v2/opmode/" + action,
+                json.encodeToString(OpModeActionRequest(name, expectedRevision)),
+            )
+        )
 
     private suspend fun request(
         method: String,
