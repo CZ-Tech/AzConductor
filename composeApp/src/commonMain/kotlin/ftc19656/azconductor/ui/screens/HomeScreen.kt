@@ -28,6 +28,7 @@ import androidx.compose.ui.zIndex
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.route.viewmodel.RouteConnector
+import ftc19656.azconductor.ui.responsiveLayout
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -149,18 +150,30 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                 )
             }
         } else {
-            val cardSizeDp = UIConfig.PATH_CARD_SIZE_DIP.dp
-            val spacingDp = 8.dp
-
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(8.dp)
-                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
+                val responsive = responsiveLayout(maxWidth, maxHeight)
+                val cardSizeDp = when {
+                    responsive.compact -> 96.dp
+                    responsive.expanded -> 132.dp
+                    else -> UIConfig.PATH_CARD_SIZE_DIP.dp
+                }
+                val spacingDp = when {
+                    responsive.compact -> 6.dp
+                    responsive.expanded -> 12.dp
+                    else -> 8.dp
+                }
+                val cardActionSize = if (responsive.compact) 36.dp else 40.dp
+                val cardActionIconSize = if (responsive.compact) 18.dp else 20.dp
+
                 FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(spacingDp),
                     verticalArrangement = Arrangement.spacedBy(spacingDp)
                 ) {
@@ -249,12 +262,12 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                                         },
                                         modifier = Modifier
                                             .align(Alignment.TopStart)
-                                            .size(24.dp)
+                                            .size(cardActionSize)
                                     ) {
                                         Icon(
                                             Icons.Default.Delete,
                                             contentDescription = "删除",
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(cardActionIconSize)
                                         )
                                     }
                                     IconButton(
@@ -265,12 +278,12 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                                         },
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
-                                            .size(24.dp)
+                                            .size(cardActionSize)
                                     ) {
                                         Icon(
                                             Icons.Default.Edit,
                                             contentDescription = "改名",
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(cardActionIconSize)
                                         )
                                     }
                                     // Mirror button (bottom-right)
@@ -281,12 +294,12 @@ fun HomeScreen(route: RouteConnector, onNavigateToPlanner: () -> Unit, onNavigat
                                         },
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
-                                            .size(24.dp)
+                                            .size(cardActionSize)
                                     ) {
                                         Icon(
                                             Icons.Default.SwapHoriz,
                                             contentDescription = "镜像到红方",
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(cardActionIconSize)
                                         )
                                     }
                                 }
