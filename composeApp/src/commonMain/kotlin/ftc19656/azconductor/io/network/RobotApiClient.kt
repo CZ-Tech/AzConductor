@@ -67,7 +67,6 @@ class RobotApiClient(
         expectedRevision: Long,
     ): ApiResult<RouteWriteResponse> {
         val errors = SplineRouteContract.validateRobotJson(routeJson)
-            .filter { it.severity == SplineRouteContract.Severity.ERROR }
         if (errors.isNotEmpty()) {
             return ApiResult.NetworkError("路径契约校验失败：" + errors.take(4).joinToString("；") {
                 "${it.waypointIndex?.let { frame -> "帧${frame + 1} " } ?: ""}${it.message}"

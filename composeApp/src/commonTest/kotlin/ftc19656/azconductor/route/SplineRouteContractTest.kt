@@ -45,15 +45,15 @@ class SplineRouteContractTest {
     }
 
     @Test
-    fun validatorFlagsUnsupportedSemanticsAndRejectsBadBraking() {
+    fun validatorOnlyRejectsInvalidFields() {
         val points = listOf(point(), point(5.0).copy(
             endSpeed = 0.0, dHeading = 20.0, command = "shoot", delayAfterArrive = 1.0
         ))
         val issues = SplineRouteContract.validate(points)
-        assertTrue(issues.any { it.field == "brakeZoneIn" && it.severity == SplineRouteContract.Severity.ERROR })
-        assertTrue(issues.any { it.field == "dHeading" && it.severity == SplineRouteContract.Severity.WARNING })
-        assertTrue(issues.any { it.field == "command" && it.severity == SplineRouteContract.Severity.WARNING })
-        assertFalse(issues.any { it.field == "endSpeed" && it.severity == SplineRouteContract.Severity.WARNING })
+        assertTrue(issues.any { it.field == "brakeZoneIn" })
+        assertFalse(issues.any { it.field == "dHeading" })
+        assertFalse(issues.any { it.field == "command" })
+        assertFalse(issues.any { it.field == "endSpeed" })
     }
 
     @Test
@@ -85,18 +85,16 @@ class SplineRouteContractTest {
     @Test
     fun rawRobotWireContractAllowsWaitAndRejectsMalformedFields() {
         val valid = """[{"x":0,"y":0},{"wait":0.5},{"x":24,"y":0,"maxPower":0.5,"endSpeed":0,"brakeZoneIn":8}]"""
-        assertTrue(SplineRouteContract.validateRobotJson(valid).none {
-            it.severity == SplineRouteContract.Severity.ERROR
-        })
+        assertTrue(SplineRouteContract.validateRobotJson(valid).isEmpty())
         val bad = """[{"x":0,"y":0},{"x":24,"y":0,"endSpeed":null,"maxSpeed":-1}]"""
         assertTrue(SplineRouteContract.validateRobotJson(bad).any {
-            it.field == "endSpeed" && it.severity == SplineRouteContract.Severity.ERROR
+            it.field == "endSpeed"
         })
         assertTrue(SplineRouteContract.validateRobotJson(bad).any {
-            it.field == "maxSpeed" && it.severity == SplineRouteContract.Severity.ERROR
+            it.field == "maxSpeed"
         })
         assertTrue(SplineRouteContract.validateRobotJson("""{"routes":[]}""").any {
-            it.severity == SplineRouteContract.Severity.ERROR
+            it.field == "json"
         })
     }
 
@@ -114,9 +112,7 @@ class SplineRouteContractTest {
         assertEquals("1.5", (frames[1] as JsonObject)["wait"]!!.jsonPrimitive.content)
         assertEquals("2.5", (frames[3] as JsonObject)["wait"]!!.jsonPrimitive.content)
         assertEquals(original, SplineRouteContract.decodeRobotRoute(wire, json))
-        assertTrue(SplineRouteContract.validateRobotJson(wire).none {
-            it.severity == SplineRouteContract.Severity.ERROR
-        })
+        assertTrue(SplineRouteContract.validateRobotJson(wire).isEmpty())
     }
 
     @Test

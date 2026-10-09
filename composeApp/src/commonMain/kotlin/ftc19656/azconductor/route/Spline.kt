@@ -144,9 +144,6 @@ class OrientedTrajectoryGenerator2D(
         duration
     )
 
-    // Robot SplineController always uses zero dHeading at both ends. Match its
-    // spatial heading shape in the preview while keeping legacy dHeading data
-    // round-trippable (the editor warns when a nonzero value is supplied).
     private val splineHeading = CubicHermiteSpline1D(
         startHeading,
         0.0,
@@ -205,7 +202,6 @@ data class DifferentialPoint2D(
 fun normalizeRelative(start: Double, end: Double): Double {
     var diff = (end - start) % 360.0
     if (diff > 180.0) diff -= 360.0
-    // Match SplineTracker's tie-breaking rule at exactly -180 degrees.
     if (diff <= -180.0) diff += 360.0
     return start + diff
 }

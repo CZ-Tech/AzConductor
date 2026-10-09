@@ -33,21 +33,6 @@ import kotlinx.serialization.serializer
 val serializer = serializer<ControlNode>()
 val descriptor = serializer.descriptor
 
-private val splineFieldHelp = mapOf(
-    "dx" to "Hermite 几何切线 dX/du（英寸），不是机器人实际速度",
-    "dy" to "Hermite 几何切线 dY/du（英寸），不是机器人实际速度",
-    "dHeading" to "机器人不读取该字段；空间 Spline 预览始终采用零端点朝向导数",
-    "duration" to "仅控制规划器时间轴预览，机器人按空间位置前进，不按此时长执行",
-    "delayAfterArrive" to "到点后等待的秒数；上传时自动转换为机器人可执行的 wait 步骤，建议先配置末端停车",
-    "maxPower" to "本段巡航功率 0~1（由上一点移动至此点的路段）",
-    "maxSpeed" to "本段速度上限，单位 in/s；留空表示不限速",
-    "endSpeed" to "到达此点的目标速度，单位 in/s；留空为通过点，填 0 为精确停车",
-    "brakeZoneIn" to "到达此点前的制动区长度，单位英寸；指定 endSpeed 后必须大于 0",
-    "brakeForwardPower" to "制动区正向功率上限 0~1；留空沿用机器人默认值",
-    "marker" to "当前机器人自动 OpMode 不消费节点事件，因此 marker 不会触发动作",
-    "command" to "当前机器人自动 OpMode 不执行规划器的节点命令"
-)
-
 private val splineFieldLabels = mapOf(
     "maxPower" to "巡航功率 maxPower",
     "maxSpeed" to "速度上限 maxSpeed (in/s)",
@@ -61,7 +46,7 @@ fun preloadSerializer(): ControlNode {
     // 强制预热序列化器引擎
     val serializer = ControlNode.serializer()
     // 读取 descriptor，触发底层结构解析
-    val count = serializer.descriptor.elementsCount
+    serializer.descriptor.elementsCount
 
     val map: MutableMap<String, String> = hashMapOf()
     for (s in serializer.descriptor.elementNames) {
@@ -87,7 +72,6 @@ fun preloadSerializer(): ControlNode {
     // 预热反序列化
     val newNode = AppContext.jsonConfig.decodeFromJsonElement(serializer, JsonObject(jsonContent))
 
-    println("Serializer preloaded! Got $count fields")
     return newNode
 }
 
@@ -137,22 +121,17 @@ fun NodeEditorDialog(
         title = { Text("编辑节点属性") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text(
-                    text = "空间跟踪模式：预览 duration 不等于实际行驶时间。运动限制作用于以当前点为终点的路段。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 TextButton(onClick = {
                     editValues["endSpeed"] = "0.0"
                     if ((editValues["brakeZoneIn"]?.toDoubleOrNull() ?: 0.0) <= 0.0) {
                         editValues["brakeZoneIn"] = "12.0"
                     }
-                }) { Text("设为停车点（12 英寸制动区起始值，需实机标定）") }
+                }) { Text("停车点") }
                 TextButton(onClick = {
                     editValues["endSpeed"] = ""
                     editValues["brakeZoneIn"] = "0.0"
                     editValues["brakeForwardPower"] = ""
-                }) { Text("设为通过点（无终点速度约束）") }
+                }) { Text("通过点") }
                 // UI 根据定义的顺序和Json字段全自动生成
                 orderedFieldNames.forEach { fieldName ->
                     OutlinedTextField(
@@ -160,10 +139,7 @@ fun NodeEditorDialog(
                         onValueChange = { editValues[fieldName] = it },
                         label = { Text(splineFieldLabels[fieldName] ?: fieldName) },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        singleLine = true,
-                        supportingText = splineFieldHelp[fieldName]?.let { help ->
-                            { Text(help, style = MaterialTheme.typography.bodySmall) }
-                        }
+                        singleLine = true
                     )
                 }
                 if (errorMessage != null) {
@@ -219,7 +195,6 @@ fun NodeEditorDialog(
 
                 } catch (e: Exception) {
                     // 如果用户在 Double 字段填了 "abc"，这里会报错，可以提示用户
-                    println("Save failed: ${e.message}")
                     // 直接在 catch 里捕获逻辑错误并反馈给 UI
                     errorMessage = "格式错误：${e.message ?: "请确保数值字段都填入了有效的数字"}"
                 }
