@@ -5,6 +5,7 @@ import ftc19656.azconductor.TimingConfig
 import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RobotRoutes
 import ftc19656.azconductor.route.RouteData
+import ftc19656.azconductor.route.SplineRouteContract
 import kotlinx.coroutines.Job
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
@@ -126,6 +127,10 @@ fun saveAll(routes: List<RouteData>) {
         } catch (_: SerializationException) {
             // 不是旧版格式，继续尝试新版
         }
+        // Robot wire format may contain explicit {"wait": seconds} frames.
+        // Reconstruct waypoint arrival delays instead of dropping them.
+        val wire = runCatching { SplineRouteContract.decodeRobotRoute(jsonText, jsonConfig) }.getOrNull()
+        if (wire != null) return listOf(RouteData(name = "导入路径", points = wire))
         return try {
             val robots = jsonConfig.decodeFromString<List<RobotRoutes>>(jsonText)
             robots.flatMap { it.routes }

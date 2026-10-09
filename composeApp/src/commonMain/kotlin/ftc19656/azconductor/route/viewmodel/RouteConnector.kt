@@ -5,6 +5,7 @@ import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.OrientedTrajectoryGenerator2D
 import ftc19656.azconductor.route.RouteCore
 import ftc19656.azconductor.route.RouteData
+import ftc19656.azconductor.route.SplineRouteContract
 import ftc19656.azconductor.io.RouteRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -142,7 +143,7 @@ class RouteConnector(
             val renamedRoute = _allRoutes.value.find { it.name == newName } ?: return
             scope.launch {
                 try {
-                    val pointsJson = AppContext.jsonConfig.encodeToString<List<ControlNode>>(renamedRoute.points)
+                    val pointsJson = SplineRouteContract.encodeRobotRoute(renamedRoute.points, AppContext.jsonConfig)
                     AppContext.syncManager.saveToRobot(newName, pointsJson)
                     AppContext.syncManager.deleteFromRobot(oldName)
                 } catch (e: Exception) {
@@ -170,7 +171,13 @@ class RouteConnector(
     suspend fun uploadRouteToRobot(name: String): Result<Unit> {
         val localRoute = _allRoutes.value.find { it.name == name }
             ?: return Result.failure(IllegalArgumentException("Route '$name' does not exist"))
-        val pointsJson = AppContext.jsonConfig.encodeToString<List<ControlNode>>(localRoute.points)
+        val problems = SplineRouteContract.errors(localRoute.points)
+        if (problems.isNotEmpty()) {
+            return Result.failure(IllegalArgumentException("路径契约校验失败：" + problems.take(4).joinToString("；") {
+                "${it.waypointIndex?.let { frame -> "点${frame + 1} " } ?: ""}${it.message}"
+            }))
+        }
+        val pointsJson = SplineRouteContract.encodeRobotRoute(localRoute.points, AppContext.jsonConfig)
         return runCatching {
             AppContext.syncManager.saveToRobot(name, pointsJson)
         }

@@ -93,7 +93,7 @@ class RobotApiClientContractTest {
         assertEquals(1, fetched.value.revision)
 
         val updated = assertIs<ApiResult.Ok<RouteWriteResponse>>(
-            client.putRoute(routeName, "[{\"x\":3}]", expectedRevision = 1)
+            client.putRoute(routeName, "[{\"x\":3,\"y\":0}]", expectedRevision = 1)
         )
         assertEquals(2, updated.value.revision)
         assertEquals("1", server.requests.last().headers["If-Match"])
@@ -111,7 +111,7 @@ class RobotApiClientContractTest {
         server.seedRoute("Auto", "[]", revision = 5)
         val client = connectedClient(server)
 
-        val result = client.putRoute("Auto", "[{\"x\":1}]", expectedRevision = 4)
+        val result = client.putRoute("Auto", "[{\"x\":1,\"y\":0}]", expectedRevision = 4)
 
         val error = assertIs<ApiResult.HttpError>(result)
         assertEquals(412, error.status)
@@ -129,6 +129,19 @@ class RobotApiClientContractTest {
         val error = assertIs<ApiResult.HttpError>(result)
         assertEquals(404, error.status)
         assertEquals("route_not_found", error.code)
+    }
+
+    @Test
+    fun invalidSplineIsRejectedBeforeHttpPut() = runTest {
+        val server = MockRobotServer(json)
+        val client = connectedClient(server)
+        val initialRequests = server.requests.size
+
+        val result = client.putRoute("Auto", """[{"x":1,"y":2,"endSpeed":0}]""", 0)
+
+        val failure = assertIs<ApiResult.NetworkError>(result)
+        assertTrue(failure.message.contains("制动区"))
+        assertEquals(initialRequests, server.requests.size)
     }
 
     @Test

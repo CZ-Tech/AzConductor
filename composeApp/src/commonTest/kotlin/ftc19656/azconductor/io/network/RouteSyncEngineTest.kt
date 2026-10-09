@@ -302,8 +302,8 @@ class RouteSyncEngineTest {
 
     companion object {
         private const val ROBOT_KEY = "192.168.43.1"
-        private const val J1 = "[{\"x\":1}]"
-        private const val J2 = "[{\"x\":2}]"
-        private const val J3 = "[{\"x\":3}]"
+        private const val J1 = "[{\"x\":1,\"y\":0}]"
+        private const val J2 = "[{\"x\":2,\"y\":0}]"
+        private const val J3 = "[{\"x\":3,\"y\":0}]"
     }
 }

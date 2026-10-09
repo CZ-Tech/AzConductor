@@ -38,7 +38,7 @@ private val splineFieldHelp = mapOf(
     "dy" to "Hermite 几何切线 dY/du（英寸），不是机器人实际速度",
     "dHeading" to "机器人不读取该字段；空间 Spline 预览始终采用零端点朝向导数",
     "duration" to "仅控制规划器时间轴预览，机器人按空间位置前进，不按此时长执行",
-    "delayAfterArrive" to "到点后停车等待的秒数；执行前建议先配置末端停车",
+    "delayAfterArrive" to "到点后等待的秒数；上传时自动转换为机器人可执行的 wait 步骤，建议先配置末端停车",
     "maxPower" to "本段巡航功率 0~1（由上一点移动至此点的路段）",
     "maxSpeed" to "本段速度上限，单位 in/s；留空表示不限速",
     "endSpeed" to "到达此点的目标速度，单位 in/s；留空为通过点，填 0 为精确停车",

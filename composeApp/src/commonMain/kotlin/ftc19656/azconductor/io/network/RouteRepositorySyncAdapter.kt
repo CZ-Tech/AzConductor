@@ -1,10 +1,8 @@
 package ftc19656.azconductor.io.network
 
 import ftc19656.azconductor.io.RouteRepository
-import ftc19656.azconductor.route.ControlNode
 import ftc19656.azconductor.route.RouteData
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
+import ftc19656.azconductor.route.SplineRouteContract
 import kotlinx.serialization.json.Json
 
 /** Bridges local route persistence to the opaque-JSON sync engine. */
@@ -17,7 +15,7 @@ class RouteRepositorySyncAdapter(
         repository.loadAll().map { route ->
             LocalRouteRecord(
                 name = route.name,
-                json = json.encodeToString(route.points),
+                json = SplineRouteContract.encodeRobotRoute(route.points, json),
             )
         }
 
@@ -25,12 +23,12 @@ class RouteRepositorySyncAdapter(
         val route = repository.load(name) ?: return null
         return LocalRouteRecord(
             name = route.name,
-            json = json.encodeToString(route.points),
+            json = SplineRouteContract.encodeRobotRoute(route.points, json),
         )
     }
 
     override fun put(name: String, json: String) {
-        val points = this.json.decodeFromString<List<ControlNode>>(json)
+        val points = SplineRouteContract.decodeRobotRoute(json, this.json)
         val existing = repository.load(name)
         repository.save(
             existing?.copy(points = points)

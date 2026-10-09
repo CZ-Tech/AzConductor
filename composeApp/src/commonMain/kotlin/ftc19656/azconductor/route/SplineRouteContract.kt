@@ -1,5 +1,13 @@
 package ftc19656.azconductor.route
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+
 /**
  * Contract of a *single* route uploaded to the robot's spatial SplineTrajectoryLoader.
  * Local archive/export JSON (RobotRoutes -> RouteData -> points) is a different format.
@@ -11,6 +19,7 @@ package ftc19656.azconductor.route
  * The robot currently ignores duration and dHeading and does not dispatch events.
  */
 object SplineRouteContract {
+    const val WIRE_FORMAT = "spatial-spline-waypoints-v1"
     enum class Severity { ERROR, WARNING }
 
     data class Issue(
@@ -91,4 +100,128 @@ object SplineRouteContract {
 
     fun errors(points: List<ControlNode>): List<Issue> =
         validate(points).filter { it.severity == Severity.ERROR }
+
+    /** Convert planner arrival delays to explicit wait frames understood by the
+     * existing robot loader (whose HONOR_DELAY_AFTER_ARRIVE defaults to false).
+     * Remove the original property so a future robot flag change cannot double-wait.
+     */
+    fun encodeRobotRoute(points: List<ControlNode>, json: Json): String {
+        val frames = mutableListOf<kotlinx.serialization.json.JsonElement>()
+        points.forEach { point ->
+            val data = json.encodeToJsonElement(ControlNode.serializer(), point) as JsonObject
+            frames += JsonObject(data.filterKeys { it != "delayAfterArrive" })
+            if (point.delayAfterArrive > 0) {
+                frames += JsonObject(mapOf("wait" to JsonPrimitive(point.delayAfterArrive)))
+            }
+        }
+        return json.encodeToString(JsonArray.serializer(), JsonArray(frames))
+    }
+
+    /** Reverse the planner-produced wire format on pull/import. Unsupported
+     * leading waits and event-bearing wait frames fail instead of being lost.
+     */
+    fun decodeRobotRoute(routeJson: String, json: Json): List<ControlNode> {
+        val frames = json.parseToJsonElement(routeJson) as? JsonArray
+            ?: throw IllegalArgumentException("机器人路径必须是 JSON 数组")
+        val nodes = mutableListOf<ControlNode>()
+        frames.forEachIndexed { index, frame ->
+            val obj = frame as? JsonObject
+                ?: throw IllegalArgumentException("第 ${index + 1} 帧不是对象")
+            if ("wait" in obj) {
+                val seconds = (obj["wait"] as? JsonPrimitive)?.doubleOrNull
+                    ?: throw IllegalArgumentException("第 ${index + 1} 帧 wait 无效")
+                require(seconds.isFinite() && seconds >= 0) { "第 ${index + 1} 帧 wait 无效" }
+                require(nodes.isNotEmpty()) { "起始点之前的 wait 无法在控制点模型中表示" }
+                require((obj["marker"] as? JsonPrimitive)?.contentOrNull.isNullOrEmpty() &&
+                        (obj["command"] as? JsonPrimitive)?.contentOrNull.isNullOrEmpty()) {
+                    "带事件的独立 wait 无法无损导入控制点模型"
+                }
+                val last = nodes.lastIndex
+                nodes[last] = nodes[last].copy(delayAfterArrive = nodes[last].delayAfterArrive + seconds)
+            } else {
+                // Robot's parser permits omitted dx/dy; the editor model
+                // requires them, so supply the same defaults as the robot.
+                val data = obj.toMutableMap()
+                if ("dx" !in data) data["dx"] = JsonPrimitive(0.0)
+                if ("dy" !in data) data["dy"] = JsonPrimitive(0.0)
+                nodes += json.decodeFromJsonElement(ControlNode.serializer(), JsonObject(data))
+            }
+        }
+        return nodes
+    }
+
+    /**
+     * Validate the actual uploaded *array* rather than a local RobotRoutes archive.
+     * Supports the robot's optional {"wait":seconds} steps as well as waypoint objects.
+     * This function is used at the HTTP boundary, including automatic synchronization.
+     */
+    fun validateRobotJson(routeJson: String): List<Issue> {
+        val root = runCatching { Json.parseToJsonElement(routeJson) }.getOrNull()
+        if (root !is JsonArray) {
+            return listOf(Issue(Severity.ERROR, null, "json", "机器人路径必须是控制点 JSON 数组，而不是归档对象"))
+        }
+        if (root.isEmpty()) {
+            return listOf(Issue(Severity.ERROR, null, "points", "不能上传空路径"))
+        }
+        val issues = mutableListOf<Issue>()
+        val pointFrames = mutableListOf<Int>()
+        val points = mutableListOf<ControlNode>()
+        root.forEachIndexed { index, entry ->
+            val obj = entry as? JsonObject
+            if (obj == null) {
+                issues += Issue(Severity.ERROR, index, "json", "路段必须是 JSON 对象")
+                return@forEachIndexed
+            }
+            fun number(key: String, default: Double? = null, required: Boolean = false): Double? {
+                if (key !in obj) {
+                    if (required) issues += Issue(Severity.ERROR, index, key, "缺少 $key")
+                    return default
+                }
+                val raw = obj[key]
+                val value = if (raw == JsonNull) null else (raw as? JsonPrimitive)?.doubleOrNull
+                if (value == null || !value.isFinite()) {
+                    issues += Issue(Severity.ERROR, index, key, "$key 必须为有限数值")
+                    return default
+                }
+                return value
+            }
+            if ("wait" in obj) {
+                val wait = number("wait", required = true)
+                if (wait != null && wait < 0) {
+                    issues += Issue(Severity.ERROR, index, "wait", "等待秒数不能为负数")
+                }
+                return@forEachIndexed
+            }
+            val x = number("x", required = true)
+            val y = number("y", required = true)
+            val dx = number("dx", default = 0.0)
+            val dy = number("dy", default = 0.0)
+            val heading = number("heading", default = 0.0)
+            val dHeading = number("dHeading", default = 0.0)
+            val duration = number("duration", default = 0.0)
+            val delay = number("delayAfterArrive", default = 0.0)
+            val maxPower = number("maxPower", default = 1.0)
+            val maxSpeed = number("maxSpeed")
+            val endSpeed = number("endSpeed")
+            val brakeZone = number("brakeZoneIn", default = 0.0)
+            val brakeForward = number("brakeForwardPower")
+            if (x == null || y == null) return@forEachIndexed
+            pointFrames += index
+            points += ControlNode(
+                x = x, y = y, dx = dx!!, dy = dy!!, heading = heading!!,
+                dHeading = dHeading!!, duration = duration!!,
+                delayAfterArrive = delay!!, maxPower = maxPower!!,
+                maxSpeed = maxSpeed, endSpeed = endSpeed,
+                brakeZoneIn = brakeZone!!, brakeForwardPower = brakeForward,
+                marker = (obj["marker"] as? JsonPrimitive)?.contentOrNull ?: "",
+                command = (obj["command"] as? JsonPrimitive)?.contentOrNull ?: ""
+            )
+        }
+        if (points.isNotEmpty()) {
+            issues += validate(points).map { issue ->
+                issue.copy(waypointIndex = issue.waypointIndex?.let { pointFrames[it] })
+            }
+        }
+        return issues
+    }
 }

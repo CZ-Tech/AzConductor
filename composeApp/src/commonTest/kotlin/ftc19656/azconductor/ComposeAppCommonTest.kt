@@ -47,6 +47,16 @@ class ComposeAppCommonTest {
     }
 
     @Test
+    fun testInitialWaitAppearsInPreviewTimeline() {
+        val route = RouteCore()
+        route.addPoint(ControlNode(x = 0.0, dx = 20.0, y = 0.0, dy = 0.0, delayAfterArrive = 1.5))
+        route.addPoint(ControlNode(x = 10.0, dx = 20.0, y = 0.0, dy = 0.0, duration = 2.0))
+        assertEquals(3.5, route.totalTime)
+        assertEquals(0.0, route.getPointAtTime(1.0)!!.x)
+        assertTrue(route.getPointAtTime(2.0)!!.x > 0.0)
+    }
+
+    @Test
     fun testAdvancePlaybackTimeAppliesSpeed() {
         // 原速推进一帧
         assertEquals(1.016f, advancePlaybackTime(1f, 10f, 1f), 1e-6f)

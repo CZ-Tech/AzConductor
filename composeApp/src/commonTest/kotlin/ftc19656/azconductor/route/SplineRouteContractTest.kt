@@ -3,6 +3,9 @@ package ftc19656.azconductor.route
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -77,5 +80,50 @@ class SplineRouteContractTest {
         )
         assertEquals(14.0625, spline.getPointAtTime(0.5).heading, 1e-7)
         assertEquals(180.0, normalizeRelative(0.0, -180.0), 1e-7)
+    }
+
+    @Test
+    fun rawRobotWireContractAllowsWaitAndRejectsMalformedFields() {
+        val valid = """[{"x":0,"y":0},{"wait":0.5},{"x":24,"y":0,"maxPower":0.5,"endSpeed":0,"brakeZoneIn":8}]"""
+        assertTrue(SplineRouteContract.validateRobotJson(valid).none {
+            it.severity == SplineRouteContract.Severity.ERROR
+        })
+        val bad = """[{"x":0,"y":0},{"x":24,"y":0,"endSpeed":null,"maxSpeed":-1}]"""
+        assertTrue(SplineRouteContract.validateRobotJson(bad).any {
+            it.field == "endSpeed" && it.severity == SplineRouteContract.Severity.ERROR
+        })
+        assertTrue(SplineRouteContract.validateRobotJson(bad).any {
+            it.field == "maxSpeed" && it.severity == SplineRouteContract.Severity.ERROR
+        })
+        assertTrue(SplineRouteContract.validateRobotJson("""{"routes":[]}""").any {
+            it.severity == SplineRouteContract.Severity.ERROR
+        })
+    }
+
+    @Test
+    fun delayWaitFramesRoundTripWithoutDoubleCounting() {
+        val original = listOf(
+            point().copy(delayAfterArrive = 1.5),
+            point(20.0).copy(duration = 2.0, delayAfterArrive = 2.5,
+                endSpeed = 0.0, brakeZoneIn = 10.0)
+        )
+        val wire = SplineRouteContract.encodeRobotRoute(original, json)
+        val frames = json.parseToJsonElement(wire) as JsonArray
+        assertEquals(4, frames.size)
+        assertFalse((frames[0] as JsonObject).containsKey("delayAfterArrive"))
+        assertEquals("1.5", (frames[1] as JsonObject)["wait"]!!.jsonPrimitive.content)
+        assertEquals("2.5", (frames[3] as JsonObject)["wait"]!!.jsonPrimitive.content)
+        assertEquals(original, SplineRouteContract.decodeRobotRoute(wire, json))
+        assertTrue(SplineRouteContract.validateRobotJson(wire).none {
+            it.severity == SplineRouteContract.Severity.ERROR
+        })
+    }
+
+    @Test
+    fun independentWaitBeforeFirstPointCannotBeSilentlyImported() {
+        val bad = """[{"wait":2},{"x":0,"y":0}]"""
+        assertTrue(runCatching { SplineRouteContract.decodeRobotRoute(bad, json) }.isFailure)
+        val oldRobotNodes = """[{"x":0,"y":1},{"x":2,"y":1,"delayAfterArrive":2}]"""
+        assertEquals(2.0, SplineRouteContract.decodeRobotRoute(oldRobotNodes, json).last().delayAfterArrive)
     }
 }

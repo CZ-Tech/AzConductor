@@ -12,9 +12,11 @@ class RouteCore() {
     val lastPoint: ControlNode? get() = waypoints.lastOrNull()
     val totalLength: Double get() = trajectoryList.sumOf { it.length }
     val totalTime: Double
-        get() = trajectoryList.indices.sumOf { index ->
+        get() = initialDelay() + trajectoryList.indices.sumOf { index ->
             trajectoryList[index].duration.coerceAtLeast(0.0) + arrivalDelayForTrajectory(index)
         }
+
+    private fun initialDelay(): Double = _waypoints.firstOrNull()?.delayAfterArrive?.coerceAtLeast(0.0) ?: 0.0
 
     private fun arrivalDelayForTrajectory(index: Int): Double {
         return _waypoints.getOrNull(index + 1)?.delayAfterArrive?.coerceAtLeast(0.0) ?: 0.0
@@ -132,7 +134,9 @@ class RouteCore() {
         // 容错处理：直接限制在有效范围内，避免 UI 状态同步延迟导致的崩溃
         val coercedTime = time.coerceIn(0.0, totalTime)
 
-        var accumulatedTime = 0.0
+        if (coercedTime <= initialDelay()) return _waypoints.first()
+
+        var accumulatedTime = initialDelay()
         for ((index, traj) in trajectoryList.withIndex()) {
             val trajectoryDuration = traj.duration.coerceAtLeast(0.0)
             val trajectoryEndTime = accumulatedTime + trajectoryDuration

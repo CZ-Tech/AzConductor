@@ -1,5 +1,6 @@
 package ftc19656.azconductor.io.network
 
+import ftc19656.azconductor.route.SplineRouteContract
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -64,14 +65,23 @@ class RobotApiClient(
         name: String,
         routeJson: String,
         expectedRevision: Long,
-    ): ApiResult<RouteWriteResponse> = decode(
+    ): ApiResult<RouteWriteResponse> {
+        val errors = SplineRouteContract.validateRobotJson(routeJson)
+            .filter { it.severity == SplineRouteContract.Severity.ERROR }
+        if (errors.isNotEmpty()) {
+            return ApiResult.NetworkError("路径契约校验失败：" + errors.take(4).joinToString("；") {
+                "${it.waypointIndex?.let { frame -> "帧${frame + 1} " } ?: ""}${it.message}"
+            })
+        }
+        return decode(
         request(
             "PUT",
             "/api/v2/routes/" + pathSegment(name),
             body = routeJson,
             extraHeaders = mapOf("If-Match" to expectedRevision.toString()),
         )
-    )
+        )
+    }
 
     suspend fun deleteRoute(name: String, expectedRevision: Long): ApiResult<Unit> =
         request(
