@@ -41,6 +41,7 @@ import ftc19656.azconductor.RobotConfig
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.toFixed
 import ftc19656.azconductor.route.ControlNode
+import ftc19656.azconductor.route.SplineRouteContract
 import ftc19656.azconductor.route.viewmodel.RouteConnector
 import ftc19656.azconductor.core.math.CoordinateMapper
 import ftc19656.azconductor.core.math.RectBounds
@@ -173,7 +174,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
             } else {
                 lastPoint.y.coerceIn(bounds.minY, bounds.maxY)
             }
-            lastPoint.copy(x = nextX, y = nextY)
+            lastPoint.nextWaypoint(x = nextX, y = nextY)
         }
 
         route.addPoint(newNode)
@@ -491,7 +492,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                 }
                             )
                             Text(
-                                text = "总时长: ${pv.let { route.getTotalTime().toFixed(2) }}s",
+                                text = "预览时长: ${pv.let { route.getTotalTime().toFixed(2) }}s",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -500,6 +501,36 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                         HorizontalDivider(
                             modifier = Modifier.padding(bottom = if (isCompactLayout) 8.dp else 16.dp)
                         )
+
+                        Text(
+                            text = "空间 Spline：时间轴仅用于预览；实际运动由里程计位置决定。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        val contractIssues = SplineRouteContract.validate(waypoints)
+                        if (contractIssues.isNotEmpty()) {
+                            val errorCount = contractIssues.count { it.severity == SplineRouteContract.Severity.ERROR }
+                            val warningCount = contractIssues.size - errorCount
+                            Text(
+                                text = "执行契约检查：${errorCount} 个错误，${warningCount} 个提醒",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (errorCount > 0) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            contractIssues.take(3).forEach { issue ->
+                                Text(
+                                    text = "${issue.waypointIndex?.let { "点 ${it + 1}：" } ?: ""}${issue.message}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (issue.severity == SplineRouteContract.Severity.ERROR)
+                                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+                            if (contractIssues.size > 3) {
+                                Text("另有 ${contractIssues.size - 3} 项，请检查各节点配置", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                         
                         Text(
                             text = "控制点",
@@ -625,10 +656,30 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                         style = MaterialTheme.typography.titleSmall
                                                     )
                                                     Text(
-                                                        text = "x=${node.x.toFixed(2)}, y=${node.y.toFixed(2)}, heading=${node.heading.toFixed(1)}度, duration=${node.duration.toFixed(1)}s",
+                                                        text = "x=${node.x.toFixed(2)}, y=${node.y.toFixed(2)}, heading=${node.heading.toFixed(1)}°, 预览 ${node.duration.toFixed(1)}s",
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
+                                                    Text(
+                                                        text = buildString {
+                                                            append(if (node.endSpeed == 0.0) "停车点" else if (node.endSpeed != null) "末速 ${node.endSpeed.toFixed(1)} in/s" else "通过点")
+                                                            append(" · 功率 ${node.maxPower.toFixed(2)}")
+                                                            node.maxSpeed?.let { append(" · 限速 ${it.toFixed(1)} in/s") }
+                                                            if (node.endSpeed != null) append(" · 制动 ${node.brakeZoneIn.toFixed(1)} in")
+                                                        },
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    if (index == waypoints.lastIndex && index > 0 && node.endSpeed != 0.0) {
+                                                        TextButton(onClick = {
+                                                            route.moveNode(index, node.copy(
+                                                                endSpeed = 0.0,
+                                                                brakeZoneIn = if (node.brakeZoneIn > 0) node.brakeZoneIn else 12.0
+                                                            ))
+                                                        }) {
+                                                            Text("设置终点停车（制动区需标定）")
+                                                        }
+                                                    }
                                                     if (node.command.isNotBlank()) {
                                                         Text(
                                                             text = "⚡ ${node.command}",
@@ -817,7 +868,7 @@ fun PathPlannerScreen(route: RouteConnector = remember { RouteConnector() }, onN
                                                                     } else {
                                                                         current.y.coerceIn(bounds.minY, bounds.maxY)
                                                                     }
-                                                                    current.copy(x = nextX, y = nextY)
+                                                                    current.nextWaypoint(x = nextX, y = nextY)
                                                                 }
                                                                 route.addPointAt(index + 1, newNode)
                                                                 selectedNodeIndex.value = index + 1

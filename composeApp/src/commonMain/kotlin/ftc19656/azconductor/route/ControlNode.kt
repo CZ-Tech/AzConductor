@@ -1,12 +1,15 @@
 package ftc19656.azconductor.route
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlin.math.abs
 
 /**
  * 路径规划的控制节点，用于底层数学计算和路径逻辑。
  */
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class ControlNode(
     val x: Double,
     val dx: Double,
@@ -18,7 +21,17 @@ data class ControlNode(
     val marker: String = "",
     val command: String = "",
     val commandParams: List<String> = emptyList(),
-    val delayAfterArrive: Double = 0.0
+    val delayAfterArrive: Double = 0.0,
+    /** Power cap for the segment ending at this node, inclusive [0, 1]. */
+    val maxPower: Double = 1.0,
+    /** Optional speed ceiling (inches/second); null means no limit. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val maxSpeed: Double? = null,
+    /** Optional target speed at this node (inches/second); zero requests a full stop. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val endSpeed: Double? = null,
+    /** Braking distance before this node (inches); required when endSpeed is specified. */
+    val brakeZoneIn: Double = 0.0,
+    /** Optional forward power cap while braking; null uses the robot default. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val brakeForwardPower: Double? = null
 ) {
     infix fun isCloseTo(other: ControlNode): Boolean {
         val epsilon = 1e-7
@@ -32,7 +45,12 @@ data class ControlNode(
                 marker == other.marker &&
                 command == other.command &&
                 commandParams == other.commandParams &&
-                abs(delayAfterArrive - other.delayAfterArrive) < epsilon
+                abs(delayAfterArrive - other.delayAfterArrive) < epsilon &&
+                abs(maxPower - other.maxPower) < epsilon &&
+                closeOptional(maxSpeed, other.maxSpeed, epsilon) &&
+                closeOptional(endSpeed, other.endSpeed, epsilon) &&
+                abs(brakeZoneIn - other.brakeZoneIn) < epsilon &&
+                closeOptional(brakeForwardPower, other.brakeForwardPower, epsilon)
     }
 
     /**
@@ -45,4 +63,15 @@ data class ControlNode(
         heading = -heading,
         dHeading = -dHeading
     )
+
+    /** A new waypoint inherits geometry and cruise power, never actions or end-of-segment braking. */
+    fun nextWaypoint(x: Double, y: Double): ControlNode = copy(
+        x = x, y = y,
+        marker = "", command = "", commandParams = emptyList(),
+        delayAfterArrive = 0.0, endSpeed = null,
+        brakeZoneIn = 0.0, brakeForwardPower = null
+    )
+
+    private fun closeOptional(a: Double?, b: Double?, epsilon: Double): Boolean =
+        if (a == null || b == null) a == b else abs(a - b) < epsilon
 }

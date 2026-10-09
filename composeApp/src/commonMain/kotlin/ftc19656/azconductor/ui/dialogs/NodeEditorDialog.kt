@@ -16,12 +16,14 @@ import androidx.compose.ui.unit.dp
 import ftc19656.azconductor.AppContext
 import ftc19656.azconductor.UIConfig
 import ftc19656.azconductor.route.ControlNode
+import ftc19656.azconductor.route.SplineRouteContract
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.SerialKind
 import kotlinx.serialization.descriptors.StructureKind
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -30,6 +32,29 @@ import kotlinx.serialization.serializer
 // 获取序列化器（静态以便提前预热避免点击延迟）
 val serializer = serializer<ControlNode>()
 val descriptor = serializer.descriptor
+
+private val splineFieldHelp = mapOf(
+    "dx" to "Hermite 几何切线 dX/du（英寸），不是机器人实际速度",
+    "dy" to "Hermite 几何切线 dY/du（英寸），不是机器人实际速度",
+    "dHeading" to "机器人不读取该字段；空间 Spline 预览始终采用零端点朝向导数",
+    "duration" to "仅控制规划器时间轴预览，机器人按空间位置前进，不按此时长执行",
+    "delayAfterArrive" to "到点后停车等待的秒数；执行前建议先配置末端停车",
+    "maxPower" to "本段巡航功率 0~1（由上一点移动至此点的路段）",
+    "maxSpeed" to "本段速度上限，单位 in/s；留空表示不限速",
+    "endSpeed" to "到达此点的目标速度，单位 in/s；留空为通过点，填 0 为精确停车",
+    "brakeZoneIn" to "到达此点前的制动区长度，单位英寸；指定 endSpeed 后必须大于 0",
+    "brakeForwardPower" to "制动区正向功率上限 0~1；留空沿用机器人默认值",
+    "marker" to "当前机器人自动 OpMode 不消费节点事件，因此 marker 不会触发动作",
+    "command" to "当前机器人自动 OpMode 不执行规划器的节点命令"
+)
+
+private val splineFieldLabels = mapOf(
+    "maxPower" to "巡航功率 maxPower",
+    "maxSpeed" to "速度上限 maxSpeed (in/s)",
+    "endSpeed" to "到点目标速度 endSpeed (in/s)",
+    "brakeZoneIn" to "制动区距离 brakeZoneIn (in)",
+    "brakeForwardPower" to "制动区前进功率 brakeForwardPower"
+)
 
 @OptIn(ExperimentalSerializationApi::class)
 fun preloadSerializer(): ControlNode {
@@ -92,6 +117,11 @@ fun NodeEditorDialog(
                 else -> value.toString()
             }
         }
+        // Optional nullable fields are omitted from robot JSON when unset,
+        // but must remain editable as empty text fields.
+        descriptor.elementNames.forEach { key ->
+            if (key !in mutableMap) mutableMap[key] = ""
+        }
         mutableMap
     }
 
@@ -107,14 +137,33 @@ fun NodeEditorDialog(
         title = { Text("编辑节点属性") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = "空间跟踪模式：预览 duration 不等于实际行驶时间。运动限制作用于以当前点为终点的路段。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = {
+                    editValues["endSpeed"] = "0.0"
+                    if ((editValues["brakeZoneIn"]?.toDoubleOrNull() ?: 0.0) <= 0.0) {
+                        editValues["brakeZoneIn"] = "12.0"
+                    }
+                }) { Text("设为停车点（12 英寸制动区起始值，需实机标定）") }
+                TextButton(onClick = {
+                    editValues["endSpeed"] = ""
+                    editValues["brakeZoneIn"] = "0.0"
+                    editValues["brakeForwardPower"] = ""
+                }) { Text("设为通过点（无终点速度约束）") }
                 // UI 根据定义的顺序和Json字段全自动生成
                 orderedFieldNames.forEach { fieldName ->
                     OutlinedTextField(
                         value = editValues[fieldName] ?: "",
                         onValueChange = { editValues[fieldName] = it },
-                        label = { Text(fieldName) },
+                        label = { Text(splineFieldLabels[fieldName] ?: fieldName) },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        singleLine = true
+                        singleLine = true,
+                        supportingText = splineFieldHelp[fieldName]?.let { help ->
+                            { Text(help, style = MaterialTheme.typography.bodySmall) }
+                        }
                     )
                 }
                 if (errorMessage != null) {
@@ -135,6 +184,9 @@ fun NodeEditorDialog(
                         val index = descriptor.getElementIndex(key)
                         if (index != -1) {
                             val elementDescriptor = descriptor.getElementDescriptor(index)
+                            if (elementDescriptor.isNullable && stringValue.isBlank()) {
+                                JsonNull
+                            } else {
                             when (elementDescriptor.kind) {
                                 PrimitiveKind.DOUBLE, PrimitiveKind.FLOAT, PrimitiveKind.INT, PrimitiveKind.LONG, PrimitiveKind.SHORT, PrimitiveKind.BYTE ->
                                     stringValue.toDoubleOrNull()?.let { JsonPrimitive(it) }
@@ -150,6 +202,7 @@ fun NodeEditorDialog(
                                 }
                                 else -> JsonPrimitive(stringValue)
                             }
+                            }
                         } else {
                             JsonPrimitive(stringValue)
                         }
@@ -157,6 +210,10 @@ fun NodeEditorDialog(
 
                     // 反序列化成类，实现改变节点字段时无需修改此处代码
                     val newNode = AppContext.jsonConfig.decodeFromJsonElement(serializer, JsonObject(jsonContent))
+                    val errors = SplineRouteContract.errors(listOf(newNode))
+                    if (errors.isNotEmpty()) {
+                        throw IllegalArgumentException(errors.joinToString("；") { it.message })
+                    }
                     onConfirm(newNode)
                     onDismiss()
 
