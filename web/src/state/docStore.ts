@@ -210,6 +210,7 @@ export class DocStore {
     this.redoStack.push(this.doc.value);
     this.applyDoc(prev, true);
     this.syncFlags();
+    this.notifyLocal();
     return true;
   }
 
@@ -219,6 +220,7 @@ export class DocStore {
     this.undoStack.push(this.doc.value);
     this.applyDoc(next, true);
     this.syncFlags();
+    this.notifyLocal();
     return true;
   }
 
@@ -305,6 +307,11 @@ export class DocStore {
   private applyDoc(doc: RoutesDoc, save = false): void {
     this.doc.value = doc;
     if (save) this.scheduleSave();
+  }
+
+  private notifyLocal(): void {
+    const d = this.doc.value;
+    this.changeListeners.forEach((fn) => fn(d));
   }
 
   private syncFlags(): void {

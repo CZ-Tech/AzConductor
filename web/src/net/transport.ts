@@ -150,6 +150,8 @@ export class SseParser {
   private event = '';
   private lastId: string | undefined;
   private started = false;
+  /** Previous chunk ended in CR: a leading LF of the next chunk belongs to that CRLF. */
+  private skipLf = false;
 
   /** Feed decoded text; returns the messages completed by it. */
   push(chunk: string): SseMessage[] {
@@ -158,15 +160,25 @@ export class SseParser {
       this.started = true;
       if (this.buf.charCodeAt(0) === 0xfeff) this.buf = this.buf.slice(1);
     }
+    if (this.skipLf && this.buf.length > 0) {
+      this.skipLf = false;
+      if (this.buf.charCodeAt(0) === 10) this.buf = this.buf.slice(1);
+    }
     const out: SseMessage[] = [];
     const b = this.buf;
     let start = 0;
     for (let i = 0; i < b.length; i++) {
       const c = b.charCodeAt(i);
       if (c !== 10 && c !== 13) continue;
-      if (c === 13 && i === b.length - 1) break; // might be the first half of CRLF — wait for more
       const line = b.slice(start, i);
-      if (c === 13 && b.charCodeAt(i + 1) === 10) i++;
+      if (c === 13) {
+        // The line ends at the CR itself (no latency); a following LF is swallowed.
+        if (i + 1 < b.length) {
+          if (b.charCodeAt(i + 1) === 10) i++;
+        } else {
+          this.skipLf = true;
+        }
+      }
       start = i + 1;
       this.line(line, out);
     }
