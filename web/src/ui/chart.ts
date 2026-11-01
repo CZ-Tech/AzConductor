@@ -10,7 +10,7 @@ export function chartAxes(samples: readonly ErrorSample[]): { xMax: number; yMax
   const xMax = Math.max(X_MIN_SEC, Math.ceil(last / X_STEP_SEC) * X_STEP_SEC);
   let maxE = 0;
   for (const s of samples) if (s.e > maxE) maxE = s.e;
-  const yMax = Math.max(Y_MIN_IN, Math.ceil(maxE));
+  const yMax = Math.max(Y_MIN_IN, Math.ceil(maxE / 5) * 5);
   return { xMax, yMax };
 }
 
@@ -38,11 +38,11 @@ export function drawErrorChart(canvas: HTMLCanvasElement, samples: readonly Erro
   ctx.fillStyle = ink;
   ctx.strokeStyle = line;
   ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = T + ph - (ph * i) / 4;
+  for (let i = 0; i <= 5; i++) {
+    const y = T + ph - (ph * i) / 5;
     ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
     ctx.textAlign = 'right';
-    ctx.fillText(((yMax * i) / 4).toFixed(1), L - 4, y + 3);
+    ctx.fillText(String((yMax * i) / 5), L - 4, y + 3);
   }
   const xt = xMax / X_STEP_SEC > 12 ? 10 : X_STEP_SEC;
   for (let x = 0; x <= xMax; x += xt) {

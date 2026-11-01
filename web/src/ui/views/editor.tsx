@@ -94,7 +94,7 @@ export function EditorView({ name }: { name: string }) {
   };
 
   const addAt = (x: number, y: number) => {
-    const next = [...live.current.points, nodeAtLogical(x, y)];
+    const next = [...live.current.points, nodeAtLogical(round(x), round(y))];
     setPoints(next);
     setSel(next.length - 1);
   };
@@ -262,7 +262,7 @@ export function EditorView({ name }: { name: string }) {
     const first = r?.[0];
     if (!first) return;
     if (live.current.points.length > 1) {
-      const ok = await askConfirm({ title: S.editor.importReplaceTitle, message: '' });
+      const ok = await askConfirm({ title: S.editor.importReplaceTitle, message: '当前路径的控制点将被替换（可用撤销恢复）。' });
       if (!ok) return;
     }
     setPoints(first.points);

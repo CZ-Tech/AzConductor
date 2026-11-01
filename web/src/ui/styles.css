@@ -177,3 +177,5 @@ a { color: var(--blue); }
 .conn { background: none; border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; min-height: 28px; }
 .conflict { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 8px; }
 .conflict h3 { margin: 0 0 4px; font-size: 14px; }
+
+.toolbar select, .topbar select { width: auto; }

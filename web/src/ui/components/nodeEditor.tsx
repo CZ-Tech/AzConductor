@@ -135,7 +135,7 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
       default:
         return (
           <div class="nf" key={k}>{label}
-            <input id={id} type="number" inputMode="decimal" step={spec.step} value={d[k as Exclude<NodeFieldKey, 'commandParams'>]}
+            <input id={id} type="number" inputMode="decimal" step="any" value={d[k as Exclude<NodeFieldKey, 'commandParams'>]}
               aria-invalid={err ? 'true' : undefined}
               onInput={(e) => set(k as Exclude<NodeFieldKey, 'commandParams'>, (e.target as HTMLInputElement).value)} />
             {hintOf(k) && !err && <div class="hint">{hintOf(k)}</div>}{errEl}</div>
@@ -147,7 +147,7 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
   const adv = NODE_FIELD_ORDER.filter((k) => (NODE_FIELDS[k] as FieldSpec).advanced);
 
   return (
-    <form onSubmit={save}>
+    <form onSubmit={save} noValidate>
       <div class="dlg-body node-form">
         <div class="presets">
           <button type="button" onClick={parking} title={S.node.parkingHint}>{S.node.parking}</button>
