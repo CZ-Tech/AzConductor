@@ -1,0 +1,1 @@
+export function EditorView(props: { name: string }) { return <div style="padding:16px">编辑器：{props.name}（待实现）</div>; }

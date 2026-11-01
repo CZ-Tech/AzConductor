@@ -1,0 +1,1 @@
+export function RoutesView() { return <div style="padding:16px">路径管理（待实现）</div>; }
