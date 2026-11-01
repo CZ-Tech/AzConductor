@@ -112,6 +112,8 @@ describe('RouteCore 基本行为', () => {
       }
       // 每个节点的到达时刻位置 = 该节点
       route.segmentEndTimes.forEach((e, k) => {
+        // 零时长段与相邻时刻重合，到达时刻不唯一，跳过
+        if (!(e > route.segmentStartTimes[k]!)) return;
         const p = route.pointAt(e)!;
         const n = nodes[k + 1]!;
         expect(p.x).toBeCloseTo(n.x, 7);
