@@ -63,7 +63,7 @@ async function main() {
     const page = await ctx.newPage();
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(String(e)));
-    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('console', (m) => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) errors.push(m.text()); });
     await ctx.addInitScript((addr) => {
       if (!localStorage.getItem('az.settings')) localStorage.setItem('az.settings', JSON.stringify({ robotAddress: addr, fieldMap: '27', lastRunRoute: '' }));
     }, robot.url);
@@ -144,6 +144,59 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1500));
     check(await page.locator('.route-card', { hasText: 'E2E 路径' }).count() === 0, '已删除路径不会复活');
 
+    // 镜像
+    const card = (n: string) => page.locator('.route-card', { hasText: n }).first();
+    await card('Red Near').getByRole('button', { name: '镜像到红方' }).click();
+    await page.locator('dialog button.primary').click();            // 确认
+    await page.locator('dialog input[type=text]').fill('Mirror A');
+    await page.locator('dialog button[type=submit]').click();
+    check(await until(() => robot.routeNames.includes('Mirror A'), 'mirror pushed', 8000), '镜像路径创建并同步到机器');
+
+    // 重命名 → 机器侧等价于删旧建新
+    await card('Mirror A').getByRole('button', { name: '重命名' }).click();
+    await page.locator('dialog input[type=text]').fill('Mirror B');
+    await page.locator('dialog button[type=submit]').click();
+    check(await until(() => robot.routeNames.includes('Mirror B') && !robot.routeNames.includes('Mirror A'), 'rename synced', 8000), '重命名同步到机器（旧名消失、新名出现）');
+
+    // 导出 → 导入
+    await card('Mirror B').getByRole('button', { name: '导出', exact: true }).click();
+    const exported = await page.locator('dialog textarea').inputValue();
+    let parsedOk = false;
+    try { parsedOk = Array.isArray(JSON.parse(exported)) && JSON.parse(exported).length >= 2; } catch { /* */ }
+    check(parsedOk, '导出 JSON 可解析且包含控制点数组');
+    await page.locator('dialog button.primary').click();
+    await page.getByRole('button', { name: '导入', exact: true }).click();
+    await page.locator('dialog textarea').fill(exported);
+    await page.locator('dialog button.primary').click();
+    check(await until(async () => (await page.locator('.route-card', { hasText: '导入路径' }).count()) === 1, 'imported card'), '粘贴导入生成新路径');
+    check(await until(() => robot.routeNames.includes('导入路径'), 'import pushed', 8000), '导入的路径同步到机器');
+
+    // 冲突：断开 → 本地改 + 机器改 → 重连
+    await page.locator('.conn').click();
+    await page.getByRole('button', { name: '断开' }).click();
+    await page.getByRole('button', { name: '关闭' }).click();
+    check(await until(async () => (await page.locator('.conn').innerText()).includes('未连接'), 'disc'), '手动断开连接');
+    await page.locator('.route-card', { hasText: 'Mirror B' }).locator('a.card-main').click();
+    await page.waitForURL(/#\/edit\//);
+    const bb = await fieldBox(page);
+    await page.mouse.click(bb.x + bb.width * 0.45, bb.y + bb.height * 0.2);
+    await page.getByRole('button', { name: /返回/ }).click();
+    robot.mutateRemoteRoute('Mirror B', '[{"x":0,"y":0,"dx":10,"dy":0,"duration":0},{"x":5,"y":5,"dx":10,"dy":0,"duration":1}]');
+    await page.locator('.conn').click();
+    await page.getByRole('button', { name: '重新连接' }).click();
+    await page.getByRole('button', { name: '关闭' }).click();
+    check(await until(async () => (await page.locator('.sync-panel').innerText()).includes('冲突'), 'conflict shown', 10000), '本地与机器都修改后出现冲突提示');
+    await page.getByRole('button', { name: '处理冲突' }).click();
+    await page.getByRole('button', { name: /以机器为准/ }).click();
+    check(await until(async () => (await page.locator('.sync-panel').innerText()).includes('已同步'), 'resolved'), '选择以机器为准后冲突解决');
+    check((await card('Mirror B').innerText()).includes('2 个点'), '本地已采用机器版本（2 个点）');
+
+    // 机器重启 → 自动重连
+    const port = robot.port;
+    await robot.stop();
+    check(await until(async () => !(await page.locator('.conn').innerText()).includes('已连接'), 'lost', 8000), '机器关闭后连接状态变为断开/失败');
+    await robot.start(port);
+    check(await until(async () => (await page.locator('.conn').innerText()).includes('已连接'), 'reconnect', 20000), '机器恢复后自动重连');
     // 运行页
     await page.goto(`http://localhost:${PORT}/#/run`);
     check(await until(async () => (await page.locator('#run-op option').count()) > 1, 'opmodes loaded'), '运行页列出 Autonomous');
