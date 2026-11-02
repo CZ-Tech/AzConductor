@@ -29,6 +29,7 @@ export const IconArrowDown = () => <Svg><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /
 export const IconReplay = () => <Svg><path d="M3 8a5 5 0 1 0 1.6-3.7L3 5.8" /><path d="M3 2.8v3h3" /></Svg>;
 export const IconSidebar = () => <Svg><rect x="2" y="3" width="12" height="10" rx="2" /><path d="M10 3v10" /></Svg>;
 export const IconRobot = () => <Svg><rect x="3" y="3" width="10" height="10" rx="2" /><circle cx="8" cy="6" r="1" fill="currentColor" /></Svg>;
+export const IconTerminal = () => <Svg><path d="m3 4.5 3.5 3.5L3 11.5M8 12h5" /></Svg>;
 export const IconMore = () => <Svg><circle cx="3" cy="8" r=".9" fill="currentColor" /><circle cx="8" cy="8" r=".9" fill="currentColor" /><circle cx="13" cy="8" r=".9" fill="currentColor" /></Svg>;
 export const IconPlay = () => <Svg><path d="M5 3.2v9.6L13 8Z" fill="currentColor" /></Svg>;
 export const IconPause = () => <Svg><path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2.4" /></Svg>;

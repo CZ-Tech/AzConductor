@@ -37,4 +37,5 @@ Node >= 22（见 `.nvmrc`）。
 - 提交信息：中文描述 + 英文前缀（`feat:` / `fix:` / `refactor:` / `test:` / `docs:` / `ci:`），一行为宜。
 - 所有"本地与远端是否相同"的比较用解析后的规范结构（`canonicalRoute`），不比较原始文本；可选字段缺省时省略，永不输出 `null`。
 - 机器人 Network V2 的线格式、状态码、CORS 要求以机器人侧代码为准；改动 `src/net` 要同步更新 mock 与测试。
+- 运行页指令试运行对应固件的 `POST /api/v2/commands/run`（`RobotApiRouter.handleCommandRun`，固件提交 b83b346）：只在 OpMode `RUNNING` 且该 OpMode 挂载了 `commandDispatcher` 时接受（目前仅 `RemoteCommand Test`，TeleOp）；校验顺序和错误码在 mock 的 `handleCommandRun` 里逐条移植。目录 `GET /commands` 带 `paramDefaults`，末尾带默认值的参数可省略，但客户端下发时一律补全（`resolveArgs`），不依赖固件补默认值。旧固件没有这个端点（404 `not_found`）。改固件接口时同步改 `RobotApiClient.runCommand`、mock 和 `src/core/commandArgs.ts`（校验规则对齐固件 `CommandArgs.convert`）。
 - 部署：推送 `main` 触发 `.github/workflows/pages.yml`（`npm ci → test → build → deploy-pages`）。

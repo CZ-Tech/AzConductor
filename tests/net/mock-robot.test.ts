@@ -390,7 +390,7 @@ describe('state endpoints', () => {
     robot.publishRuntime(true, 'HttpAuto', { x: 1.5, y: -2, heading: 90 });
     expect((await call(robot, 'GET', '/api/v2/execution', { token: t })).json()).toEqual({ state: 'RUNNING', requestId: 4, subject: 'Auto "Q"', revision: 2 });
     expect((await call(robot, 'GET', '/api/v2/commands', { token: t })).json())
-      .toEqual({ revision: 2, commands: [{ name: 'shoot', paramNames: ['n'], paramTypes: ['int'] }] });
+      .toEqual({ revision: 2, commands: [{ name: 'shoot', paramNames: ['n'], paramTypes: ['int'], paramDefaults: [null] }] });
 
     const rt = (await call(robot, 'GET', '/api/v2/runtime', { token: t })).text;
     expect(rt).toContain('"x":1.500000'); // JsonUtil.number → %.6f

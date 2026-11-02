@@ -32,8 +32,13 @@ export type MockExecutionState = 'NOT_READY' | 'IDLE' | 'RUNNING';
 
 export interface MockRouteEntry { name: string; json: string; revision: number }
 /** `route` binds the op mode to a stored route: START then plays that route's pose track. */
-export interface MockOpMode { name: string; group: string; route: string | null }
-export interface MockCommand { name: string; paramNames: string[]; paramTypes: string[] }
+export interface MockOpMode {
+  name: string; group: string; route: string | null;
+  /** Like the firmware's `RemoteCommand Test` TeleOp: attaches the command dispatcher while RUNNING. */
+  commands?: boolean;
+}
+/** `paramDefaults[i]` is the default text of parameter i (`null` = required); defaulted ones are trailing. */
+export interface MockCommand { name: string; paramNames: string[]; paramTypes: string[]; paramDefaults?: (string | null)[] }
 export interface MockOpModeSnapshot {
   revision: number;
   controllerAvailable: boolean;
@@ -275,6 +280,8 @@ export class MockRobotServer {
   // ---- observability (public, for assertions) ----------------------------------------------
   /** Every request received, oldest first. */
   readonly requests: RecordedRequest[] = [];
+  /** Commands accepted by `POST /commands/run`, oldest first. */
+  readonly commandRuns: { name: string; args: string[] }[] = [];
   /** Raw targets of all `GET /events` requests that were accepted (200). */
   readonly openedEventTargets: string[] = [];
 
@@ -446,16 +453,16 @@ export class MockRobotServer {
   get opModes(): readonly MockOpMode[] { return this.opModeList; }
 
   /** Replace the autonomous list. Strings are plain unbound op modes in group `Auto`. */
-  setOpModes(list: ReadonlyArray<string | { name: string; group?: string; route?: string | null }>): void {
+  setOpModes(list: ReadonlyArray<string | { name: string; group?: string; route?: string | null; commands?: boolean }>): void {
     this.opModeList = list.map((o) => (typeof o === 'string'
       ? { name: o, group: 'Auto', route: null }
-      : { name: o.name, group: o.group ?? 'Auto', route: o.route ?? null }));
+      : { name: o.name, group: o.group ?? 'Auto', route: o.route ?? null, ...(o.commands ? { commands: true } : {}) }));
   }
 
-  addOpMode(name: string, options: { group?: string; route?: string | null } = {}): void {
+  addOpMode(name: string, options: { group?: string; route?: string | null; commands?: boolean } = {}): void {
     this.opModeList = [
       ...this.opModeList.filter((o) => o.name !== name),
-      { name, group: options.group ?? 'Auto', route: options.route ?? null },
+      { name, group: options.group ?? 'Auto', route: options.route ?? null, ...(options.commands ? { commands: true } : {}) },
     ];
   }
 
@@ -496,7 +503,10 @@ export class MockRobotServer {
 
   /** Replace the command catalog (revision +1, announced on the stream as `commands`). */
   setCommands(list: readonly MockCommand[]): void {
-    this.commandList = list.map((c) => ({ name: c.name, paramNames: [...c.paramNames], paramTypes: [...c.paramTypes] }));
+    this.commandList = list.map((c) => ({
+      name: c.name, paramNames: [...c.paramNames], paramTypes: [...c.paramTypes],
+      paramDefaults: c.paramNames.map((_, i) => c.paramDefaults?.[i] ?? null),
+    }));
     this.commandRevision++;
   }
   get commandsRevision(): number { return this.commandRevision; }
@@ -727,6 +737,10 @@ export class MockRobotServer {
       if (method !== 'GET') return methodNotAllowed();
       return json(200, this.commandsJson());
     }
+    if (path === `${PREFIX}/commands/run`) {
+      if (method !== 'POST') return methodNotAllowed();
+      return this.handleCommandRun(ctx);
+    }
     if (method === 'GET' && path === `${PREFIX}/runtime`) {
       return json(200, `{"runtime":${runtimeJson(this.runtime)},"pose":${poseJson(this.runtime)}}`);
     }
@@ -859,6 +873,51 @@ export class MockRobotServer {
     this.sendJson(res, 202, `{"accepted":true,"action":"${action}","name":${JSON.stringify(name)}}`, record);
   }
 
+  /**
+   * `POST /api/v2/commands/run` — port of `RobotApiRouter.handleCommandRun` (firmware b83b346):
+   * same check order and error codes. Trailing parameters with a default may be omitted; the
+   * recorded `commandRuns` args are the completed list, as the firmware's `Overload.complete` builds it.
+   */
+  private handleCommandRun(ctx: Ctx): void {
+    const { res, record } = ctx;
+    let body: Record<string, unknown> | null = null;
+    try { body = parseObject(ctx.body); } catch { body = null; } // malformed body → treated like a missing name
+    const rawName = body?.['name'];
+    const name = typeof rawName === 'string' ? rawName : '';
+    if (body === null || name.trim() === '') return this.sendJson(res, 400, '{"error":"missing_command_name"}', record);
+    const rawRevision = body['expectedRevision'];
+    if (rawRevision === undefined || rawRevision === null) {
+      return this.sendJson(res, 428, '{"error":"expected_revision_required"}', record);
+    }
+
+    const rejected = (status: number, code: string, message: string): void => {
+      this.sendJson(res, status, `{"error":${JSON.stringify(code)},"message":${JSON.stringify(message)},"opMode":${opModeJson(this.opSnap)}}`, record);
+    };
+
+    if (optLong(body, 'expectedRevision') !== this.opSnap.revision) {
+      return rejected(409, 'state_changed', 'Robot OpMode state changed before the request was applied');
+    }
+    if (!this.opSnap.controllerAvailable) return rejected(503, 'controller_unavailable', 'FTC OpMode controller is unavailable');
+    const cmd = this.commandList.find((c) => c.name === name);
+    if (!cmd) return rejected(404, 'command_not_found', `No command named ${name}`);
+
+    const completed = completeCommandArgs(cmd, body['args']);
+    if (typeof completed === 'string') return rejected(400, 'invalid_command_args', completed);
+
+    if (this.opSnap.phase !== 'RUNNING') return rejected(409, 'command_not_ready', 'Commands run only while an OpMode is RUNNING');
+    if (!this.commandsReady()) return rejected(409, 'command_not_ready', 'The running OpMode does not accept commands');
+    if (this.execSnap.state === 'RUNNING') return rejected(409, 'route_executing', 'A route is being executed');
+
+    this.commandRuns.push({ name, args: completed });
+    this.sendJson(res, 202, `{"accepted":true,"name":${JSON.stringify(name)}}`, record);
+  }
+
+  /** The firmware attaches its command dispatcher only in OpModes written for it (RemoteCommand Test). */
+  private commandsReady(): boolean {
+    const run = this.run;
+    return run !== null && this.opModeList.find((o) => o.name === run.opModeName)?.commands === true;
+  }
+
   /** `OpModeLifecycleService.publish`: revision only moves when something changed. */
   private publishOpMode(available: boolean, phase: MockOpModePhase, activeName: string | null): void {
     const old = this.opSnap;
@@ -889,7 +948,8 @@ export class MockRobotServer {
     const core = this.routeCoreFor(op);
     this.publishOpMode(true, 'RUNNING', op.name);
     this.publishRuntime(true, op.name);
-    this.publishExecution('RUNNING', ++this.lastRequestId, core ? op.route : null);
+    // A command OpMode (TeleOp) publishes IDLE execution and attaches the dispatcher instead of following a route
+    this.publishExecution(op.commands ? 'IDLE' : 'RUNNING', ++this.lastRequestId, core ? op.route : null);
 
     const total = core?.totalTime ?? 0;
     const derived = Math.min(this.opts.maxRunMs, Math.max(this.opts.minRunMs, total * 1000 * this.opts.runTimeScale));
@@ -1028,7 +1088,7 @@ export class MockRobotServer {
 
   private commandsJson(): string {
     const items = this.commandList.map((c) =>
-      `{"name":${JSON.stringify(c.name)},"paramNames":${JSON.stringify(c.paramNames)},"paramTypes":${JSON.stringify(c.paramTypes)}}`).join(',');
+      `{"name":${JSON.stringify(c.name)},"paramNames":${JSON.stringify(c.paramNames)},"paramTypes":${JSON.stringify(c.paramTypes)},"paramDefaults":${JSON.stringify(c.paramDefaults)}}`).join(',');
     return `{"revision":${this.commandRevision},"commands":[${items}]}`;
   }
 }
@@ -1074,6 +1134,61 @@ function optLong(o: Record<string, unknown>, key: string): number {
   return Number.NEGATIVE_INFINITY;
 }
 
+/**
+ * Port of `RobotApiRouter.parseCommandArguments` + `CommandArgs.convertAll` (arguments stay text here).
+ * Returns the completed argument list (omitted trailing defaults filled in) or an error message.
+ */
+function completeCommandArgs(cmd: MockCommand, rawArgs: unknown): string[] | string {
+  const values: string[] = [];
+  if (rawArgs !== undefined && rawArgs !== null) {
+    if (!Array.isArray(rawArgs)) return 'args must be an array of strings';
+    for (let i = 0; i < rawArgs.length; i++) {
+      if (typeof rawArgs[i] !== 'string') return `args[${i}] is not a string`;
+      values.push(rawArgs[i] as string);
+    }
+  }
+  const n = cmd.paramNames.length;
+  const defaults = cmd.paramDefaults ?? [];
+  let trailing = 0;
+  while (trailing < n && (defaults[n - 1 - trailing] ?? null) !== null) trailing++;
+  if (values.length < n - trailing || values.length > n) return `${cmd.name} does not accept ${values.length} argument(s)`;
+  for (let i = 0; i < values.length; i++) {
+    const bad = javaConvertError(values[i] as string, cmd.paramTypes[i] ?? '');
+    if (bad) return `Argument ${i}: ${bad}`;
+  }
+  return [...values, ...defaults.slice(values.length, n).map((d) => d as string)];
+}
+
+/** `CommandArgs.convert`: strict; unknown types are plain text. Returns an error message or null. */
+function javaConvertError(value: string, type: string): string | null {
+  const t = type.startsWith('java.lang.') ? type.slice('java.lang.'.length) : type;
+  const bad = (what: string): string => `'${value}' is not a valid ${what}`;
+  const integer = (bits: number, what: string): string | null => {
+    if (!/^[+-]?\d+$/.test(value)) return bad(what);
+    const v = BigInt(value);
+    const lim = 1n << BigInt(bits - 1);
+    return v >= -lim && v < lim ? null : bad(what);
+  };
+  const decimal = (what: string, single: boolean): string | null => {
+    // Java's parseDouble/parseFloat trim whitespace and accept a trailing f/d suffix; NaN/Infinity are refused above
+    const s = value.trim().replace(/[fFdD]$/, '');
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return bad(what);
+    const x = single ? Math.fround(Number(s)) : Number(s);
+    return Number.isFinite(x) ? null : bad(what);
+  };
+  switch (t) {
+    case 'int': case 'Integer': return integer(32, 'int');
+    case 'long': case 'Long': return integer(64, 'long');
+    case 'short': case 'Short': return integer(16, 'short');
+    case 'byte': case 'Byte': return integer(8, 'byte');
+    case 'float': case 'Float': return decimal('float', true);
+    case 'double': case 'Double': return decimal('double', false);
+    case 'boolean': case 'Boolean': return /^(true|false)$/i.test(value) ? null : bad('boolean');
+    case 'char': case 'Character': return value.length === 1 ? null : bad('char');
+    default: return null;
+  }
+}
+
 function routeToJson(route: string | readonly ControlNode[] | readonly unknown[]): string {
   if (typeof route === 'string') return route;
   const first = route[0];
@@ -1115,12 +1230,16 @@ export function seedSampleRobot(robot: MockRobotServer): void {
     { name: 'Auto Blue Far', group: 'Auto', route: 'Blue Far' },
     { name: 'Auto Path A', group: 'Auto', route: '蓝 路径(A)' },
     { name: 'Auto Park', group: 'Auto', route: null },
+    // Firmware's TeleOp that accepts remote commands while RUNNING (the only OpMode that does)
+    { name: 'RemoteCommand Test', group: 'Test', route: null, commands: true },
   ]);
 
   robot.setCommands([
     { name: 'intakeOn', paramNames: [], paramTypes: [] },
     { name: 'intakeOff', paramNames: [], paramTypes: [] },
-    { name: 'shoot', paramNames: ['count', 'power'], paramTypes: ['int', 'double'] },
+    { name: 'shoot', paramNames: ['count', 'power'], paramTypes: ['int', 'double'], paramDefaults: [null, '0.8'] },
     { name: 'setLift', paramNames: ['height'], paramTypes: ['double'] },
+    // Firmware names commands "<subsystem>.<method>" and publishes defaults for trailing parameters
+    { name: 'shooter.spin', paramNames: ['rpm', 'power', 'reverse', 'label'], paramTypes: ['int', 'double', 'boolean', 'String'], paramDefaults: [null, '0.8', 'true', ''] },
   ]);
 }

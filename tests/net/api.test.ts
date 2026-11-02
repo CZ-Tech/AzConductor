@@ -299,11 +299,11 @@ describe('robot state', () => {
     expect(ok(await client.commandCatalog())).toEqual({ revision: 1, commands: [] });
 
     robot.publishExecution('RUNNING', 3, 'Auto');
-    robot.setCommands([{ name: 'shoot', paramNames: ['n', 'p'], paramTypes: ['int', 'double'] }]);
+    robot.setCommands([{ name: 'shoot', paramNames: ['n', 'p'], paramTypes: ['int', 'double'], paramDefaults: [null, '0.8'] }]);
     robot.publishRuntime(true, 'HttpAuto', { x: 1.25, y: -2.5, heading: 90 });
     expect(ok(await client.executionState())).toEqual({ state: 'RUNNING', requestId: 3, subject: 'Auto', revision: 2 });
     expect(ok(await client.commandCatalog())).toEqual({
-      revision: 2, commands: [{ name: 'shoot', paramNames: ['n', 'p'], paramTypes: ['int', 'double'] }],
+      revision: 2, commands: [{ name: 'shoot', paramNames: ['n', 'p'], paramTypes: ['int', 'double'], paramDefaults: [null, '0.8'] }],
     });
     const snap = ok(await client.runtimeSnapshot());
     expect(snap.runtime).toEqual({ seq: 1, opModeActive: true, opModeName: 'HttpAuto' });
@@ -343,6 +343,99 @@ describe('robot state', () => {
     });
     ok(await client.openSession('T'));
     expect(fail(await client.getRoute('x')).kind).toBe('parse');
+  });
+});
+
+describe('manual command run (POST /api/v2/commands/run)', () => {
+  const shoot = { name: 'shoot', paramNames: ['count', 'power'], paramTypes: ['int', 'double'], paramDefaults: [null, '0.8'] };
+  const spin = { name: 'shooter.spin', paramNames: ['rpm', 'reverse', 'label'], paramTypes: ['int', 'boolean', 'String'], paramDefaults: [null, 'true', ''] };
+
+  /** Firmware shape: only the TeleOp-like `Remote` OpMode attaches the dispatcher; `Auto A` is a plain Autonomous. */
+  async function running(start = true) {
+    const s = await connected();
+    s.robot.setOpModes([{ name: 'Remote', group: 'Test', route: null, commands: true }, 'Auto A']);
+    s.robot.setCommands([shoot, spin, { name: 'intakeOn', paramNames: [], paramTypes: [] }]);
+    ok(await s.client.initOpMode('Remote', s.robot.opModeRevision));
+    if (start) ok(await s.client.startOpMode('Remote', s.robot.opModeRevision));
+    return s;
+  }
+  const code = (e: ReturnType<typeof httpFail>) => [e.status, e.code];
+
+  it('posts name, string args and the op mode revision, and is accepted with 202', async () => {
+    const { robot, client } = await running();
+    const res = await client.runCommand('shoot', ['3', '0.5'], robot.opModeRevision);
+    expect(res.ok && res.status).toBe(202);
+    expect(ok(res)).toEqual({ accepted: true, name: 'shoot' });
+    const req = robot.requests.at(-1);
+    expect(req?.url).toBe(`${robot.url}/api/v2/commands/run`);
+    expect(req?.headers[SESSION_HEADER.toLowerCase()]).toBe(robot.sessionToken);
+    expect(JSON.parse(req?.body ?? '')).toEqual({ name: 'shoot', args: ['3', '0.5'], expectedRevision: robot.opModeRevision });
+    expect(robot.commandRuns).toEqual([{ name: 'shoot', args: ['3', '0.5'] }]);
+    expect(robot.execution.state).toBe('IDLE');
+  });
+
+  it('a command OpMode keeps execution IDLE; the robot completes omitted trailing defaults itself', async () => {
+    const { robot, client } = await running();
+    ok(await client.runCommand('shoot', ['3'], robot.opModeRevision));
+    ok(await client.runCommand('shooter.spin', ['900'], robot.opModeRevision));
+    expect(robot.commandRuns).toEqual([
+      { name: 'shoot', args: ['3', '0.8'] },
+      { name: 'shooter.spin', args: ['900', 'true', ''] },
+    ]);
+  });
+
+  it('is refused while STOPPED, while only INIT, and in an OpMode that does not take commands', async () => {
+    const stopped = await connected();
+    stopped.robot.setCommands([shoot]);
+    expect(code(httpFail(await stopped.client.runCommand('shoot', ['3', '0.8'], stopped.robot.opModeRevision)))).toEqual([409, 'command_not_ready']);
+
+    const init = await running(false);
+    expect(code(httpFail(await init.client.runCommand('intakeOn', [], init.robot.opModeRevision)))).toEqual([409, 'command_not_ready']);
+
+    const auto = await connected();
+    auto.robot.setCommands([shoot]);
+    ok(await auto.client.initOpMode('Auto A', auto.robot.opModeRevision));
+    ok(await auto.client.startOpMode('Auto A', auto.robot.opModeRevision));
+    expect(code(httpFail(await auto.client.runCommand('shoot', ['3', '0.8'], auto.robot.opModeRevision)))).toEqual([409, 'command_not_ready']);
+    expect([stopped, init, auto].flatMap((s) => s.robot.commandRuns)).toEqual([]);
+  });
+
+  it('refuses to run while a route is executing', async () => {
+    const { robot, client } = await running();
+    robot.publishExecution('RUNNING', 1, 'Route A');
+    expect(code(httpFail(await client.runCommand('intakeOn', [], robot.opModeRevision)))).toEqual([409, 'route_executing']);
+    expect(robot.commandRuns).toEqual([]);
+  });
+
+  it('a stale revision is a 409 state_changed and sends exactly one request', async () => {
+    const { robot, client } = await running();
+    const stale = robot.opModeRevision;
+    robot.bumpOpModeRevision();
+    const before = robot.requests.length;
+    const err = httpFail(await client.runCommand('intakeOn', [], stale));
+    expect(code(err)).toEqual([409, 'state_changed']);
+    expect(robot.requests).toHaveLength(before + 1);
+    expect(robot.commandRuns).toEqual([]);
+  });
+
+  it('maps unknown commands and bad or incomplete arguments to 404 / 400 like the firmware', async () => {
+    const { robot, client } = await running();
+    const run = async (name: string, args: string[]) => code(httpFail(await client.runCommand(name, args, robot.opModeRevision)));
+    expect(await run('nope', [])).toEqual([404, 'command_not_found']);
+    expect(await run('shoot', ['1.5', '0.8'])).toEqual([400, 'invalid_command_args']); // int
+    expect(await run('shoot', [])).toEqual([400, 'invalid_command_args']); // required count missing
+    expect(await run('shoot', ['3', '0.8', 'x'])).toEqual([400, 'invalid_command_args']); // too many
+    expect(await run('shoot', ['3000000000', '0.8'])).toEqual([400, 'invalid_command_args']); // beyond int
+    expect(await run('shoot', [' 3', '0.8'])).toEqual([400, 'invalid_command_args']); // Integer.valueOf takes no spaces
+    expect(await run('shooter.spin', ['9', 'maybe'])).toEqual([400, 'invalid_command_args']); // boolean
+    expect(robot.commandRuns).toEqual([]);
+  });
+
+  it('rejects a bad revision locally without sending anything', async () => {
+    const { robot, client } = await running();
+    const before = robot.requests.length;
+    await expect(client.runCommand('intakeOn', [], -1)).rejects.toThrow(RangeError);
+    expect(robot.requests).toHaveLength(before);
   });
 });
 

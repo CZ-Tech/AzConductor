@@ -18,8 +18,10 @@ export interface RouteManifest { routes: RouteManifestEntry[]; changeRevision: n
 export interface RobotRoutePayload { name: string; revision: number; json: string }
 export interface RouteWriteResponse { name: string; revision: number }
 export interface ExecutionSnapshot { state: ExecutionState; requestId: number; subject: string | null; revision: number }
-export interface CommandDescriptor { name: string; paramNames: string[]; paramTypes: string[] }
+/** `paramDefaults[i]` is the default text of parameter i, `null` for a required one (always one entry per parameter). */
+export interface CommandDescriptor { name: string; paramNames: string[]; paramTypes: string[]; paramDefaults: (string | null)[] }
 export interface CommandCatalog { revision: number; commands: CommandDescriptor[] }
+export interface CommandRunResponse { accepted: boolean; name: string }
 export interface PoseEvent { seq: number; tNanos: number; x: number; y: number; heading: number }
 export interface RuntimeEvent { seq: number; opModeActive: boolean; opModeName: string | null }
 export interface RevisionEvent { revision: number }
@@ -92,6 +94,16 @@ function strArr(o: Obj, k: string): string[] {
   });
 }
 
+/** `paramDefaults` is absent on older firmware: every parameter is then required. Always `count` entries. */
+function defaultsArr(o: Obj, count: number): (string | null)[] {
+  return Array.from({ length: count }, (_, i) => {
+    const v = arr(o, 'paramDefaults')[i];
+    if (v === undefined || v === null) return null;
+    if (typeof v !== 'string') throw new DecodeError("'paramDefaults' contains a non-string");
+    return v;
+  });
+}
+
 const PHASES: readonly string[] = ['STOPPED', 'INIT', 'RUNNING'];
 const EXEC_STATES: readonly string[] = ['NOT_READY', 'IDLE', 'RUNNING'];
 
@@ -129,9 +141,14 @@ export function decodeCommandCatalog(raw: unknown): CommandCatalog {
     revision: num(o, 'revision', 0),
     commands: arr(o, 'commands').map((e) => {
       const c = obj(e, 'command');
-      return { name: str(c, 'name'), paramNames: strArr(c, 'paramNames'), paramTypes: strArr(c, 'paramTypes') };
+      const paramNames = strArr(c, 'paramNames');
+      return { name: str(c, 'name'), paramNames, paramTypes: strArr(c, 'paramTypes'), paramDefaults: defaultsArr(c, paramNames.length) };
     }),
   };
+}
+export function decodeCommandRun(raw: unknown): CommandRunResponse {
+  const o = obj(raw, 'command run');
+  return { accepted: bool(o, 'accepted', false), name: str(o, 'name', '') };
 }
 export function decodePose(raw: unknown): PoseEvent {
   const o = obj(raw, 'pose');

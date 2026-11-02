@@ -9,7 +9,8 @@ import { settings, updateSettings } from '../../state/settings';
 import { FieldSvg, PathCurve, RobotGlyph } from '../components/field';
 import { toast } from '../components/dialogs';
 import { openConnectionDialog } from '../components/connection';
-import { IconPlay, IconStop } from '../components/icons';
+import { CommandPanel } from '../components/commandPanel';
+import { IconPlay, IconStop, IconTerminal } from '../components/icons';
 import { describeApiError, isHttpError } from '../../net/transport';
 import { drawErrorChart, type ErrorSample } from '../chart';
 import { S } from '../strings';
@@ -55,6 +56,8 @@ export function RunView() {
   const [busy, setBusy] = useState(false);
   const [manualRoute, setManualRoute] = useState(settings.value.lastRunRoute);
   const [remoteNames, setRemoteNames] = useState<string[]>([]);
+  // 宽屏默认展开；窄屏是盖在场地上的抽屉，默认收起（断点同 styles.css）
+  const [cmdOpen, setCmdOpen] = useState(() => matchMedia('(min-width: 1101px)').matches);
 
   // 已 INIT/RUNNING 的 OpMode 自动成为所选项
   useEffect(() => { if (opMode?.activeName) setSelected(opMode.activeName); }, [opMode?.activeName]);
@@ -168,7 +171,9 @@ export function RunView() {
   return (
     <div class="run">
       <div class="run-main">
+        <CommandPanel open={cmdOpen} onClose={() => setCmdOpen(false)} />
         <div class="run-map">
+          {!cmdOpen && <button type="button" class="cmd-toggle" aria-expanded="false" aria-controls="cmd-panel" onClick={() => setCmdOpen(true)}><IconTerminal />{S.commands.toggle}</button>}
           <FieldSvg svgRef={useRef<SVGSVGElement>(null)} label={S.run.map}>
             {nodes && <PathCurve nodes={nodes} color="var(--f-casing)" width={2.4} />}{nodes && <PathCurve nodes={nodes} color="var(--f-path)" width={1.1} />}
             {nodes && nodes.map((n, i) => {

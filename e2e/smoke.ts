@@ -56,7 +56,7 @@ async function cardAction(page: Page, routeName: string, item: string) {
 }
 
 async function main() {
-  const robot = new MockRobotServer({ host: '127.0.0.1', poseHz: 30, runDurationMs: 4000 });
+  const robot = new MockRobotServer({ host: '127.0.0.1', poseHz: 30, runDurationMs: 30_000 }); // 回合都以 STOP 结束；指令 OpMode 需要足够长的 RUNNING 窗口
   seedSampleRobot(robot);
   await robot.start(0);
   log(`mock robot ${robot.url} routes=${robot.routeNames.join(',')} opmodes=${robot.opModes.map((o) => o.name).join(',')}`);
@@ -236,13 +236,70 @@ async function main() {
     // 运行页
     await page.goto(`http://localhost:${PORT}/#/run`);
     check(await until(async () => (await page.locator('.topbar nav a[aria-current=page]').innerText()) === '运行', 'nav current'), '运行页导航高亮「运行」');
-    check(await until(async () => (await page.locator('#run-op option').count()) > 1, 'opmodes loaded'), '运行页列出 Autonomous');
+    check(await until(async () => (await page.locator('#run-op option').count()) > 1, 'opmodes loaded'), '运行页列出 OpMode');
+    // 指令试运行只在支持远程指令的 OpMode（固件的 RemoteCommand Test，TeleOp）RUNNING 时可用
+    const cmdOp = 'RemoteCommand Test';
+    check((await page.locator('#run-op option', { hasText: cmdOp }).count()) === 1, '下拉框列出 TeleOp（RemoteCommand Test）');
+    await page.locator('#run-op').selectOption(cmdOp);
+    const panel = page.locator('#cmd-panel');
+    const runBtn = (n: string) => page.getByRole('button', { name: `运行 ${n}`, exact: true });
+    const field = (n: string, i: number) => page.locator(`[id="cmd-${n}-${i}"]`);
+    check(await panel.isVisible() && (await panel.locator('.cmd-item').count()) === robot.commands.length, '宽屏默认展开指令栏并列出全部指令');
+    check(await runBtn('intakeOn').isDisabled() && (await panel.innerText()).includes('START'), '无活动 OpMode 时指令不可运行并提示 INIT/START');
+
+    // 默认值自动填充：目录里的 paramDefaults 直接出现在输入框里
+    check((await field('shoot', 1).inputValue()) === '0.8' && (await field('shoot', 0).inputValue()) === '', 'shoot 的 power 预填默认值 0.8，必填项 count 为空');
+    check((await field('shooter.spin', 1).inputValue()) === '0.8' && (await field('shooter.spin', 2).inputValue()) === 'true' && (await field('shooter.spin', 3).inputValue()) === '', 'shooter.spin 的 double/boolean/String 默认值都已填好');
+
+    await page.getByRole('button', { name: 'INIT', exact: true }).click();
+    check(await until(async () => await page.getByRole('button', { name: 'START' }).isEnabled(), 'start enabled'), `INIT 后 START 可用（${cmdOp}）`);
+    check(await runBtn('intakeOn').isDisabled() && (await panel.innerText()).includes('START'), 'INIT 阶段指令仍不可运行（固件只在 RUNNING 接受）');
+    await page.getByRole('button', { name: 'START', exact: true }).click();
+    check(await until(() => runBtn('intakeOn').isEnabled(), 'cmd enabled'), 'START 后无参数指令可运行');
+
+    // 带参数的指令：本地校验后才能运行
+    check(await runBtn('shoot').isDisabled(), '必填参数未填时不可运行');
+    await field('shoot', 0).fill('1.5');
+    check(await runBtn('shoot').isDisabled() && (await panel.locator('.field-error').innerText()).includes('整数'), 'int 参数填小数时提示并禁止运行');
+    await field('shoot', 0).fill('3000000000');
+    check(await runBtn('shoot').isDisabled() && (await panel.locator('.field-error').innerText()).includes('范围'), 'int 参数超范围时提示并禁止运行');
+    await field('shoot', 0).fill('  3 ');
+    await field('shoot', 1).fill('');
+    check(await runBtn('shoot').isEnabled(), '带默认值的参数清空后仍可运行');
+    await runBtn('shoot').dblclick();
+    check(await until(async () => (await panel.locator('.cmd-log li').first().innerText()).includes('已受理'), 'cmd accepted'), '运行结果显示已受理');
+    await new Promise((r) => setTimeout(r, 300));
+    const runs = () => robot.commandRuns.map((c) => `${c.name}(${c.args.join(',')})`);
+    check(runs().join(' ') === 'shoot(3,0.8)', `双击只执行一次；留空的默认值补全、首尾空格去掉，参数不缺 (${runs().join(' ')})`);
+
+    await field('shooter.spin', 0).fill('900');
+    await runBtn('shooter.spin').click();
+    check(await until(() => robot.commandRuns.length === 2, 'spin run'), '点号命名的指令可运行');
+    check(runs()[1] === 'shooter.spin(900,0.8,true,)', `全部默认值随指令下发 (${runs()[1]})`);
+
+    // 旧固件：没有这个端点（路由层 404 not_found）；不能显示成“已受理”或笼统失败
+    const cors = { 'Access-Control-Allow-Origin': '*' };
+    await page.route('**/api/v2/commands/run', (r) => r.fulfill({ status: 404, headers: cors, contentType: 'application/json', body: '{"error":"not_found"}' }));
+    await runBtn('intakeOn').click();
+    check(await until(async () => (await panel.locator('.cmd-log li').first().innerText()).includes('固件尚不支持'), 'unsupported'), '固件无端点时提示尚不支持');
+    await page.unroute('**/api/v2/commands/run');
+    // 响应丢失：指令可能已执行，必须提示先确认，不能当作失败引导重试
+    await page.route('**/api/v2/commands/run', (r) => r.abort('connectionreset'));
+    await runBtn('intakeOn').click();
+    check(await until(async () => (await panel.locator('.cmd-log li').first().innerText()).includes('可能已执行'), 'unknown'), '响应丢失时提示结果未知');
+    await page.unroute('**/api/v2/commands/run');
+
+    // 结束指令 OpMode，换路径类 OpMode：它在 RUNNING 时不接受手动指令
+    await page.getByRole('button', { name: 'STOP', exact: true }).click();
+    check(await until(async () => (await page.locator('.run-status').innerText()).includes('已停止'), 'cmd op stopped'), '结束 RemoteCommand Test');
+    check(await until(() => runBtn('intakeOn').isDisabled(), 'cmd off after stop'), 'OpMode 结束后指令不可运行');
     const opName = robot.opModes[0]!.name;
     await page.locator('#run-op').selectOption(opName);
     await page.getByRole('button', { name: 'INIT', exact: true }).click();
-    check(await until(async () => await page.getByRole('button', { name: 'START' }).isEnabled(), 'start enabled'), `INIT 后 START 可用（${opName}）`);
+    check(await until(async () => await page.getByRole('button', { name: 'START' }).isEnabled(), 'route start enabled'), `INIT 后 START 可用（${opName}）`);
     await page.getByRole('button', { name: 'START', exact: true }).click();
     check(await until(async () => (await page.locator('.run-status').innerText()).includes('运行中'), 'running'), 'START 后显示运行中');
+    check(await until(() => runBtn('intakeOn').isDisabled(), 'cmd blocked') && (await panel.innerText()).includes('路径执行中'), '路径执行中禁用手动指令');
     const telemetry = page.locator('.telemetry');
     const p1 = await telemetry.innerText();
     await new Promise((r) => setTimeout(r, 800));
@@ -269,9 +326,21 @@ async function main() {
         const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
         return { overflowed, visible: box.top >= 0 && box.bottom <= innerHeight && !!hit && b.contains(hit) };
       });
-      check(r.overflowed && r.visible, `${width}×${height} 滚到底后 STOP 仍可见 (overflowed=${r.overflowed} visible=${r.visible})`);
+      const drawer = await panel.isVisible();
+      check(r.overflowed && r.visible && drawer, `${width}×${height} 指令栏打开且滚到底后 STOP 仍可见可点 (overflowed=${r.overflowed} visible=${r.visible} panel=${drawer})`);
     }
+
+    // 手机：抽屉可收起和重新打开
+    await page.getByRole('button', { name: '收起指令栏' }).click();
+    check(!(await panel.isVisible()), '可收起指令栏');
+    await page.locator('.run-main').evaluate((el) => { el.scrollTop = 0; });
+    await page.locator('.cmd-toggle').click();
+    check(await panel.isVisible() && (await page.locator('[id="cmd-shoot-0"]').inputValue()).trim() === '3', '重新打开指令栏且保留已填参数');
     await page.setViewportSize({ width: 1280, height: 800 });
+
+    // 真机现状：目录为空
+    robot.setCommands([]);
+    check(await until(async () => (await panel.innerText()).includes('没有提供可用指令'), 'empty catalog'), '目录为空时显示空状态');
 
     // 断线重连：停掉 mock 再启动
     await page.screenshot({ path: 'e2e/final.png' });

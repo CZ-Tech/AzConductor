@@ -5,6 +5,7 @@ import { validateRobotFrames } from '../core/contract';
 import {
   DecodeError,
   decodeCommandCatalog,
+  decodeCommandRun,
   decodeErrorBody,
   decodeExecution,
   decodeHealth,
@@ -16,6 +17,7 @@ import {
   decodeRuntimeSnapshot,
   decodeSessionOpen,
   type CommandCatalog,
+  type CommandRunResponse,
   type ExecutionSnapshot,
   type HealthInfo,
   type OpModeActionResponse,
@@ -215,6 +217,24 @@ export class RobotApiClient {
 
   async commandCatalog(): Promise<Result<CommandCatalog>> {
     return this.decode(await this.send('GET', '/api/v2/commands'), decodeCommandCatalog);
+  }
+
+  /**
+   * `POST /api/v2/commands/run` — queue one catalog command on the robot.
+   *
+   * Implemented by the firmware (RobotApiRouter.handleCommandRun); older firmware answers 404
+   * `not_found`. `args` are strings in parameter order and must be complete — callers fill
+   * defaults first (`resolveArgs`). `expectedRevision` is the OpMode revision, as in the op mode
+   * actions; 202 means queued, not finished (and a later command on the same subsystem replaces
+   * it). Only accepted while an OpMode that attached a dispatcher is RUNNING. Never retry this
+   * call: a lost response may still have run the command.
+   */
+  async runCommand(name: string, args: readonly string[], expectedRevision: number): Promise<Result<CommandRunResponse>> {
+    assertRevision(expectedRevision);
+    return this.decode(
+      await this.send('POST', '/api/v2/commands/run', { body: JSON.stringify({ name, args, expectedRevision }) }),
+      decodeCommandRun,
+    );
   }
 
   /** `GET /api/v2/runtime` — latest runtime + pose snapshot (not in the Kotlin client). */

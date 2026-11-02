@@ -84,6 +84,23 @@ for (const [tag, vp, dark] of [['d', { width: 1280, height: 800 }, false], ['m',
   await page.goto('http://localhost:4175/#/run');
   await page.waitForFunction(() => document.querySelectorAll('#run-op option').length > 1);
   await shot(page, `${tag}-run-idle`);
+  // 指令试运行：只在支持远程指令的 OpMode（RemoteCommand Test）RUNNING 时可用；手机上先打开抽屉
+  await page.locator('#run-op').selectOption('RemoteCommand Test');
+  await page.getByRole('button', { name: 'INIT', exact: true }).click();
+  await sleep(600);
+  if (tag === 'm') await page.locator('.cmd-toggle').click();
+  await shot(page, `${tag}-run-commands-init`);
+  if (tag === 'm') await page.getByRole('button', { name: '收起指令栏' }).click();
+  await page.getByRole('button', { name: 'START', exact: true }).click();
+  await sleep(600);
+  if (tag === 'm') await page.locator('.cmd-toggle').click();
+  await page.locator('[id="cmd-shoot-0"]').fill('3'); // power 留着默认值 0.8
+  await page.getByRole('button', { name: '运行 shoot', exact: true }).click();
+  await sleep(300);
+  await shot(page, `${tag}-run-commands`);
+  if (tag === 'm') await page.getByRole('button', { name: '收起指令栏' }).click();
+  await page.getByRole('button', { name: 'STOP', exact: true }).click();
+  await sleep(600);
   await page.locator('#run-op').selectOption('Auto Blue Far');
   await page.getByRole('button', { name: 'INIT', exact: true }).click();
   await sleep(600);
@@ -154,6 +171,9 @@ for (const [tag, vp] of [['tablet', { width: 768, height: 1024 }], ['landscape',
   await page.waitForSelector('.run-status');
   await sleep(500);
   await shot(page, `${tag}-run`);
+  await page.locator('.cmd-toggle').click();
+  await sleep(200);
+  await shot(page, `${tag}-run-drawer`);
   await ctx.close();
 }
 
