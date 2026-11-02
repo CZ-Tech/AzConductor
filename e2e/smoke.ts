@@ -48,6 +48,13 @@ async function fieldBox(page: Page) {
   return b;
 }
 
+/** 打开路径卡片的「更多操作」菜单并选择一项。 */
+async function cardAction(page: Page, routeName: string, item: string) {
+  const c = page.locator('.route-card', { hasText: routeName }).first();
+  await c.getByRole('button', { name: '更多操作' }).click();
+  await c.getByRole('menuitem', { name: item, exact: true }).click();
+}
+
 async function main() {
   const robot = new MockRobotServer({ host: '127.0.0.1', poseHz: 30, runDurationMs: 4000 });
   seedSampleRobot(robot);
@@ -107,6 +114,35 @@ async function main() {
     check(undone === before, '撤销恢复拖动前坐标');
     await page.keyboard.press('Control+y');
 
+    // 侧栏快速编辑：回车提交，一次提交对应一步撤销；坐标限制在场地内
+    const row1 = page.locator('.node-list li').nth(1);
+    if (await row1.locator('.node-detail').count() === 0) await row1.locator('.node-sum').click();
+    const beforeQuick = await row1.locator('.node-sum span').innerText();
+    const quickX = row1.locator('.nq input').first();
+    await quickX.fill('500');
+    await quickX.press('Enter');
+    check((await row1.locator('.node-sum span').innerText()).startsWith('72.00,'), '快速编辑提交并限制在场地内');
+    await quickX.evaluate((el) => (el as HTMLInputElement).blur());
+    await page.keyboard.press('Control+z');
+    check(await row1.locator('.node-sum span').innerText() === beforeQuick, '快速编辑可一步撤销');
+
+    // 编辑器菜单：切换场地地图不会关闭菜单，Esc 关闭
+    await page.getByRole('button', { name: '更多操作' }).click();
+    await page.getByRole('menuitemradio', { name: '2026 赛季' }).click();
+    check((await page.locator('.ed-field image').getAttribute('href'))?.includes('MAP26'), '菜单切换场地地图');
+    await page.getByRole('menuitemradio', { name: '2027 赛季' }).click();
+    await page.keyboard.press('Escape');
+    check(await page.getByRole('menuitem', { name: '导出 JSON' }).count() === 0, 'Esc 关闭菜单');
+
+    // 空格：焦点在按钮上时激活按钮，而不是触发播放
+    const timeBefore = await page.locator('.timeline .time').innerText();
+    await page.getByRole('button', { name: '更多操作' }).focus();
+    await page.keyboard.press('Space');
+    check(await page.getByRole('menuitem', { name: '导出 JSON' }).isVisible(), '空格可激活聚焦的按钮');
+    await page.keyboard.press('Escape');
+    await new Promise((r) => setTimeout(r, 200));
+    check(await page.locator('.timeline .time').innerText() === timeBefore, '空格激活按钮时不触发回放');
+
     // 右键编辑：设置到点等待并保存
     await page.locator('[data-kind=node][data-i="2"]').click({ button: 'right' });
     await page.locator('dialog').waitFor();
@@ -138,7 +174,7 @@ async function main() {
 
     // 本地删除 → 机器同步删除（墓碑）
     page.once('dialog', () => undefined);
-    await page.locator('.route-card', { hasText: 'E2E 路径' }).getByRole('button', { name: '删除' }).click();
+    await cardAction(page, 'E2E 路径', '删除');
     await page.locator('dialog button.primary').click();
     check(await until(() => !robot.routeNames.includes('E2E 路径'), 'remote delete', 8000), '本地删除同步删除机器上的路径');
     await new Promise((r) => setTimeout(r, 1500));
@@ -146,20 +182,20 @@ async function main() {
 
     // 镜像
     const card = (n: string) => page.locator('.route-card', { hasText: n }).first();
-    await card('Red Near').getByRole('button', { name: '镜像到红方' }).click();
+    await cardAction(page, 'Red Near', '镜像到红方');
     await page.locator('dialog button.primary').click();            // 确认
     await page.locator('dialog input[type=text]').fill('Mirror A');
     await page.locator('dialog button[type=submit]').click();
     check(await until(() => robot.routeNames.includes('Mirror A'), 'mirror pushed', 8000), '镜像路径创建并同步到机器');
 
     // 重命名 → 机器侧等价于删旧建新
-    await card('Mirror A').getByRole('button', { name: '重命名' }).click();
+    await cardAction(page, 'Mirror A', '重命名');
     await page.locator('dialog input[type=text]').fill('Mirror B');
     await page.locator('dialog button[type=submit]').click();
     check(await until(() => robot.routeNames.includes('Mirror B') && !robot.routeNames.includes('Mirror A'), 'rename synced', 8000), '重命名同步到机器（旧名消失、新名出现）');
 
     // 导出 → 导入
-    await card('Mirror B').getByRole('button', { name: '导出', exact: true }).click();
+    await cardAction(page, 'Mirror B', '导出');
     const exported = await page.locator('dialog textarea').inputValue();
     let parsedOk = false;
     try { parsedOk = Array.isArray(JSON.parse(exported)) && JSON.parse(exported).length >= 2; } catch { /* */ }
@@ -199,21 +235,43 @@ async function main() {
     check(await until(async () => (await page.locator('.conn').innerText()).includes('已连接'), 'reconnect', 20000), '机器恢复后自动重连');
     // 运行页
     await page.goto(`http://localhost:${PORT}/#/run`);
+    check(await until(async () => (await page.locator('.topbar nav a[aria-current=page]').innerText()) === '运行', 'nav current'), '运行页导航高亮「运行」');
     check(await until(async () => (await page.locator('#run-op option').count()) > 1, 'opmodes loaded'), '运行页列出 Autonomous');
     const opName = robot.opModes[0]!.name;
     await page.locator('#run-op').selectOption(opName);
     await page.getByRole('button', { name: 'INIT', exact: true }).click();
     check(await until(async () => await page.getByRole('button', { name: 'START' }).isEnabled(), 'start enabled'), `INIT 后 START 可用（${opName}）`);
     await page.getByRole('button', { name: 'START', exact: true }).click();
-    check(await until(async () => (await page.locator('.run-side .chips').innerText()).includes('运行中'), 'running'), 'START 后显示运行中');
-    const p1 = await page.locator('.run-side .mono').first().innerText();
+    check(await until(async () => (await page.locator('.run-status').innerText()).includes('运行中'), 'running'), 'START 后显示运行中');
+    const telemetry = page.locator('.telemetry');
+    const p1 = await telemetry.innerText();
     await new Promise((r) => setTimeout(r, 800));
-    const p2 = await page.locator('.run-side .mono').first().innerText();
-    check(p1 !== p2 && p2.includes('x='), `实时位姿更新 (${p1.trim()} → ${p2.trim()})`);
+    const p2 = await telemetry.innerText();
+    check(p1 !== p2 && /\d+\.\d+/.test(p2), `实时位姿更新 (${p1.replace(/\s+/g, ' ')} → ${p2.replace(/\s+/g, ' ')})`);
+    check(await until(async () => (await page.locator('.run-map polyline').count()) === 1, 'trail', 3000), '运行时绘制实际轨迹');
     check(await until(async () => (await page.locator('.run-side').innerText()).includes('参考路径：'), 'subject'), '执行时显示参考路径（execution.subject）');
     await page.screenshot({ path: 'e2e/run.png' });
     await page.getByRole('button', { name: 'STOP', exact: true }).click();
-    check(await until(async () => (await page.locator('.run-side .chips').innerText()).includes('已停止'), 'stopped'), 'STOP 后回到已停止');
+    check(await until(async () => (await page.locator('.run-status').innerText()).includes('已停止'), 'stopped'), 'STOP 后回到已停止');
+
+    // STOP 是安全操作：内容滚到底时仍须可见且不被遮挡
+    for (const [width, height] of [[800, 390], [1280, 500], [390, 800]] as const) {
+      await page.setViewportSize({ width, height });
+      const r = await page.evaluate(() => {
+        let overflowed = false;
+        for (const s of ['.run-side', '.run-main']) {
+          const el = document.querySelector(s) as HTMLElement;
+          if (el.scrollHeight > el.clientHeight) overflowed = true;
+          el.scrollTop = el.scrollHeight;
+        }
+        const b = document.querySelector('button.stop') as HTMLElement;
+        const box = b.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return { overflowed, visible: box.top >= 0 && box.bottom <= innerHeight && !!hit && b.contains(hit) };
+      });
+      check(r.overflowed && r.visible, `${width}×${height} 滚到底后 STOP 仍可见 (overflowed=${r.overflowed} visible=${r.visible})`);
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
 
     // 断线重连：停掉 mock 再启动
     await page.screenshot({ path: 'e2e/final.png' });

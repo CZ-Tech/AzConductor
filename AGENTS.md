@@ -28,7 +28,7 @@ Node >= 22（见 `.nvmrc`）。
 - `src/core`：纯函数内核（样条/Bézier、路径时间轴、契约校验、机器人线格式、存档格式、场地坐标、回放），不依赖 DOM 与 UI 框架。
 - `src/net`：Network V2（transport、api、connection 状态机、sync 同步引擎、baselines），不依赖 UI 框架。
 - `src/state`：docStore（撤销栈、防抖保存、跨标签页）、session（连接 + Web Locks）、sync 接线、robotData、settings。
-- `src/ui`：路径管理页、编辑器、运行页、对话框；界面文字集中在 `src/ui/strings.ts`；节点编辑表单由 `src/ui/nodeFields.ts` 字段表驱动（给 `ControlNode` 加字段必须在此登记，否则编译不过）。
+- `src/ui`：路径管理页、编辑器、运行页、对话框；界面文字集中在 `src/ui/strings.ts`；节点编辑表单由 `src/ui/nodeFields.ts` 字段表驱动（给 `ControlNode` 加字段必须在此登记，否则编译不过）。`components/` 下的 `icons.tsx`（内联 SVG 图标）、`menu.tsx`（Popover 下拉菜单）、`connection.tsx`（连接胶囊与设置对话框）为共用件；颜色走 `styles.css` 的令牌，场地上的绘制用不随深浅色变化的 `--f-*` 色板。
 - `src/tools/mock-robot.ts`：Node 版模拟机器人，测试与本地联调用，不进发布产物。
 - `tests/`、`e2e/`：Vitest 测试与真实浏览器端到端脚本。
 

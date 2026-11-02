@@ -3,8 +3,9 @@ import { useMemo, useState } from 'preact/hooks';
 import type { ControlNode } from '../../core/node';
 import { validateNodes } from '../../core/contract';
 import { commandCatalog } from '../../state/robotData';
-import { NODE_FIELDS, NODE_FIELD_ORDER, PARKING_BRAKE_ZONE, type FieldSpec, type NodeFieldKey } from '../nodeFields';
+import { NODE_FIELDS, NODE_FIELD_ORDER, NODE_MAIN_SECTIONS, PARKING_BRAKE_ZONE, type FieldSection, type FieldSpec, type NodeFieldKey } from '../nodeFields';
 import { showDialog } from './dialogs';
+import { IconChevron, IconClose, IconPlus } from './icons';
 import { S } from '../strings';
 
 export type NodeEditResult = { kind: 'save'; node: ControlNode } | { kind: 'delete' };
@@ -93,14 +94,14 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
   }));
   const passing = () => setD((o) => ({ ...o, endSpeed: '', brakeZoneIn: '0', brakeForwardPower: '' }));
 
-  const labelOf = (k: NodeFieldKey): string => S.node.fields[k][0];
-  const hintOf = (k: NodeFieldKey): string => S.node.fields[k][1];
+  const hintOf = (k: NodeFieldKey): string => S.node.fields[k][2];
 
   const renderField = (k: NodeFieldKey) => {
     const spec: FieldSpec = NODE_FIELDS[k];
     const id = `nf-${k}`;
     const err = errors[k];
-    const label = <label for={id}>{labelOf(k)}</label>;
+    const [zh, code] = S.node.fields[k];
+    const label = <label class="nf-label" for={id}><span>{zh}</span>{code && <code>{code}</code>}</label>;
     const errEl = err ? <div class="field-error" role="alert">{err}</div> : null;
     switch (spec.kind) {
       case 'text':
@@ -119,17 +120,17 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
         );
       case 'params':
         return (
-          <div class="nf" key={k}>
-            <label>{labelOf(k)}</label>
+          <div class="nf wide" key={k}>
+            <label class="nf-label"><span>{zh}</span></label>
             {d.commandParams.map((v, i) => (
               <div class="param-row" key={i}>
                 <input type="text" aria-label={S.node.paramN(i + 1)} value={v}
                   placeholder={desc ? `${desc.paramNames[i] ?? S.node.paramN(i + 1)} (${desc.paramTypes[i] ?? ''})` : S.node.paramN(i + 1)}
                   onInput={(e) => { const arr = [...d.commandParams]; arr[i] = (e.target as HTMLInputElement).value; set('commandParams', arr); }} />
-                {!desc && <button type="button" class="icon" aria-label={S.node.removeParam} onClick={() => set('commandParams', d.commandParams.filter((_, j) => j !== i))}>✕</button>}
+                {!desc && <button type="button" class="icon ghost" aria-label={S.node.removeParam} title={S.node.removeParam} onClick={() => set('commandParams', d.commandParams.filter((_, j) => j !== i))}><IconClose /></button>}
               </div>
             ))}
-            {!desc && <button type="button" onClick={() => set('commandParams', [...d.commandParams, ''])}>＋ {S.node.addParam}</button>}
+            {!desc && <button type="button" class="ghost" onClick={() => set('commandParams', [...d.commandParams, ''])}><IconPlus />{S.node.addParam}</button>}
           </div>
         );
       default:
@@ -143,19 +144,24 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
     }
   };
 
-  const main = NODE_FIELD_ORDER.filter((k) => !(NODE_FIELDS[k] as FieldSpec).advanced);
-  const adv = NODE_FIELD_ORDER.filter((k) => (NODE_FIELDS[k] as FieldSpec).advanced);
+  const fieldsOf = (s: FieldSection) => NODE_FIELD_ORDER.filter((k) => (NODE_FIELDS[k] as FieldSpec).section === s);
 
   return (
     <form onSubmit={save} noValidate>
       <div class="dlg-body node-form">
         <div class="presets">
+          <span class="muted">{S.node.presets}</span>
           <button type="button" onClick={parking} title={S.node.parkingHint}>{S.node.parking}</button>
           <button type="button" onClick={passing} title={S.node.passingHint}>{S.node.passing}</button>
         </div>
-        <div class="nf-grid">{main.map(renderField)}</div>
-        <button type="button" class="link" aria-expanded={showAdv} onClick={() => setShowAdv(!showAdv)}>{showAdv ? '▾' : '▸'} 高级（速度 / 制动）</button>
-        {showAdv && <div class="nf-grid">{adv.map(renderField)}</div>}
+        {NODE_MAIN_SECTIONS.map((s) => (
+          <fieldset class="nf-section" key={s}>
+            <legend>{S.node.sections[s]}</legend>
+            <div class="nf-grid" data-section={s}>{fieldsOf(s).map(renderField)}</div>
+          </fieldset>
+        ))}
+        <button type="button" class="nf-toggle" aria-expanded={showAdv} onClick={() => setShowAdv(!showAdv)}><IconChevron />{S.node.sections.advanced}</button>
+        {showAdv && <div class="nf-grid" data-section="advanced">{fieldsOf('advanced').map(renderField)}</div>}
       </div>
       <div class="dlg-foot">
         {p.canDelete && <button type="button" class="danger" onClick={() => p.onDone({ kind: 'delete' })}>{S.node.deleteNode}</button>}

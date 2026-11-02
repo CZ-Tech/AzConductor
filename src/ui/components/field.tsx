@@ -54,6 +54,21 @@ export function FieldSvg(p: FieldSvgProps) {
   );
 }
 
+/** 只读缩略图：真实场地 + 路径 + 起终点（路径卡片、冲突对比）。 */
+export function RoutePreview({ nodes }: { nodes: readonly ControlNode[] }) {
+  const first = nodes[0];
+  const last = nodes.length > 1 ? nodes[nodes.length - 1] : undefined;
+  return (
+    <svg class="preview" viewBox={FIELD_VIEWBOX} aria-hidden="true">
+      <image href={fieldImage(settings.value.fieldMap)} x={-FIELD_HALF} y={-FIELD_HALF} width={144} height={144} preserveAspectRatio="none" />
+      <PathCurve nodes={nodes} color="var(--f-casing)" width={4.4} />
+      <PathCurve nodes={nodes} color="var(--f-path)" width={2.4} />
+      {first && <circle cx={first.y} cy={first.x} r={4} fill="var(--f-start)" stroke="var(--f-casing)" stroke-width={1.4} />}
+      {last && <circle cx={last.y} cy={last.x} r={4} fill="var(--f-end)" stroke="var(--f-casing)" stroke-width={1.4} />}
+    </svg>
+  );
+}
+
 /** 路径曲线（精确三次 Bézier）。 */
 export function PathCurve(p: { nodes: readonly ControlNode[]; color?: string; width?: number; dashed?: boolean }) {
   const d = svgPathD(p.nodes);
@@ -62,7 +77,7 @@ export function PathCurve(p: { nodes: readonly ControlNode[]; color?: string; wi
     <path
       d={d}
       fill="none"
-      stroke={p.color ?? '#3964fe'}
+      stroke={p.color ?? 'var(--f-path)'}
       stroke-width={p.width ?? 0.9}
       stroke-linecap="round"
       stroke-linejoin="round"
@@ -92,12 +107,12 @@ export function RobotGlyph(p: RobotGlyphProps) {
     <g opacity={p.opacity ?? 1}>
       <g transform={`translate(${c.sx} ${c.sy}) rotate(${rot})`} pointer-events="none">
         <rect x={-ROBOT_WIDTH / 2} y={-ROBOT_HEIGHT / 2} width={ROBOT_WIDTH} height={ROBOT_HEIGHT} rx={2}
-          fill={p.fill ?? 'rgba(57,100,254,.22)'} stroke={p.stroke ?? '#3964fe'} stroke-width={0.5} />
+          fill={p.fill ?? 'var(--f-robot-fill)'} stroke={p.stroke ?? 'var(--f-path)'} stroke-width={0.5} />
       </g>
       <circle
         class={p.onHeadPointerDown ? 'handle head' : undefined}
         cx={c.sx + head.sx} cy={c.sy + head.sy} r={ROBOT_HEAD_DOT * (p.onHeadPointerDown ? 1.4 : 0.5)}
-        fill={p.stroke ?? '#3964fe'}
+        fill={p.stroke ?? 'var(--f-path)'}
         onPointerDown={p.onHeadPointerDown as never}
         pointer-events={p.onHeadPointerDown ? 'all' : 'none'}
       />

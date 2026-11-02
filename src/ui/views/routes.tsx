@@ -1,26 +1,18 @@
 import { docStore } from '../../state/docStore';
 import { RouteCore } from '../../core/route';
-import { mirrorNodes, FIELD_VIEWBOX } from '../../core/field';
+import { mirrorNodes } from '../../core/field';
 import { exportArchiveJson, exportRouteJson } from '../../core/archive';
 import { askConfirm, askText, toast } from '../components/dialogs';
 import { importIntoStore, showExportDialog } from '../components/ioDialogs';
-import { PathCurve } from '../components/field';
+import { RoutePreview } from '../components/field';
 import { SyncPanel } from '../components/syncPanel';
+import { Menu, MenuItem, MenuSeparator } from '../components/menu';
+import {
+  IconArrowDown, IconArrowUp, IconCopy, IconExport, IconImport, IconMirror, IconMore, IconPencil, IconPlus, IconTrash,
+} from '../components/icons';
 import { navigate } from '../router';
 import { S } from '../strings';
 import type { RouteData } from '../../core/archive';
-
-function Preview({ route }: { route: RouteData }) {
-  return (
-    <svg class="preview" viewBox={FIELD_VIEWBOX} aria-hidden="true">
-      <rect x={-72} y={-72} width={144} height={144} fill="var(--paper-2)" />
-      <line x1={0} y1={-72} x2={0} y2={72} stroke="var(--line)" stroke-width={0.6} />
-      <line x1={-72} y1={0} x2={72} y2={0} stroke="var(--line)" stroke-width={0.6} />
-      <PathCurve nodes={route.points} color="var(--blue)" width={2} />
-      {route.points[0] && <circle cx={route.points[0].y} cy={route.points[0].x} r={3} fill="var(--ok)" />}
-    </svg>
-  );
-}
 
 export function RoutesView() {
   const store = docStore();
@@ -50,17 +42,25 @@ export function RoutesView() {
 
   return (
     <div class="routes-view">
-      <div class="toolbar">
-        <h1>{S.routes.title}</h1>
-        <span class="spacer" />
-        <button onClick={() => void importIntoStore(store)}>{S.routes.import}</button>
-        <button disabled={routes.length === 0} onClick={() => void showExportDialog(S.io.exportTitle, exportArchiveJson(routes), 'azconductor-routes.json')}>{S.routes.exportAll}</button>
-        <button class="primary" onClick={() => void create()}>＋ {S.routes.newRoute}</button>
+      <div class="page-head">
+        <div class="page-title">
+          <h1>{S.routes.title}</h1>
+          {routes.length > 0 && <span class="muted">{S.routes.count(routes.length)}</span>}
+        </div>
+        <div class="page-actions">
+          <button class="ghost" onClick={() => void importIntoStore(store)}><IconImport />{S.routes.import}</button>
+          <button class="ghost" disabled={routes.length === 0} onClick={() => void showExportDialog(S.io.exportTitle, exportArchiveJson(routes), 'azconductor-routes.json')}><IconExport />{S.routes.exportAll}</button>
+          <button class="primary" onClick={() => void create()}><IconPlus />{S.routes.newRoute}</button>
+        </div>
       </div>
       <SyncPanel />
-      {store.saveError.value && <div class="banner bad" role="alert">{store.saveError.value}</div>}
+      {store.saveError.value && <div class="banner bad page-banner" role="alert">{store.saveError.value}</div>}
       {routes.length === 0 ? (
-        <p class="empty">{S.routes.empty}</p>
+        <div class="empty">
+          <h2>{S.routes.emptyTitle}</h2>
+          <p>{S.routes.empty}</p>
+          <button class="primary" onClick={() => void create()}><IconPlus />{S.routes.newRoute}</button>
+        </div>
       ) : (
         <ul class="route-grid">
           {routes.map((r, i) => {
@@ -68,18 +68,22 @@ export function RoutesView() {
             return (
               <li key={r.name} class="route-card">
                 <a class="card-main" href={`#/edit/${encodeURIComponent(r.name)}`} title={S.routes.open}>
-                  <Preview route={r} />
+                  <RoutePreview nodes={r.points} />
                   <div class="card-title">{r.name}</div>
                   <div class="card-meta">{S.routes.points(r.points.length)} · {S.routes.duration(total)}</div>
                 </a>
-                <div class="card-actions" role="group" aria-label={r.name}>
-                  <button class="icon" aria-label={S.routes.moveUp} title={S.routes.moveUp} disabled={i === 0} onClick={() => store.moveRoute(i, i - 1)}><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button>
-                  <button class="icon" aria-label={S.routes.moveDown} title={S.routes.moveDown} disabled={i === routes.length - 1} onClick={() => store.moveRoute(i, i + 1)}><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg></button>
-                  <button onClick={() => void rename(r.name)}>{S.common.rename}</button>
-                  <button onClick={() => store.duplicateRoute(r.name)}>{S.common.duplicate}</button>
-                  <button onClick={() => void mirror(r)}>{S.routes.mirror}</button>
-                  <button onClick={() => void showExportDialog(S.io.exportTitle, exportRouteJson(r.points), `${r.name}.json`)}>{S.routes.export}</button>
-                  <button class="danger" onClick={() => void remove(r.name)}>{S.common.delete}</button>
+                <div class="card-menu">
+                  <Menu label={S.common.more} icon={<IconMore />}>
+                    <MenuItem icon={<IconPencil />} onSelect={() => void rename(r.name)}>{S.common.rename}</MenuItem>
+                    <MenuItem icon={<IconCopy />} onSelect={() => store.duplicateRoute(r.name)}>{S.common.duplicate}</MenuItem>
+                    <MenuItem icon={<IconMirror />} onSelect={() => void mirror(r)}>{S.routes.mirror}</MenuItem>
+                    <MenuItem icon={<IconExport />} onSelect={() => void showExportDialog(S.io.exportTitle, exportRouteJson(r.points), `${r.name}.json`)}>{S.routes.export}</MenuItem>
+                    <MenuSeparator />
+                    <MenuItem icon={<IconArrowUp />} disabled={i === 0} onSelect={() => store.moveRoute(i, i - 1)}>{S.routes.moveUp}</MenuItem>
+                    <MenuItem icon={<IconArrowDown />} disabled={i === routes.length - 1} onSelect={() => store.moveRoute(i, i + 1)}>{S.routes.moveDown}</MenuItem>
+                    <MenuSeparator />
+                    <MenuItem icon={<IconTrash />} danger onSelect={() => void remove(r.name)}>{S.common.delete}</MenuItem>
+                  </Menu>
                 </div>
               </li>
             );

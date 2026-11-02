@@ -5,7 +5,7 @@ import { RouteCore } from '../../core/route';
 import { validateNodes } from '../../core/contract';
 import { exportRouteJson, exportRobotWireJson } from '../../core/archive';
 import {
-  appendedNode, clampToField, headingFromPointer, logicalToScreen, nodeAtLogical,
+  FIELD_HALF, appendedNode, clampToField, headingFromPointer, logicalToScreen, nodeAtLogical,
   velocityFromHandleLogical, velocityHandleScreen,
 } from '../../core/field';
 import { SPEED_PRESETS, advance, speedLabel } from '../../core/playback';
@@ -13,6 +13,12 @@ import { FieldSvg, PathCurve, RobotGlyph, pointerToLogical } from '../components
 import { askConfirm, toast } from '../components/dialogs';
 import { showNodeEditor } from '../components/nodeEditor';
 import { showExportDialog, showImportDialog } from '../components/ioDialogs';
+import { ConnButton } from '../components/connection';
+import { Menu, MenuItem, MenuLabel, MenuSeparator } from '../components/menu';
+import {
+  IconBack, IconExport, IconImport, IconMore, IconPause, IconPencil, IconPlay, IconPlus, IconRedo, IconReplay, IconRobot,
+  IconSidebar, IconSwap, IconTrash, IconUndo,
+} from '../components/icons';
 import { commandByName } from '../../state/robotData';
 import { settings, updateSettings } from '../../state/settings';
 import { navigate } from '../router';
@@ -48,6 +54,8 @@ export function EditorView({ name }: { name: string }) {
   const [sideOpen, setSideOpen] = useState(true);
   const [sideLeft, setSideLeft] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
+  const listRef = useRef<HTMLOListElement>(null);
+  const coordRef = useRef<HTMLSpanElement>(null);
   const dragRef = useRef<Drag | null>(null);
   const live = useRef({ name, points });
   live.current = { name, points };
@@ -61,6 +69,11 @@ export function EditorView({ name }: { name: string }) {
   useEffect(() => {
     if (sel !== null && sel >= points.length) setSel(points.length ? points.length - 1 : null);
   }, [points.length, sel]);
+
+  // 在场地上选中时，让侧栏滚到对应控制点
+  useEffect(() => {
+    if (sel !== null) listRef.current?.querySelector('li.sel')?.scrollIntoView({ block: 'nearest' });
+  }, [sel]);
 
   // 播放循环（真实 dt）
   useEffect(() => {
@@ -215,6 +228,17 @@ export function EditorView({ name }: { name: string }) {
     if (target) void editAt(Number(target.dataset['i']));
   };
 
+  // 鼠标悬停时显示场地坐标（直写 DOM，不触发重渲染）
+  const onStageMove = (e: PointerEvent) => {
+    const out = coordRef.current;
+    const svg = svgRef.current;
+    if (!out || !svg || e.pointerType !== 'mouse') return;
+    const L = pointerToLogical(svg, e.clientX, e.clientY);
+    const inside = L && Math.abs(L.x) <= FIELD_HALF && Math.abs(L.y) <= FIELD_HALF;
+    out.textContent = inside ? `X ${fmt(L.x, 1)}  Y ${fmt(L.y, 1)}` : '';
+  };
+  const onStageLeave = () => { if (coordRef.current) coordRef.current.textContent = ''; };
+
   // ---------- 键盘 ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -224,7 +248,12 @@ export function EditorView({ name }: { name: string }) {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) store.redo(); else store.undo(); return; }
       if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); store.redo(); return; }
-      if (e.key === ' ') { e.preventDefault(); setPlaying((p) => !p); return; }
+      if (e.key === ' ') {
+        if (el?.closest('button, a')) return; // 空格保留给聚焦的按钮
+        e.preventDefault();
+        setPlaying((p) => !p);
+        return;
+      }
       if (e.key === 'Escape') { setSel(null); return; }
       const i = sel;
       if (i === null) return;
@@ -283,55 +312,69 @@ export function EditorView({ name }: { name: string }) {
   const selNode = sel !== null ? points[sel] : undefined;
   const headNode = selNode && !playing ? selNode : undefined;
   const mapKey = settings.value.fieldMap;
+  const setMap = (m: '26' | '27') => updateSettings({ fieldMap: m });
+  const progress = total > 0 ? Math.min(t, total) / total : 0;
 
   return (
     <div class={`editor${sideLeft ? ' side-left' : ''}${sideOpen ? '' : ' side-closed'}`}>
-      <div class="toolbar ed-toolbar">
-        <button onClick={() => void back()} aria-label={S.common.back}>← {S.common.back}</button>
+      <header class="topbar ed-bar">
+        <button class="ghost ed-back" onClick={() => void back()} aria-label={S.common.back} title={S.common.back}><IconBack /><span>{S.common.back}</span></button>
         <h1 class="ed-title" title={name}>{name}</h1>
         <span class="spacer" />
-        <button class="icon" disabled={!store.canUndo.value} onClick={() => store.undo()} title={`${S.common.undo} (Ctrl+Z)`} aria-label={S.common.undo}>↶︎</button>
-        <button class="icon" disabled={!store.canRedo.value} onClick={() => store.redo()} title={`${S.common.redo} (Ctrl+Y)`} aria-label={S.common.redo}>↷︎</button>
-        <button onClick={() => void doImport()}>{S.editor.importJson}</button>
-        <button onClick={() => void showExportDialog(S.io.exportTitle, exportRouteJson(points), `${name}.json`)}>{S.editor.exportJson}</button>
-        <button onClick={() => void showExportDialog(S.editor.exportRobot, exportRobotWireJson(points, true), `${name}.robot.json`)}>{S.editor.exportRobot}</button>
-        <select aria-label={S.settings.fieldMap} value={mapKey} onChange={(e) => updateSettings({ fieldMap: (e.target as HTMLSelectElement).value === '26' ? '26' : '27' })}>
-          <option value="26">{S.settings.map26}</option>
-          <option value="27">{S.settings.map27}</option>
-        </select>
-        <button class="icon" onClick={() => setSideLeft(!sideLeft)} title={S.editor.swapSides} aria-label={S.editor.swapSides}>⇄︎</button>
-        <button class="icon" onClick={() => setSideOpen(!sideOpen)} title={sideOpen ? S.editor.collapse : S.editor.expand} aria-label={sideOpen ? S.editor.collapse : S.editor.expand} aria-expanded={sideOpen}>{sideOpen ? '⟩' : '⟨'}</button>
-      </div>
+        <button class="icon ghost" disabled={!store.canUndo.value} onClick={() => store.undo()} title={`${S.common.undo} (Ctrl+Z)`} aria-label={S.common.undo}><IconUndo /></button>
+        <button class="icon ghost" disabled={!store.canRedo.value} onClick={() => store.redo()} title={`${S.common.redo} (Ctrl+Y)`} aria-label={S.common.redo}><IconRedo /></button>
+        <Menu label={S.common.more} icon={<IconMore />}>
+          <MenuItem icon={<IconImport />} onSelect={() => void doImport()}>{S.editor.importJson}</MenuItem>
+          <MenuItem icon={<IconExport />} onSelect={() => void showExportDialog(S.io.exportTitle, exportRouteJson(points), `${name}.json`)}>{S.editor.exportJson}</MenuItem>
+          <MenuItem icon={<IconRobot />} onSelect={() => void showExportDialog(S.editor.exportRobot, exportRobotWireJson(points, true), `${name}.robot.json`)}>{S.editor.exportRobot}</MenuItem>
+          <MenuSeparator />
+          <MenuLabel>{S.settings.fieldMap}</MenuLabel>
+          <MenuItem kind="radio" checked={mapKey === '26'} onSelect={() => setMap('26')}>{S.settings.map26}</MenuItem>
+          <MenuItem kind="radio" checked={mapKey === '27'} onSelect={() => setMap('27')}>{S.settings.map27}</MenuItem>
+          <MenuSeparator />
+          <MenuLabel>{S.editor.view}</MenuLabel>
+          <MenuItem kind="checkbox" checked={ghost} onSelect={() => setGhost(!ghost)}>{S.editor.ghost}</MenuItem>
+          <MenuItem icon={<IconSwap />} class="desktop-only" onSelect={() => setSideLeft(!sideLeft)}>{S.editor.swapSides}</MenuItem>
+        </Menu>
+        <button class="icon ghost" onClick={() => setSideOpen(!sideOpen)} title={sideOpen ? S.editor.collapse : S.editor.expand} aria-label={sideOpen ? S.editor.collapse : S.editor.expand} aria-expanded={sideOpen}><IconSidebar /></button>
+        <ConnButton />
+      </header>
 
       <div class="ed-main">
         <div class="ed-field">
-          <FieldSvg
-            svgRef={svgRef}
-            label={S.editor.hint}
-            onPointerDown={onPointerDown as never}
-            onPointerMove={onPointerMove as never}
-            onPointerUp={((e: PointerEvent) => finishDrag(e, false)) as never}
-            onPointerCancel={((e: PointerEvent) => finishDrag(e, true)) as never}
-          >
-            <g onContextMenu={onContextMenu as never} onDblClick={onDblClick as never}>
-              <rect x={-72} y={-72} width={144} height={144} fill="transparent" />
-              <PathCurve nodes={points} color="#ffffff" width={2.4} />
-              <PathCurve nodes={points} color="#3964fe" width={1} />
-              {headNode && <RobotGlyph x={headNode.x} y={headNode.y} heading={headNode.heading} opacity={0.9} />}
-              {ghostPose && <RobotGlyph x={ghostPose.x} y={ghostPose.y} heading={ghostPose.heading} fill="rgba(234,179,8,.25)" stroke="#ca8a04" opacity={0.95} />}
-              {headNode && <HeadHandle node={headNode} index={sel as number} />}
-              {selNode && sel !== null && <VelocityHandle node={selNode} index={sel} />}
-              {points.map((n, i) => <NodeDot key={i} node={n} index={i} total={points.length} selected={i === sel} />)}
-            </g>
-          </FieldSvg>
-          <div class="ed-hint">{S.editor.hint}</div>
+          <div class="field-stage" onPointerMove={onStageMove as never} onPointerLeave={onStageLeave}>
+            <FieldSvg
+              svgRef={svgRef}
+              label={S.editor.hint}
+              onPointerDown={onPointerDown as never}
+              onPointerMove={onPointerMove as never}
+              onPointerUp={((e: PointerEvent) => finishDrag(e, false)) as never}
+              onPointerCancel={((e: PointerEvent) => finishDrag(e, true)) as never}
+            >
+              <g onContextMenu={onContextMenu as never} onDblClick={onDblClick as never}>
+                <rect x={-72} y={-72} width={144} height={144} fill="transparent" />
+                <PathCurve nodes={points} color="var(--f-casing)" width={2.4} />
+                <PathCurve nodes={points} color="var(--f-path)" width={1} />
+                {headNode && <RobotGlyph x={headNode.x} y={headNode.y} heading={headNode.heading} opacity={0.9} />}
+                {ghostPose && <RobotGlyph x={ghostPose.x} y={ghostPose.y} heading={ghostPose.heading} fill="var(--f-ghost-fill)" stroke="var(--f-ghost)" opacity={0.95} />}
+                {headNode && <HeadHandle node={headNode} index={sel as number} />}
+                {selNode && sel !== null && <VelocityHandle node={selNode} index={sel} />}
+                {points.map((n, i) => <NodeDot key={i} node={n} index={i} total={points.length} selected={i === sel} />)}
+              </g>
+            </FieldSvg>
+          </div>
+          <div class="ed-hint">
+            <span>{selNode ? S.editor.hintSelected : S.editor.hintIdle}</span>
+            <span ref={coordRef} class="mono ed-coord" />
+          </div>
         </div>
 
         <aside class="ed-side" aria-label={S.editor.nodeList} hidden={!sideOpen}>
           <div class="side-head">
             <strong>{S.editor.nodeList}</strong>
+            <span class="count">{points.length}</span>
+            <span class="spacer" />
             <span class="muted">{S.editor.totalTime(total)}</span>
-            <label class="check"><input type="checkbox" checked={ghost} onChange={(e) => setGhost((e.target as HTMLInputElement).checked)} /> {S.editor.ghost}</label>
           </div>
           {issues.length > 0 && (
             <div class="banner warn" role="status">
@@ -339,33 +382,52 @@ export function EditorView({ name }: { name: string }) {
               <ul>{issues.slice(0, 4).map((i, k) => <li key={k}>{i.index !== undefined ? `${S.editor.node(i.index + 1)}：` : ''}{i.message}</li>)}</ul>
             </div>
           )}
-          {points.length === 0 && <p class="muted">{S.editor.noNodes}</p>}
-          <ol class="node-list">
+          {points.length === 0 && <p class="muted side-empty">{S.editor.noNodes}</p>}
+          <ol class="node-list" ref={listRef}>
             {points.map((n, i) => (
               <li key={i} class={i === sel ? 'sel' : ''}>
-                <button class="node-sum" onClick={() => setSel(i)} aria-pressed={i === sel}>
-                  <b>{S.editor.node(i + 1)}</b>
-                  <span>x={fmt(n.x)} y={fmt(n.y)} h={fmt(n.heading, 1)}° d={fmt(n.duration, 1)}s</span>
+                <button class="node-sum" onClick={() => setSel(i === sel ? null : i)} aria-pressed={i === sel}>
+                  <b class={`node-badge ${nodeRole(i, points.length)}`}>{i + 1}</b>
+                  <span>{fmt(n.x)}, {fmt(n.y)}</span>
+                  <small>{fmt(n.heading, 0)}° · {fmt(n.duration, 1)}s</small>
                   {(n.command || n.marker) && <em>{n.command || n.marker}</em>}
                 </button>
-                <div class="node-actions">
-                  <button class="icon" onClick={() => void editAt(i)} title={S.editor.edit} aria-label={S.editor.edit}>✎︎</button>
-                  <button class="icon" onClick={() => addAfter(i)} title={S.editor.addAfter} aria-label={S.editor.addAfter}>＋</button>
-                  <button class="icon danger" onClick={() => removeAt(i)} title={S.editor.remove} aria-label={S.editor.remove}>✕︎</button>
-                </div>
+                {i === sel && (
+                  <div class="node-detail">
+                    <div class="node-quick">
+                      <QuickNum label={S.editor.quick.x} value={n.x} step={0.5} onCommit={(v) => { const c = clampToField(v, n.y); patchNode(i, { x: round(c.x) }); }} />
+                      <QuickNum label={S.editor.quick.y} value={n.y} step={0.5} onCommit={(v) => { const c = clampToField(n.x, v); patchNode(i, { y: round(c.y) }); }} />
+                      <QuickNum label={S.editor.quick.heading} value={n.heading} step={1} onCommit={(v) => patchNode(i, { heading: round(v) })} />
+                      <QuickNum label={S.editor.quick.duration} value={n.duration} step={0.1} onCommit={(v) => patchNode(i, { duration: round(v) })} />
+                    </div>
+                    <div class="node-actions">
+                      <button class="ghost" onClick={() => void editAt(i)} title={S.editor.edit}><IconPencil />{S.editor.edit}</button>
+                      <span class="spacer" />
+                      <button class="icon ghost" onClick={() => addAfter(i)} title={S.editor.addAfter} aria-label={S.editor.addAfter}><IconPlus /></button>
+                      <button class="icon ghost danger" onClick={() => removeAt(i)} title={S.editor.remove} aria-label={S.editor.remove}><IconTrash /></button>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ol>
-          <button class="add-last" onClick={() => { const next = [...points, appendedNode(points[points.length - 1])]; setPoints(next); setSel(next.length - 1); }}>＋ {S.common.add}</button>
+          <button class="add-last" onClick={() => { const next = [...points, appendedNode(points[points.length - 1])]; setPoints(next); setSel(next.length - 1); }}><IconPlus />{S.editor.addLast}</button>
         </aside>
       </div>
 
       <div class="timeline" role="group" aria-label="时间线">
-        <button class="primary" onClick={() => { if (!playing && t >= total) setT(0); setPlaying(!playing); }} disabled={total <= 0} aria-label={playing ? S.editor.pause : S.editor.play}>
-          {playing ? '⏸' : t >= total && total > 0 ? '↻' : '▶'}
+        <button class="primary play" onClick={() => { if (!playing && t >= total) setT(0); setPlaying(!playing); }} disabled={total <= 0} aria-label={playing ? S.editor.pause : S.editor.play}>
+          {playing ? <IconPause /> : t >= total && total > 0 ? <IconReplay /> : <IconPlay />}
         </button>
-        <input class="scrub" type="range" min={0} max={total || 1} step={0.01} value={Math.min(t, total)} disabled={total <= 0}
-          aria-label="时间" onInput={(e) => { setPlaying(false); setT(Number((e.target as HTMLInputElement).value)); }} />
+        <div class="scrub-wrap" style={{ '--p': progress }}>
+          <input class="scrub" type="range" min={0} max={total || 1} step={0.01} value={Math.min(t, total)} disabled={total <= 0}
+            aria-label="时间" onInput={(e) => { setPlaying(false); setT(Number((e.target as HTMLInputElement).value)); }} />
+          {total > 0 && (
+            <div class="scrub-ticks" aria-hidden="true">
+              {core.segmentEndTimes.map((end, i) => <i key={i} style={{ '--m': end / total }} />)}
+            </div>
+          )}
+        </div>
         <span class="mono time">{fmt(t)} / {fmt(total)}s</span>
         <select aria-label={S.editor.speed} value={speed} onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value))}>
           {SPEED_PRESETS.map((s) => <option key={s} value={s}>{speedLabel(s)}</option>)}
@@ -377,18 +439,41 @@ export function EditorView({ name }: { name: string }) {
 
 const round = (v: number) => Math.round(v * 100) / 100;
 
+/** 首点 / 末点 / 中间点，场地圆点与列表徽标共用同一配色。 */
+const nodeRole = (i: number, total: number): 'first' | 'last' | 'mid' =>
+  (i === 0 ? 'first' : i === total - 1 ? 'last' : 'mid');
+
+/** 侧栏快速编辑：失焦或回车提交（每次提交一步撤销），Esc 放弃。 */
+function QuickNum(p: { label: string; value: number; step: number; onCommit: (v: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    const v = Number(draft);
+    setDraft(null);
+    if (draft.trim() !== '' && Number.isFinite(v) && v !== p.value) p.onCommit(v);
+  };
+  return (
+    <label class="nq">
+      <span>{p.label}</span>
+      <input type="number" inputMode="decimal" step={p.step} value={draft ?? String(p.value)}
+        onInput={(e) => setDraft((e.target as HTMLInputElement).value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          else if (e.key === 'Escape') setDraft(null);
+        }} />
+    </label>
+  );
+}
+
 function NodeDot(p: { node: ControlNode; index: number; total: number; selected: boolean }) {
   const c = logicalToScreen(p.node.x, p.node.y);
-  const first = p.index === 0;
-  const last = p.index === p.total - 1 && p.total > 1;
-  const fill = p.selected ? '#3964fe' : first ? '#22c55e' : last ? '#ec1313' : '#ffffff';
-  const ring = p.selected || first || last ? '#ffffff' : '#3964fe';
   return (
-    <g data-kind="node" data-i={p.index} class="node-dot" transform={`translate(${c.sx} ${c.sy})`} role="button" tabIndex={-1} aria-label={S.editor.node(p.index + 1)}>
-      <circle r={5} fill="transparent" />
-      <circle r={p.selected ? 3.1 : 2.6} fill={fill} stroke={ring} stroke-width={p.selected || first || last ? 0.8 : 1} />
-      {(p.node.command || p.node.marker) && <rect x={-1} y={-1} width={2} height={2} fill="#111" transform="rotate(45) translate(0 -4.5)" />}
-      <text y={-4} text-anchor="middle" font-size={3.6} fill="#111" stroke="#fff" stroke-width={0.7} paint-order="stroke" pointer-events="none">{p.index + 1}</text>
+    <g data-kind="node" data-i={p.index} class={`node-dot ${nodeRole(p.index, p.total)}${p.selected ? ' sel' : ''}`} transform={`translate(${c.sx} ${c.sy})`} role="button" tabIndex={-1} aria-label={S.editor.node(p.index + 1)}>
+      <circle class="hit" r={5} fill="transparent" />
+      <circle class="core" r={p.selected ? 3.6 : 3.1} />
+      <text class="num" dy=".36em" text-anchor="middle" font-size={3.3} pointer-events="none">{p.index + 1}</text>
+      {(p.node.command || p.node.marker) && <circle class="tag" cx={2.7} cy={-2.7} r={1.2} />}
     </g>
   );
 }
@@ -398,8 +483,8 @@ function VelocityHandle({ node, index }: { node: ControlNode; index: number }) {
   const h = velocityHandleScreen(node);
   return (
     <g>
-      <line x1={c.sx} y1={c.sy} x2={h.sx} y2={h.sy} stroke="#f97316" stroke-width={0.7} pointer-events="none" />
-      <circle data-kind="handle" data-i={index} class="handle" cx={h.sx} cy={h.sy} r={2.4} fill="#f97316" stroke="#111" stroke-width={0.4} />
+      <line x1={c.sx} y1={c.sy} x2={h.sx} y2={h.sy} stroke="var(--f-velocity)" stroke-width={0.7} pointer-events="none" />
+      <circle data-kind="handle" data-i={index} class="handle" cx={h.sx} cy={h.sy} r={2.4} fill="var(--f-velocity)" stroke="var(--f-casing)" stroke-width={0.6} />
     </g>
   );
 }
@@ -410,5 +495,5 @@ function HeadHandle({ node, index }: { node: ControlNode; index: number }) {
   const rad = ((90 - node.heading) * Math.PI) / 180;
   const cx = c.sx + 9 * Math.cos(rad);
   const cy = c.sy + 9 * Math.sin(rad);
-  return <circle data-kind="head" data-i={index} class="handle head" cx={cx} cy={cy} r={2.6} fill="#3964fe" stroke="#fff" stroke-width={0.8} />;
+  return <circle data-kind="head" data-i={index} class="handle head" cx={cx} cy={cy} r={2.6} fill="var(--f-path)" stroke="var(--f-casing)" stroke-width={0.8} />;
 }

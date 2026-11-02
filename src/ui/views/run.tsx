@@ -8,6 +8,8 @@ import { opModes, refreshRobotData } from '../../state/robotData';
 import { settings, updateSettings } from '../../state/settings';
 import { FieldSvg, PathCurve, RobotGlyph } from '../components/field';
 import { toast } from '../components/dialogs';
+import { openConnectionDialog } from '../components/connection';
+import { IconPlay, IconStop } from '../components/icons';
 import { describeApiError, isHttpError } from '../../net/transport';
 import { drawErrorChart, type ErrorSample } from '../chart';
 import { S } from '../strings';
@@ -75,23 +77,32 @@ export function RunView() {
 
   // ---------- 误差采样 ----------
   const samples = useRef<ErrorSample[]>([]);
+  const trail = useRef<string[]>([]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const lineRef = useRef(line);
   lineRef.current = line;
   const running = phase === 'RUNNING' || exec?.state === 'RUNNING';
   const startedAt = useRef(0);
+  const [peak, setPeak] = useState<number | null>(null);
   useEffect(() => {
     if (!running) return;
     samples.current = [];
+    trail.current = [];
+    setPeak(null);
     startedAt.current = performance.now();
     const id = setInterval(() => {
       const cur = pose.peek();
       const l = lineRef.current;
-      if (!cur || l.length === 0) return;
+      if (!cur) return;
+      const s = logicalToScreen(cur.x, cur.y);
+      trail.current.push(`${s.sx},${s.sy}`);
+      if (trail.current.length > MAX_SAMPLES) trail.current.shift();
+      if (l.length === 0) return;
       const e = pathError({ x: cur.x, y: cur.y }, l);
       if (!Number.isFinite(e)) return;
       samples.current.push({ t: (performance.now() - startedAt.current) / 1000, e });
       if (samples.current.length > MAX_SAMPLES) samples.current.shift();
+      setPeak((v) => (v === null || e > v ? e : v));
       if (canvas.current) drawErrorChart(canvas.current, samples.current);
     }, SAMPLE_MS);
     return () => clearInterval(id);
@@ -103,7 +114,9 @@ export function RunView() {
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(c);
-    return () => ro.disconnect();
+    const scheme = matchMedia('(prefers-color-scheme: dark)'); // Canvas 颜色不随 CSS 变量自动更新
+    scheme.addEventListener('change', redraw);
+    return () => { ro.disconnect(); scheme.removeEventListener('change', redraw); };
   }, []);
 
   // ---------- OpMode 控制 ----------
@@ -145,55 +158,71 @@ export function RunView() {
       .filter((x) => x.n.command || x.n.marker);
   }, [nodes, core]);
 
-  const hint = !connected ? S.run.notConnected
+  const hint = !connected ? null
     : phase === 'STOPPED' ? S.run.needInit
     : !routeName ? S.run.noRoute : null;
+
+  const liveError = p && line.length > 0 ? pathError({ x: p.x, y: p.y }, line) : NaN;
+  const num = (v: number | undefined, d: number) => (v !== undefined && Number.isFinite(v) ? v.toFixed(d) : '--');
 
   return (
     <div class="run">
       <div class="run-main">
-        <div class="run-left">
-          <div class="run-map">
-            <FieldSvg svgRef={useRef<SVGSVGElement>(null)} label={S.run.map}>
-              {nodes && <PathCurve nodes={nodes} color="#ffffff" width={2.4} />}{nodes && <PathCurve nodes={nodes} color="#7f9bff" width={1.1} />}
-              {nodes && nodes.map((n, i) => {
-                const c = logicalToScreen(n.x, n.y);
-                return (
-                  <g key={i} transform={`translate(${c.sx} ${c.sy})`} pointer-events="none">
-                    <circle r={n.command || n.marker ? 2.4 : 1.4} fill={n.command || n.marker ? '#f59e0b' : '#ffffff'} stroke={n.command || n.marker ? '#ffffff' : '#7f9bff'} stroke-width={0.6} />
-                  </g>
-                );
-              })}
-              {p && <RobotGlyph x={p.x} y={p.y} heading={p.heading} />}
-            </FieldSvg>
-          </div>
-          <div class="run-chart">
-            <div class="muted" style="font-size:12px">{S.run.errorChart}</div>
-            <canvas ref={canvas} aria-label={S.run.errorChart} />
-          </div>
+        <div class="run-map">
+          <FieldSvg svgRef={useRef<SVGSVGElement>(null)} label={S.run.map}>
+            {nodes && <PathCurve nodes={nodes} color="var(--f-casing)" width={2.4} />}{nodes && <PathCurve nodes={nodes} color="var(--f-path)" width={1.1} />}
+            {nodes && nodes.map((n, i) => {
+              const c = logicalToScreen(n.x, n.y);
+              const tagged = !!(n.command || n.marker);
+              return (
+                <g key={i} transform={`translate(${c.sx} ${c.sy})`} pointer-events="none">
+                  <circle r={tagged ? 2.4 : 1.4} fill={tagged ? 'var(--f-command)' : 'var(--f-casing)'} stroke={tagged ? 'var(--f-casing)' : 'var(--f-path)'} stroke-width={0.6} />
+                </g>
+              );
+            })}
+            {trail.current.length > 1 && <polyline points={trail.current.join(' ')} fill="none" stroke="var(--f-live)" stroke-width={0.9} stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />}
+            {p && <RobotGlyph x={p.x} y={p.y} heading={p.heading} fill="var(--f-live-fill)" stroke="var(--f-live)" />}
+          </FieldSvg>
         </div>
         <aside class="run-side" aria-label={S.run.title}>
-          <div>
+          <div class="run-status" data-phase={phase} aria-live="polite">
+            <i />
+            <div class="run-status-text">
+              <strong>{S.run.phase[phase] ?? phase}</strong>
+              <span>{opMode?.activeName ?? S.run.noActive}</span>
+            </div>
+            {exec && <span class="chip">{S.run.execution[exec.state] ?? exec.state}</span>}
+          </div>
+          {!connected && <div class="banner">{st.kind === 'connecting' ? S.run.connecting : S.run.notConnected} <button class="link" onClick={openConnectionDialog}>{S.connection.settings}</button></div>}
+          {connected && opMode && !opMode.controllerAvailable && <div class="banner warn">{S.run.controlUnavailable}</div>}
+          <div class="run-op">
             <label for="run-op">{S.run.pickAuto}</label>
             <select id="run-op" value={selected} disabled={!ctrl} onChange={(e) => setSelected((e.target as HTMLSelectElement).value)}>
               <option value="">{autoNames.length ? S.run.pickAuto : S.run.noAuto}</option>
               {opModes.value.map((o) => <option key={o.name} value={o.name}>{o.group ? `${o.name}（${o.group}）` : o.name}</option>)}
             </select>
+            {hint && <div class="hint">{hint}</div>}
           </div>
           <div class="run-ctl">
-            <button disabled={!canInit || busy} onClick={() => void act('init')}>{S.run.init}</button>
-            <button class="primary" disabled={!canStart || busy} onClick={() => void act('start')}>{S.run.start}</button>
-            <button class="danger" disabled={!canStop || busy} onClick={() => void act('stop')}>{S.run.stop}</button>
+            <button class={canInit ? 'primary' : ''} disabled={!canInit || busy} onClick={() => void act('init')}>{S.run.init}</button>
+            <button class={canStart ? 'primary' : ''} disabled={!canStart || busy} onClick={() => void act('start')}><IconPlay />{S.run.start}</button>
+            <button class="stop" disabled={!canStop || busy} onClick={() => void act('stop')}><IconStop />{S.run.stop}</button>
           </div>
-          {connected && opMode && !opMode.controllerAvailable && <div class="banner warn">{S.run.controlUnavailable}</div>}
-          <div class="chips" aria-live="polite">
-            <span class={`chip${phase !== 'STOPPED' ? ' on' : ''}`}>{opMode?.activeName ? `${opMode.activeName} · ` : ''}{S.run.phase[phase] ?? phase}</span>
-            {exec && <span class="chip">{S.run.execution[exec.state] ?? exec.state}</span>}
+          <dl class="telemetry">
+            <div><dt>{S.run.telemetry.x}</dt><dd>{num(p?.x, 2)}</dd></div>
+            <div><dt>{S.run.telemetry.y}</dt><dd>{num(p?.y, 2)}</dd></div>
+            <div><dt>{S.run.telemetry.heading}</dt><dd>{p ? `${num(p.heading, 1)}°` : '--'}</dd></div>
+            <div><dt>{S.run.telemetry.error}</dt><dd>{num(liveError, 2)}</dd></div>
+          </dl>
+          <div class="run-chart">
+            <div class="run-chart-head">
+              <strong>{S.run.errorChart}</strong>
+              {peak !== null && <span class="muted mono">{S.run.errorPeak(peak)}</span>}
+            </div>
+            <canvas ref={canvas} aria-label={S.run.errorChart} />
           </div>
-          <div class="mono" style="font-size:13px">{p ? S.run.pose(p.x, p.y, p.heading) : S.run.poseNone}</div>
-          {hint && <div class="muted">{hint}</div>}
           {connected && !subject && (
-            <div>
+            <div class="run-route">
               <label for="run-route">{S.run.pickRoute}</label>
               <select id="run-route" value={manualRoute} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setManualRoute(v); updateSettings({ lastRunRoute: v }); }}>
                 <option value="">—</option>
@@ -201,9 +230,9 @@ export function RunView() {
               </select>
             </div>
           )}
-          {subject && <div class="muted">参考路径：{subject}</div>}
+          {subject && <div class="muted run-route">{S.run.referenceRoute(subject)}</div>}
           {error && <div class="banner bad">{error}</div>}
-          <div>
+          <div class="run-tasks">
             <strong>{S.run.tasks}</strong>
             {tasks.length === 0 ? <div class="muted">{S.run.noTasks}</div> : (
               <ul class="task-list">

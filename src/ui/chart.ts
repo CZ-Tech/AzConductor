@@ -5,6 +5,10 @@ export const X_MIN_SEC = 30;
 export const X_STEP_SEC = 5;
 export const Y_MIN_IN = 5;
 
+/** x 轴标注间距候选（秒）与标注最小像素间距。 */
+const X_TICKS = [5, 10, 20, 30, 60, 120, 300];
+const X_TICK_MIN_PX = 40;
+
 export function chartAxes(samples: readonly ErrorSample[]): { xMax: number; yMax: number } {
   const last = samples.length ? (samples[samples.length - 1] as ErrorSample).t : 0;
   const xMax = Math.max(X_MIN_SEC, Math.ceil(last / X_STEP_SEC) * X_STEP_SEC);
@@ -27,38 +31,51 @@ export function drawErrorChart(canvas: HTMLCanvasElement, samples: readonly Erro
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const css = getComputedStyle(canvas);
-  const ink = css.getPropertyValue('--ink').trim() || '#111';
-  const line = css.getPropertyValue('--line').trim() || '#ccc';
-  const accent = css.getPropertyValue('--blue').trim() || '#2563eb';
+  const muted = css.getPropertyValue('--ink-3').trim() || '#777';
+  const grid = css.getPropertyValue('--line').trim() || '#ddd';
+  const axis = css.getPropertyValue('--line-strong').trim() || '#bbb';
+  const accent = css.getPropertyValue('--brand').trim() || '#3964fe';
+  const font = css.getPropertyValue('--font').trim() || 'sans-serif';
   ctx.clearRect(0, 0, w, h);
-  const L = 36, R = 8, T = 8, B = 20;
+  const L = 26, R = 10, T = 6, B = 18;
   const pw = w - L - R, ph = h - T - B;
   const { xMax, yMax } = chartAxes(samples);
-  ctx.font = '10px sans-serif';
-  ctx.fillStyle = ink;
-  ctx.strokeStyle = line;
+  ctx.font = `10px ${font}`;
+  ctx.fillStyle = muted;
   ctx.lineWidth = 1;
+  // 只画水平网格，竖向用刻度标注，减少视觉噪声
   for (let i = 0; i <= 5; i++) {
-    const y = T + ph - (ph * i) / 5;
+    const y = Math.round(T + ph - (ph * i) / 5) + 0.5;
+    ctx.strokeStyle = i === 0 ? axis : grid;
     ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
     ctx.textAlign = 'right';
-    ctx.fillText(String((yMax * i) / 5), L - 4, y + 3);
+    ctx.fillText(String((yMax * i) / 5), L - 6, y + 3);
   }
-  const xt = xMax / X_STEP_SEC > 12 ? 10 : X_STEP_SEC;
-  for (let x = 0; x <= xMax; x += xt) {
-    const px = L + (pw * x) / xMax;
-    ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.fillText(String(x), px, h - 6);
-  }
+  const xt = X_TICKS.find((t) => (pw * t) / xMax >= X_TICK_MIN_PX) ?? xMax;
+  ctx.textAlign = 'center';
+  for (let x = 0; x <= xMax; x += xt) ctx.fillText(`${x}s`, L + (pw * x) / xMax, h - 4);
   if (samples.length === 0) return;
+
+  const px = (s: ErrorSample) => L + (pw * s.t) / xMax;
+  const py = (s: ErrorSample) => T + ph - (ph * s.e) / yMax;
+  const first = samples[0] as ErrorSample;
+  const last = samples[samples.length - 1] as ErrorSample;
+  ctx.beginPath();
+  samples.forEach((s, i) => { if (i === 0) ctx.moveTo(px(s), py(s)); else ctx.lineTo(px(s), py(s)); });
   ctx.strokeStyle = accent;
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  samples.forEach((s, i) => {
-    const px = L + (pw * s.t) / xMax;
-    const py = T + ph - (ph * s.e) / yMax;
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  });
+  ctx.lineJoin = 'round';
   ctx.stroke();
+  // 面积填充
+  ctx.lineTo(px(last), T + ph);
+  ctx.lineTo(px(first), T + ph);
+  ctx.closePath();
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = accent;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  // 当前值
+  ctx.beginPath();
+  ctx.arc(px(last), py(last), 2.5, 0, Math.PI * 2);
+  ctx.fill();
 }

@@ -2,6 +2,8 @@ import { syncController } from '../../state/sync';
 import { connState, isOwnerTab } from '../../state/session';
 import { settings } from '../../state/settings';
 import { askConfirm, showDialog, toast } from './dialogs';
+import { openConnectionDialog } from './connection';
+import { RoutePreview } from './field';
 import { RouteCore } from '../../core/route';
 import { S } from '../strings';
 import type { Resolution, SyncConflict } from '../../net/sync';
@@ -27,12 +29,13 @@ export function SyncPanel() {
   const rep = ctl.lastResult.value;
   const addr = settings.value.robotAddress.trim();
 
-  if (!addr) return <div class="sync-panel" data-status="off"><span class="dot" />{S.connection.noAddress}（在顶栏设置）</div>;
-  if (st.kind !== 'connected') {
+  if (!addr || st.kind !== 'connected') {
+    const connecting = !!addr && st.kind === 'connecting';
     return (
-      <div class="sync-panel" data-status="off">
+      <div class="sync-panel" data-status={connecting ? 'syncing' : 'off'}>
         <span class="dot" />
-        <span>未连接机器人，路径仅保存在本地；连接后自动同步。</span>
+        <span>{connecting ? S.routes.localConnecting : S.routes.localOnly}</span>
+        <button class="link" onClick={openConnectionDialog}>{!addr ? S.connection.setAddress : connecting ? S.connection.settings : S.connection.connect}</button>
       </div>
     );
   }
@@ -45,7 +48,7 @@ export function SyncPanel() {
       {status === 'error' && rep?.failures[0] && <span class="muted" title={rep.failures.join('\n')}>{rep.failures[0]}</span>}
       <span class="spacer" />
       {conflicts.length > 0 && <button class="primary" onClick={() => void openConflicts()}>{S.routes.resolve}</button>}
-      <button onClick={() => void ctl.syncNow()} disabled={status === 'syncing' || !isOwnerTab.value}>{S.routes.syncNow}</button>
+      <button class="ghost" onClick={() => void ctl.syncNow()} disabled={status === 'syncing' || !isOwnerTab.value}>{S.routes.syncNow}</button>
     </div>
   );
 }
@@ -74,8 +77,17 @@ function ConflictList({ onClose }: { onClose: () => void }) {
           <section key={c.id} class="conflict">
             <h3>{c.routeName}</h3>
             <p class="muted">{REASON[c.reason]}</p>
-            <p class="mono">电脑端：{summary(c.local)}<br />机器上：{summary(c.remote)}</p>
-            <div class="chips">
+            <div class="conflict-compare">
+              <figure>
+                <RoutePreview nodes={c.local ?? []} />
+                <figcaption><b>电脑端</b><span>{summary(c.local)}</span></figcaption>
+              </figure>
+              <figure>
+                <RoutePreview nodes={c.remote ?? []} />
+                <figcaption><b>机器上</b><span>{summary(c.remote)}</span></figcaption>
+              </figure>
+            </div>
+            <div class="conflict-actions">
               <button onClick={() => void act(c, 'keepLocal')}>{c.reason === 'LOCAL_DELETED_REMOTE_CHANGED' ? '确认删除（机器上也删）' : '以电脑端为准（覆盖机器）'}</button>
               <button onClick={() => void act(c, 'keepRemote')}>{c.reason === 'LOCAL_DELETED_REMOTE_CHANGED' ? '恢复机器上的版本' : '以机器为准（覆盖电脑端）'}</button>
               {c.reason !== 'LOCAL_DELETED_REMOTE_CHANGED' && <button onClick={() => void act(c, 'keepBoth')}>两者都保留</button>}

@@ -31,6 +31,12 @@ for (const [tag, vp, dark] of [['d', { width: 1280, height: 800 }, false], ['m',
   await shot(page, `${tag}-conn-dialog`);
   await page.getByRole('button', { name: '关闭' }).click();
 
+  // 卡片菜单
+  await page.locator('.route-card').first().getByRole('button', { name: '更多操作' }).click();
+  await sleep(200);
+  await shot(page, `${tag}-card-menu`);
+  await page.keyboard.press('Escape');
+
   if (tag !== 'm') {
     // 新建对话框
     await page.getByRole('button', { name: /新建路径/ }).click();
@@ -38,7 +44,8 @@ for (const [tag, vp, dark] of [['d', { width: 1280, height: 800 }, false], ['m',
     await shot(page, `${tag}-new-dialog`);
     await page.getByRole('button', { name: '取消' }).click();
     // 导出 / 导入
-    await page.locator('.route-card').first().getByRole('button', { name: '导出', exact: true }).click();
+    await page.locator('.route-card').first().getByRole('button', { name: '更多操作' }).click();
+    await page.locator('.route-card').first().getByRole('menuitem', { name: '导出', exact: true }).click();
     await sleep(200);
     await shot(page, `${tag}-export-dialog`);
     await page.getByRole('button', { name: '关闭' }).click();
@@ -57,6 +64,10 @@ for (const [tag, vp, dark] of [['d', { width: 1280, height: 800 }, false], ['m',
   await page.locator('.node-list li').nth(1).locator('.node-sum').click();   // 选中点 2 → 速度/朝向手柄
   await sleep(200);
   await shot(page, `${tag}-editor-selected`);
+  await page.locator('.ed-bar').getByRole('button', { name: '更多操作' }).click();
+  await sleep(200);
+  await shot(page, `${tag}-editor-menu`);
+  await page.keyboard.press('Escape');
   await page.locator('.node-list li').nth(1).getByRole('button', { name: '编辑控制点' }).click();
   await sleep(300);
   await shot(page, `${tag}-node-dialog`);
@@ -109,6 +120,40 @@ for (const [tag, vp, dark] of [['d', { width: 1280, height: 800 }, false], ['m',
   await page.getByRole('button', { name: '处理冲突' }).click();
   await sleep(300);
   await shot(page, 'd-conflict-dialog');
+  await ctx.close();
+}
+
+// 未连接：空状态、同步提示、运行页（桌面 + 手机）
+for (const [tag, vp] of [['d', { width: 1280, height: 800 }], ['m', { width: 390, height: 800 }]] as const) {
+  const ctx = await browser.newContext({ viewport: vp, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  await page.goto('http://localhost:4175/#/');
+  await page.waitForSelector('.empty');
+  await shot(page, `${tag}-empty`);
+  await page.goto('http://localhost:4175/#/run');
+  await page.waitForSelector('.run-status');
+  await sleep(300); // 等导航高亮的 .15s 过渡结束
+  await shot(page, `${tag}-run-offline`);
+  await ctx.close();
+}
+
+// 其他尺寸下的编辑器：平板竖屏、手机横屏
+for (const [tag, vp] of [['tablet', { width: 768, height: 1024 }], ['landscape', { width: 800, height: 390 }]] as const) {
+  const ctx = await browser.newContext({ viewport: vp, serviceWorkers: 'block' });
+  await ctx.addInitScript((a) => localStorage.setItem('az.settings', JSON.stringify({ robotAddress: a, fieldMap: '27', lastRunRoute: '' })), robot.url);
+  const page = await ctx.newPage();
+  await page.goto('http://localhost:4175/#/');
+  await page.waitForSelector('.route-card');
+  await sleep(800);
+  await page.locator('.route-card', { hasText: 'Blue Far' }).locator('a.card-main').click();
+  await page.waitForSelector('.field-svg');
+  await page.locator('.node-list li').nth(1).locator('.node-sum').click();
+  await sleep(300);
+  await shot(page, `${tag}-editor`);
+  await page.goto('http://localhost:4175/#/run');
+  await page.waitForSelector('.run-status');
+  await sleep(500);
+  await shot(page, `${tag}-run`);
   await ctx.close();
 }
 
