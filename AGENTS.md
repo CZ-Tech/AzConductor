@@ -1,72 +1,40 @@
-# Repository Guidelines
+# 仓库指南
 
-## Project Structure & Module Organization
+AzConductor：FTC 机器人路径规划器的纯静态网页版（可直接部署到 GitHub Pages，支持 PWA 离线）。
+旧的 Kotlin Multiplatform 版在分支 `legacy-kotlin`，本分支不含 Kotlin 代码。
 
-```
-AzConductor/
-├── composeApp/
-│   ├── src/
-│   │   ├── commonMain/        # Shared Kotlin + Compose UI
-│   │   │   └── kotlin/ftc19656/azconductor/
-│   │   │       ├── ui/screens/ # Page-level composables
-│   │   │       ├── ui/components/ # Reusable widgets
-│   │   │       ├── ui/dialogs/ # Dialog composables
-│   │   │       ├── route/         # Path planning & networking
-│   │   │       └── core/          # Math, config, utilities
-│   │   ├── jvmMain/           # Desktop (JVM) entry point
-│   │   ├── wasmJsMain/        # Web (Wasm) entry point
-│   │   ├── jsMain/            # Web (JS) entry point
-│   │   ├── webMain/           # Web resources (index.html)
-│   │   └── commonTest/        # Shared tests
-│   └── build.gradle.kts
-├── web_deploy/                # Built web output
-└── build.gradle.kts           # Root build config
-```
+## 技术栈
 
-This is a Kotlin Multiplatform project targeting **Desktop (JVM)** and **Web (Wasm/JS)**. All business logic and UI live in `commonMain`. Platform-specific code goes in `jvmMain`, `wasmJsMain`, etc.
+Vite 8 + TypeScript 7（strict、noUncheckedIndexedAccess、exactOptionalPropertyTypes）+ Preact 11 + @preact/signals；
+样式为原生 CSS；hash 路由；vite-plugin-pwa（Workbox）；测试用 Vitest；端到端用 playwright-core（驱动本机 Edge/Chrome）。
+Node >= 22（见 `.nvmrc`）。
 
-## Build, Test, and Development Commands
+## 命令
 
-| Command | What it does |
+| 命令 | 作用 |
 |---|---|
-| `.\gradlew :composeApp:run` | Build & run desktop app |
-| `.\gradlew :composeApp:wasmJsBrowserDevelopmentRun` | Start web dev server (Wasm, modern browsers) |
-| `.\gradlew :composeApp:jsBrowserDevelopmentRun` | Start web dev server (JS, older browsers) |
+| `npm ci` | 安装依赖 |
+| `npm run dev` | 开发服务器 |
+| `npm run mock` | 本地模拟机器人（Network V2，默认 8888 端口） |
+| `npm test` | Vitest（单元 + 对 mock 机器人的 HTTP/SSE 集成测试） |
+| `npm run typecheck` | `tsc --noEmit`（含 src、tests、e2e） |
+| `npm run build` | 类型检查 + 构建 + PWA，产物在 `dist/` |
+| `npm run e2e` | 端到端冒烟（需先 build；用 mock 机器人 + 真实浏览器 + PWA 离线） |
+| `npm run visual` | 截图用于人工视觉检查，输出 `e2e/vis/`（已忽略） |
+| `npm run live` | 对已部署的线上页面做连通验证 |
 
-> **Important**: Dev server commands above are long-running and will be killed when the shell session ends. Always launch them as a detached process:
-> ```powershell
-> Start-Process -FilePath "powershell" -ArgumentList "-NoExit", "-Command", "Set-Location -LiteralPath '<proj>'; .\gradlew :composeApp:wasmJsBrowserDevelopmentRun" -WindowStyle Hidden
-> ```
-> Access at http://localhost:8080/ once ready.
-> To stop: find the PID from netstat and run `Stop-Process -Id <pid> -Force`.
-| `.\gradlew :composeApp:wasmJsBrowserDistribution` | Build production web bundle |
-| `.\gradlew :composeApp:build` | Full project build |
+## 结构
 
-## Coding Style & Naming
+- `src/core`：纯函数内核（样条/Bézier、路径时间轴、契约校验、机器人线格式、存档格式、场地坐标、回放），不依赖 DOM 与 UI 框架。
+- `src/net`：Network V2（transport、api、connection 状态机、sync 同步引擎、baselines），不依赖 UI 框架。
+- `src/state`：docStore（撤销栈、防抖保存、跨标签页）、session（连接 + Web Locks）、sync 接线、robotData、settings。
+- `src/ui`：路径管理页、编辑器、运行页、对话框；界面文字集中在 `src/ui/strings.ts`；节点编辑表单由 `src/ui/nodeFields.ts` 字段表驱动（给 `ControlNode` 加字段必须在此登记，否则编译不过）。
+- `src/tools/mock-robot.ts`：Node 版模拟机器人，测试与本地联调用，不进发布产物。
+- `tests/`、`e2e/`：Vitest 测试与真实浏览器端到端脚本。
 
-- **Language**: Kotlin with Compose Multiplatform. Follow standard Kotlin conventions.
-- **Package**: `ftc19656.azconductor.<module>`
-- **UI**: Jetpack Compose APIs via `androidx.compose.*`. Use Material 3 components.
-- **Naming**: PascalCase for composables (`PathPlannerScreen`), camelCase for properties/functions (`selectedNodeIndex`).
-- **Icons**: Prefer `Icons.Default` (aliased from `Icons.Filled`), already wildcard-imported.
+## 约定
 
-## File Encoding (Critical)
-
-All source files use **UTF-8 without BOM**. When editing via PowerShell:
-
-- **Read**: `Get-Content -Encoding UTF8`
-- **Write**: `[System.IO.File]::WriteAllLines($path, $lines, [System.Text.UTF8Encoding]::new($false))`
-
-Never use plain `Set-Content` — it defaults to system encoding and corrupts non-ASCII characters.
-
-## Commit & Pull Request Guidelines
-
-- **Language**: Chinese for feature descriptions, English for conventional prefixes (`feat:`, `fix:`, `refactor:`).
-- **Format**: Keep summaries short (one line preferred). Use `feat:` / `fix:` / `refactor:` prefixes for English-style commits.
-- **Example**: `fix: use direct Settings read/write to bypass async ConfigManager cache race`
-
-## Architecture Notes
-
-- State is managed via `remember { mutableStateOf() }` at the screen level. No external state management library.
-- `RouteConnector` is the central ViewModel-like class for path data and robot communication.
-- Coordinate mapping goes through `CoordinateMapper` (logical ↔ screen space with optional rotation).
+- 提交信息：中文描述 + 英文前缀（`feat:` / `fix:` / `refactor:` / `test:` / `docs:` / `ci:`），一行为宜。
+- 所有"本地与远端是否相同"的比较用解析后的规范结构（`canonicalRoute`），不比较原始文本；可选字段缺省时省略，永不输出 `null`。
+- 机器人 Network V2 的线格式、状态码、CORS 要求以机器人侧代码为准；改动 `src/net` 要同步更新 mock 与测试。
+- 部署：推送 `main` 触发 `.github/workflows/pages.yml`（`npm ci → test → build → deploy-pages`）。

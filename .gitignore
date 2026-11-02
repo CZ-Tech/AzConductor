@@ -1,27 +1,23 @@
-*.iml
-.kotlin
-.gradle
-**/build/
-xcuserdata
-!src/**/build/
-local.properties
-.idea
-.DS_Store
-captures
-.externalNativeBuild
-.cxx
-*.xcodeproj/*
-!*.xcodeproj/project.pbxproj
-!*.xcodeproj/xcshareddata/
-!*.xcodeproj/project.xcworkspace/
-!*.xcworkspace/contents.xcworkspacedata
-**/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
-web_deploy/
-.stfolder/
-.stversions/
-*.sync-conflict-*
-*.class
+dist/
+dev-dist/
+
+# 截图与本地调试产物
+e2e/*.png
+e2e/vis/
+
+# 环境 / IDE / 系统
 .env
 .env.*
 !.env.example
+.idea/
+.vscode/*
+!.vscode/extensions.json
+local.properties
+.DS_Store
+Thumbs.db
+
+# Syncthing
+.stfolder/
+.stversions/
+*.sync-conflict-*
