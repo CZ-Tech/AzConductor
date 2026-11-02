@@ -3,3 +3,4 @@ dist
 dev-dist
 
 e2e/*.png
+e2e/vis/
