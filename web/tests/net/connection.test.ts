@@ -403,7 +403,8 @@ describe('reconnect', () => {
     await robot.stop();
     await waitFor(() => conn.state.kind === 'failed', 'failed');
     await sleep(350); // several backoff rounds against a closed port
-    expect(conn.state.kind).toBe('failed');
+    // Sampled mid-retry the state may briefly be 'connecting'; it must never report 'connected'.
+    expect(['failed', 'connecting']).toContain(conn.state.kind);
 
     await robot.start(port);
     await waitFor(() => conn.state.kind === 'connected', 'connected again', 5000);
