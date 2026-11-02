@@ -73,8 +73,8 @@ export function RoutesView() {
                   <div class="card-meta">{S.routes.points(r.points.length)} · {S.routes.duration(total)}</div>
                 </a>
                 <div class="card-actions" role="group" aria-label={r.name}>
-                  <button class="icon" aria-label={S.routes.moveUp} title={S.routes.moveUp} disabled={i === 0} onClick={() => store.moveRoute(i, i - 1)}>↑</button>
-                  <button class="icon" aria-label={S.routes.moveDown} title={S.routes.moveDown} disabled={i === routes.length - 1} onClick={() => store.moveRoute(i, i + 1)}>↓</button>
+                  <button class="icon" aria-label={S.routes.moveUp} title={S.routes.moveUp} disabled={i === 0} onClick={() => store.moveRoute(i, i - 1)}><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button>
+                  <button class="icon" aria-label={S.routes.moveDown} title={S.routes.moveDown} disabled={i === routes.length - 1} onClick={() => store.moveRoute(i, i + 1)}><svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg></button>
                   <button onClick={() => void rename(r.name)}>{S.common.rename}</button>
                   <button onClick={() => store.duplicateRoute(r.name)}>{S.common.duplicate}</button>
                   <button onClick={() => void mirror(r)}>{S.routes.mirror}</button>

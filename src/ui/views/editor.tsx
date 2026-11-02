@@ -290,8 +290,8 @@ export function EditorView({ name }: { name: string }) {
         <button onClick={() => void back()} aria-label={S.common.back}>← {S.common.back}</button>
         <h1 class="ed-title" title={name}>{name}</h1>
         <span class="spacer" />
-        <button class="icon" disabled={!store.canUndo.value} onClick={() => store.undo()} title={`${S.common.undo} (Ctrl+Z)`} aria-label={S.common.undo}>↶</button>
-        <button class="icon" disabled={!store.canRedo.value} onClick={() => store.redo()} title={`${S.common.redo} (Ctrl+Y)`} aria-label={S.common.redo}>↷</button>
+        <button class="icon" disabled={!store.canUndo.value} onClick={() => store.undo()} title={`${S.common.undo} (Ctrl+Z)`} aria-label={S.common.undo}>↶︎</button>
+        <button class="icon" disabled={!store.canRedo.value} onClick={() => store.redo()} title={`${S.common.redo} (Ctrl+Y)`} aria-label={S.common.redo}>↷︎</button>
         <button onClick={() => void doImport()}>{S.editor.importJson}</button>
         <button onClick={() => void showExportDialog(S.io.exportTitle, exportRouteJson(points), `${name}.json`)}>{S.editor.exportJson}</button>
         <button onClick={() => void showExportDialog(S.editor.exportRobot, exportRobotWireJson(points, true), `${name}.robot.json`)}>{S.editor.exportRobot}</button>
@@ -299,7 +299,7 @@ export function EditorView({ name }: { name: string }) {
           <option value="26">{S.settings.map26}</option>
           <option value="27">{S.settings.map27}</option>
         </select>
-        <button class="icon" onClick={() => setSideLeft(!sideLeft)} title={S.editor.swapSides} aria-label={S.editor.swapSides}>⇄</button>
+        <button class="icon" onClick={() => setSideLeft(!sideLeft)} title={S.editor.swapSides} aria-label={S.editor.swapSides}>⇄︎</button>
         <button class="icon" onClick={() => setSideOpen(!sideOpen)} title={sideOpen ? S.editor.collapse : S.editor.expand} aria-label={sideOpen ? S.editor.collapse : S.editor.expand} aria-expanded={sideOpen}>{sideOpen ? '⟩' : '⟨'}</button>
       </div>
 
@@ -315,8 +315,8 @@ export function EditorView({ name }: { name: string }) {
           >
             <g onContextMenu={onContextMenu as never} onDblClick={onDblClick as never}>
               <rect x={-72} y={-72} width={144} height={144} fill="transparent" />
-              <PathCurve nodes={points} color="#e5e5e5" width={1.6} />
-              <PathCurve nodes={points} color="#6b7280" width={0.8} />
+              <PathCurve nodes={points} color="#ffffff" width={2.4} />
+              <PathCurve nodes={points} color="#3964fe" width={1} />
               {headNode && <RobotGlyph x={headNode.x} y={headNode.y} heading={headNode.heading} opacity={0.9} />}
               {ghostPose && <RobotGlyph x={ghostPose.x} y={ghostPose.y} heading={ghostPose.heading} fill="rgba(234,179,8,.25)" stroke="#ca8a04" opacity={0.95} />}
               {headNode && <HeadHandle node={headNode} index={sel as number} />}
@@ -349,9 +349,9 @@ export function EditorView({ name }: { name: string }) {
                   {(n.command || n.marker) && <em>{n.command || n.marker}</em>}
                 </button>
                 <div class="node-actions">
-                  <button class="icon" onClick={() => void editAt(i)} title={S.editor.edit} aria-label={S.editor.edit}>✎</button>
+                  <button class="icon" onClick={() => void editAt(i)} title={S.editor.edit} aria-label={S.editor.edit}>✎︎</button>
                   <button class="icon" onClick={() => addAfter(i)} title={S.editor.addAfter} aria-label={S.editor.addAfter}>＋</button>
-                  <button class="icon danger" onClick={() => removeAt(i)} title={S.editor.remove} aria-label={S.editor.remove}>✕</button>
+                  <button class="icon danger" onClick={() => removeAt(i)} title={S.editor.remove} aria-label={S.editor.remove}>✕︎</button>
                 </div>
               </li>
             ))}
@@ -381,11 +381,12 @@ function NodeDot(p: { node: ControlNode; index: number; total: number; selected:
   const c = logicalToScreen(p.node.x, p.node.y);
   const first = p.index === 0;
   const last = p.index === p.total - 1 && p.total > 1;
-  const fill = p.selected ? 'var(--accent)' : first ? '#16a34a' : last ? '#dc2626' : '#2563eb';
+  const fill = p.selected ? '#3964fe' : first ? '#22c55e' : last ? '#ec1313' : '#ffffff';
+  const ring = p.selected || first || last ? '#ffffff' : '#3964fe';
   return (
     <g data-kind="node" data-i={p.index} class="node-dot" transform={`translate(${c.sx} ${c.sy})`} role="button" tabIndex={-1} aria-label={S.editor.node(p.index + 1)}>
       <circle r={5} fill="transparent" />
-      <circle r={2.6} fill={fill} stroke="#111" stroke-width={0.5} />
+      <circle r={p.selected ? 3.1 : 2.6} fill={fill} stroke={ring} stroke-width={p.selected || first || last ? 0.8 : 1} />
       {(p.node.command || p.node.marker) && <rect x={-1} y={-1} width={2} height={2} fill="#111" transform="rotate(45) translate(0 -4.5)" />}
       <text y={-4} text-anchor="middle" font-size={3.6} fill="#111" stroke="#fff" stroke-width={0.7} paint-order="stroke" pointer-events="none">{p.index + 1}</text>
     </g>
@@ -409,5 +410,5 @@ function HeadHandle({ node, index }: { node: ControlNode; index: number }) {
   const rad = ((90 - node.heading) * Math.PI) / 180;
   const cx = c.sx + 9 * Math.cos(rad);
   const cy = c.sy + 9 * Math.sin(rad);
-  return <circle data-kind="head" data-i={index} class="handle head" cx={cx} cy={cy} r={2.6} fill="#2563eb" stroke="#fff" stroke-width={0.5} />;
+  return <circle data-kind="head" data-i={index} class="handle head" cx={cx} cy={cy} r={2.6} fill="#3964fe" stroke="#fff" stroke-width={0.8} />;
 }

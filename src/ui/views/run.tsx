@@ -155,12 +155,12 @@ export function RunView() {
         <div class="run-left">
           <div class="run-map">
             <FieldSvg svgRef={useRef<SVGSVGElement>(null)} label={S.run.map}>
-              {nodes && <PathCurve nodes={nodes} color="#9ca3af" width={1.2} />}
+              {nodes && <PathCurve nodes={nodes} color="#ffffff" width={2.4} />}{nodes && <PathCurve nodes={nodes} color="#7f9bff" width={1.1} />}
               {nodes && nodes.map((n, i) => {
                 const c = logicalToScreen(n.x, n.y);
                 return (
                   <g key={i} transform={`translate(${c.sx} ${c.sy})`} pointer-events="none">
-                    <circle r={n.command || n.marker ? 2.4 : 1.4} fill={n.command || n.marker ? '#f59e0b' : '#6b7280'} stroke="#111" stroke-width={0.3} />
+                    <circle r={n.command || n.marker ? 2.4 : 1.4} fill={n.command || n.marker ? '#f59e0b' : '#ffffff'} stroke={n.command || n.marker ? '#ffffff' : '#7f9bff'} stroke-width={0.6} />
                   </g>
                 );
               })}

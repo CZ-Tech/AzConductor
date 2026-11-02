@@ -88,7 +88,7 @@ export function App() {
   return (
     <div class="shell">
       <header class="topbar">
-        <span class="brand">{S.appName}</span>
+        <span class="brand"><i class="mark" aria-hidden="true" />{S.appName}</span>
         <nav aria-label="主导航">
           <a href={hrefFor({ name: 'routes' })} aria-current={current === 'routes' ? 'page' : undefined}>{S.nav.routes}</a>
           <a href={hrefFor({ name: 'run' })} aria-current={current === 'run' ? 'page' : undefined}>{S.nav.run}</a>

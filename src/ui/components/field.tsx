@@ -62,7 +62,7 @@ export function PathCurve(p: { nodes: readonly ControlNode[]; color?: string; wi
     <path
       d={d}
       fill="none"
-      stroke={p.color ?? '#9a9a9a'}
+      stroke={p.color ?? '#3964fe'}
       stroke-width={p.width ?? 0.9}
       stroke-linecap="round"
       stroke-linejoin="round"
@@ -92,12 +92,12 @@ export function RobotGlyph(p: RobotGlyphProps) {
     <g opacity={p.opacity ?? 1}>
       <g transform={`translate(${c.sx} ${c.sy}) rotate(${rot})`} pointer-events="none">
         <rect x={-ROBOT_WIDTH / 2} y={-ROBOT_HEIGHT / 2} width={ROBOT_WIDTH} height={ROBOT_HEIGHT} rx={2}
-          fill={p.fill ?? 'rgba(37,99,235,.25)'} stroke={p.stroke ?? '#2563eb'} stroke-width={0.5} />
+          fill={p.fill ?? 'rgba(57,100,254,.22)'} stroke={p.stroke ?? '#3964fe'} stroke-width={0.5} />
       </g>
       <circle
         class={p.onHeadPointerDown ? 'handle head' : undefined}
         cx={c.sx + head.sx} cy={c.sy + head.sy} r={ROBOT_HEAD_DOT * (p.onHeadPointerDown ? 1.4 : 0.5)}
-        fill={p.stroke ?? '#2563eb'}
+        fill={p.stroke ?? '#3964fe'}
         onPointerDown={p.onHeadPointerDown as never}
         pointer-events={p.onHeadPointerDown ? 'all' : 'none'}
       />
