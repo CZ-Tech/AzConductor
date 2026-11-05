@@ -1,5 +1,6 @@
 /** 场地 SVG：viewBox 即逻辑坐标（-72..72），屏幕 sx = 逻辑 y，sy = 逻辑 x。 */
 import type { ComponentChildren, Ref } from 'preact';
+import { useCallback, useRef } from 'preact/hooks';
 import type { ControlNode } from '../../core/node';
 import { svgPathD, type Vec2 } from '../../core/route';
 import {
@@ -32,11 +33,36 @@ export interface FieldSvgProps {
   label?: string;
 }
 
+/**
+ * 界面元素（节点圆点、手柄、路径线）按 CSS 像素定尺寸，而不是场地逻辑单位：
+ * 场地 SVG 的 CSS 像素大小随系统缩放（DPI）与窗口变化，逻辑单位会让这些元素跟着场地忽大忽小，
+ * 与其余随 DPI 缩放的界面不一致。`--u` = 每 CSS 像素对应的逻辑单位，由 FieldSvg 随尺寸更新。
+ */
+export const px = (n: number): string => `calc(var(--u, 0.2) * ${n}px)`;
+
 export function FieldSvg(p: FieldSvgProps) {
   const map = settings.value.fieldMap;
+  const observer = useRef<ResizeObserver | null>(null);
+  const setRef = useCallback((node: SVGSVGElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    const r = p.svgRef as { current: SVGSVGElement | null } | ((n: SVGSVGElement | null) => void);
+    if (typeof r === 'function') r(node);
+    else r.current = node;
+    if (!node) return;
+    const update = () => {
+      const w = node.getBoundingClientRect().width;
+      if (w > 0) node.style.setProperty('--u', String((FIELD_HALF * 2) / w));
+    };
+    update();
+    if (typeof ResizeObserver === 'function') {
+      observer.current = new ResizeObserver(update);
+      observer.current.observe(node);
+    }
+  }, [p.svgRef]);
   return (
     <svg
-      ref={p.svgRef}
+      ref={setRef}
       class="field-svg"
       viewBox={FIELD_VIEWBOX}
       preserveAspectRatio="xMidYMid meet"
@@ -70,7 +96,7 @@ export function RoutePreview({ nodes }: { nodes: readonly ControlNode[] }) {
 }
 
 /** 路径曲线（精确三次 Bézier）。 */
-export function PathCurve(p: { nodes: readonly ControlNode[]; color?: string; width?: number; dashed?: boolean }) {
+export function PathCurve(p: { nodes: readonly ControlNode[]; color?: string; width?: number; widthPx?: number; dashed?: boolean }) {
   const d = svgPathD(p.nodes);
   if (!d) return null;
   return (
@@ -78,7 +104,8 @@ export function PathCurve(p: { nodes: readonly ControlNode[]; color?: string; wi
       d={d}
       fill="none"
       stroke={p.color ?? 'var(--f-path)'}
-      stroke-width={p.width ?? 0.9}
+      stroke-width={p.widthPx === undefined ? p.width ?? 0.9 : undefined}
+      style={p.widthPx === undefined ? undefined : { strokeWidth: px(p.widthPx) }}
       stroke-linecap="round"
       stroke-linejoin="round"
       stroke-dasharray={p.dashed ? '2 2' : undefined}

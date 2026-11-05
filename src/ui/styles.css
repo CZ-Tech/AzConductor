@@ -265,18 +265,25 @@ button.conn {
   width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); display: block; overflow: visible; flex: none;
   touch-action: none; user-select: none; -webkit-user-select: none; box-shadow: var(--shadow-2);
 }
+/* 场地上的交互元素按 CSS 像素定尺寸：--u（每 CSS 像素对应的逻辑单位）由 FieldSvg 随尺寸更新，
+   这样节点/手柄大小与其余界面一样跟随系统 DPI，而不是随场地缩放。calc 结果的 px 在 SVG 里即用户单位。 */
+.field-svg { --u: .2; }
 .handle { cursor: grab; }
 .handle:active { cursor: grabbing; }
+.handle.head { r: calc(var(--u) * 12px); stroke-width: calc(var(--u) * 3.5px); }
+.handle.vel { r: calc(var(--u) * 11px); stroke-width: calc(var(--u) * 3px); }
+.vel-line { stroke-width: calc(var(--u) * 3px); }
 .node-dot { cursor: pointer; }
-.node-dot .core { fill: var(--f-casing); stroke: var(--f-path); stroke-width: .8; transition: r .1s; }
-.node-dot .num { fill: var(--f-path); font-weight: 700; font-family: var(--font); }
-.node-dot:hover .core { stroke-width: 1.2; }
+.node-dot .hit { r: calc(var(--u) * 22px); }
+.node-dot .core { r: calc(var(--u) * 14px); fill: var(--f-casing); stroke: var(--f-path); stroke-width: calc(var(--u) * 3.5px); transition: r .1s; }
+.node-dot .num { font-size: calc(var(--u) * 15px); fill: var(--f-path); font-weight: 700; font-family: var(--font); }
+.node-dot:hover .core { stroke-width: calc(var(--u) * 5px); }
 .node-dot.first .core { fill: var(--f-start); stroke: var(--f-casing); }
 .node-dot.last .core { fill: var(--f-end); stroke: var(--f-casing); }
-.node-dot.sel .core { fill: var(--f-path); stroke: var(--f-casing); stroke-width: 1; }
+.node-dot.sel .core { r: calc(var(--u) * 16px); fill: var(--f-path); stroke: var(--f-casing); stroke-width: calc(var(--u) * 4.5px); }
 .node-dot.first .num, .node-dot.last .num, .node-dot.sel .num { fill: #fff; }
-.node-dot .tag { fill: var(--f-command); stroke: var(--f-casing); stroke-width: .5; }
-@media (pointer: coarse) { .node-dot .hit { r: 7px; } }
+.node-dot .tag { cx: calc(var(--u) * 12px); cy: calc(var(--u) * -12px); r: calc(var(--u) * 5.5px); fill: var(--f-command); stroke: var(--f-casing); stroke-width: calc(var(--u) * 2px); }
+@media (pointer: coarse) { .node-dot .hit { r: calc(var(--u) * 30px); } }
 
 /* ============ 编辑器 ============ */
 .editor { display: flex; flex-direction: column; height: 100%; min-height: 0; }

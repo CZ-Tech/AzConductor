@@ -6,7 +6,7 @@ import { logicalToScreen } from '../../core/field';
 import { connData, connState, getConnection, pose } from '../../state/session';
 import { opModes, refreshRobotData } from '../../state/robotData';
 import { settings, updateSettings } from '../../state/settings';
-import { FieldSvg, PathCurve, RobotGlyph } from '../components/field';
+import { FieldSvg, PathCurve, RobotGlyph, px } from '../components/field';
 import { toast } from '../components/dialogs';
 import { openConnectionDialog } from '../components/connection';
 import { CommandPanel } from '../components/commandPanel';
@@ -82,6 +82,7 @@ export function RunView() {
   const samples = useRef<ErrorSample[]>([]);
   const trail = useRef<string[]>([]);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const lineRef = useRef(line);
   lineRef.current = line;
   const running = phase === 'RUNNING' || exec?.state === 'RUNNING';
@@ -174,18 +175,18 @@ export function RunView() {
         <CommandPanel open={cmdOpen} onClose={() => setCmdOpen(false)} />
         <div class="run-map">
           {!cmdOpen && <button type="button" class="cmd-toggle" aria-expanded="false" aria-controls="cmd-panel" onClick={() => setCmdOpen(true)}><IconTerminal />{S.commands.toggle}</button>}
-          <FieldSvg svgRef={useRef<SVGSVGElement>(null)} label={S.run.map}>
-            {nodes && <PathCurve nodes={nodes} color="var(--f-casing)" width={2.4} />}{nodes && <PathCurve nodes={nodes} color="var(--f-path)" width={1.1} />}
+          <FieldSvg svgRef={svgRef} label={S.run.map}>
+            {nodes && <PathCurve nodes={nodes} color="var(--f-casing)" widthPx={11} />}{nodes && <PathCurve nodes={nodes} color="var(--f-path)" widthPx={5} />}
             {nodes && nodes.map((n, i) => {
               const c = logicalToScreen(n.x, n.y);
               const tagged = !!(n.command || n.marker);
               return (
                 <g key={i} transform={`translate(${c.sx} ${c.sy})`} pointer-events="none">
-                  <circle r={tagged ? 2.4 : 1.4} fill={tagged ? 'var(--f-command)' : 'var(--f-casing)'} stroke={tagged ? 'var(--f-casing)' : 'var(--f-path)'} stroke-width={0.6} />
+                  <circle style={`r:${px(tagged ? 11 : 6.5)};stroke-width:${px(3)}`} fill={tagged ? 'var(--f-command)' : 'var(--f-casing)'} stroke={tagged ? 'var(--f-casing)' : 'var(--f-path)'} />
                 </g>
               );
             })}
-            {trail.current.length > 1 && <polyline points={trail.current.join(' ')} fill="none" stroke="var(--f-live)" stroke-width={0.9} stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />}
+            {trail.current.length > 1 && <polyline points={trail.current.join(' ')} fill="none" stroke="var(--f-live)" style={{ strokeWidth: px(4) }} stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />}
             {p && <RobotGlyph x={p.x} y={p.y} heading={p.heading} fill="var(--f-live-fill)" stroke="var(--f-live)" />}
           </FieldSvg>
         </div>

@@ -353,8 +353,8 @@ export function EditorView({ name }: { name: string }) {
             >
               <g onContextMenu={onContextMenu as never} onDblClick={onDblClick as never}>
                 <rect x={-72} y={-72} width={144} height={144} fill="transparent" />
-                <PathCurve nodes={points} color="var(--f-casing)" width={2.4} />
-                <PathCurve nodes={points} color="var(--f-path)" width={1} />
+                <PathCurve nodes={points} color="var(--f-casing)" widthPx={11} />
+                <PathCurve nodes={points} color="var(--f-path)" widthPx={4.5} />
                 {headNode && <RobotGlyph x={headNode.x} y={headNode.y} heading={headNode.heading} opacity={0.9} />}
                 {ghostPose && <RobotGlyph x={ghostPose.x} y={ghostPose.y} heading={ghostPose.heading} fill="var(--f-ghost-fill)" stroke="var(--f-ghost)" opacity={0.95} />}
                 {headNode && <HeadHandle node={headNode} index={sel as number} />}
@@ -470,10 +470,10 @@ function NodeDot(p: { node: ControlNode; index: number; total: number; selected:
   const c = logicalToScreen(p.node.x, p.node.y);
   return (
     <g data-kind="node" data-i={p.index} class={`node-dot ${nodeRole(p.index, p.total)}${p.selected ? ' sel' : ''}`} transform={`translate(${c.sx} ${c.sy})`} role="button" tabIndex={-1} aria-label={S.editor.node(p.index + 1)}>
-      <circle class="hit" r={5} fill="transparent" />
-      <circle class="core" r={p.selected ? 3.6 : 3.1} />
-      <text class="num" dy=".36em" text-anchor="middle" font-size={3.3} pointer-events="none">{p.index + 1}</text>
-      {(p.node.command || p.node.marker) && <circle class="tag" cx={2.7} cy={-2.7} r={1.2} />}
+      <circle class="hit" fill="transparent" />
+      <circle class="core" />
+      <text class="num" dy=".36em" text-anchor="middle" pointer-events="none">{p.index + 1}</text>
+      {(p.node.command || p.node.marker) && <circle class="tag" />}
     </g>
   );
 }
@@ -483,8 +483,8 @@ function VelocityHandle({ node, index }: { node: ControlNode; index: number }) {
   const h = velocityHandleScreen(node);
   return (
     <g>
-      <line x1={c.sx} y1={c.sy} x2={h.sx} y2={h.sy} stroke="var(--f-velocity)" stroke-width={0.7} pointer-events="none" />
-      <circle data-kind="handle" data-i={index} class="handle" cx={h.sx} cy={h.sy} r={2.4} fill="var(--f-velocity)" stroke="var(--f-casing)" stroke-width={0.6} />
+      <line class="vel-line" x1={c.sx} y1={c.sy} x2={h.sx} y2={h.sy} stroke="var(--f-velocity)" pointer-events="none" />
+      <circle data-kind="handle" data-i={index} class="handle vel" cx={h.sx} cy={h.sy} fill="var(--f-velocity)" stroke="var(--f-casing)" />
     </g>
   );
 }
@@ -495,5 +495,5 @@ function HeadHandle({ node, index }: { node: ControlNode; index: number }) {
   const rad = ((90 - node.heading) * Math.PI) / 180;
   const cx = c.sx + 9 * Math.cos(rad);
   const cy = c.sy + 9 * Math.sin(rad);
-  return <circle data-kind="head" data-i={index} class="handle head" cx={cx} cy={cy} r={2.6} fill="var(--f-path)" stroke="var(--f-casing)" stroke-width={0.8} />;
+  return <circle data-kind="head" data-i={index} class="handle head" cx={cx} cy={cy} fill="var(--f-path)" stroke="var(--f-casing)" />;
 }
