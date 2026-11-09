@@ -24,7 +24,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,webp,png,ico,woff2,webmanifest}'],
-        navigateFallback: null,
+        // 任何页面导航（带查询串、非根路径、从桌面图标/书签打开）离线时都回退到预缓存的应用壳；
+        // 路由是 hash 路由，所以始终是同一份 index.html。
+        navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
       },
     }),

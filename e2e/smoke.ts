@@ -348,13 +348,43 @@ async function main() {
     // PWA：启用 Service Worker，预缓存后离线重载
     const ctx2 = await browser.newContext({ viewport: { width: 1000, height: 700 } });
     const off = await ctx2.newPage();
+    const offErrors: string[] = [];
+    let offlinePhase = false;
+    off.on('pageerror', (e) => { if (offlinePhase) offErrors.push(`pageerror: ${e}`); });
+    off.on('console', (m) => {
+      // 浏览器自己对失败网络请求打的 "Failed to load resource" 不算应用报错
+      if (offlinePhase && (m.type() === 'error' || m.type() === 'warning') && !m.text().startsWith('Failed to load resource')) offErrors.push(`console.${m.type()}: ${m.text()}`);
+    });
+    await ctx2.addInitScript((addr) => {
+      if (!localStorage.getItem('az.settings')) localStorage.setItem('az.settings', JSON.stringify({ robotAddress: addr, fieldMap: '27', lastRunRoute: '' }));
+    }, robot.url);
     await off.goto(`http://localhost:${PORT}/#/`);
     check(await until(async () => off.evaluate(async () => !!(await navigator.serviceWorker.getRegistration())?.active), 'sw active', 15000), 'Service Worker 已激活');
     await off.reload();
     await new Promise((r) => setTimeout(r, 1500));
     await ctx2.setOffline(true);
+    offlinePhase = true;
     await off.reload();
     check(await off.locator('.brand').innerText() === 'AzConductor', '离线重载仍可打开应用（PWA 预缓存）');
+    // 带查询串、非根路径的导航也要能回退到应用壳
+    await off.goto(`http://localhost:${PORT}/?source=pwa#/`);
+    check(await off.locator('.brand').innerText() === 'AzConductor', '离线下带查询串的地址仍可打开应用');
+    // 离线下进入编辑器与运行页，场地图必须来自缓存
+    await off.getByRole('button', { name: /新建路径/ }).first().click();
+    await off.locator('dialog input[type=text]').fill('离线路径');
+    await off.locator('dialog button[type=submit]').click();
+    await off.waitForURL(/#\/edit\//);
+    check(await until(() => off.evaluate(() => { const i = document.querySelector('.ed-field image'); return !!i; }), 'field image'), '离线编辑器渲染场地');
+    const imgOk = await off.evaluate(async () => {
+      const href = document.querySelector('.ed-field image')?.getAttribute('href') ?? '';
+      try { return (await fetch(href)).ok; } catch { return false; }
+    });
+    check(imgOk, '离线下场地图可从缓存读取');
+    await off.goto(`http://localhost:${PORT}/#/run`);
+    await new Promise((r) => setTimeout(r, 2500)); // 让连接重试与同步引擎跑几轮
+    check(await off.locator('.conn').count() > 0, '离线运行页正常渲染');
+    check(offErrors.length === 0, `离线全程无应用报错 ${offErrors.slice(0, 3).join(' | ')}`);
+    offlinePhase = false;
     await ctx2.setOffline(false);
     await browser.close();
   } finally {
