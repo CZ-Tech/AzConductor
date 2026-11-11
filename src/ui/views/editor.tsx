@@ -17,8 +17,9 @@ import { ConnButton } from '../components/connection';
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from '../components/menu';
 import {
   IconBack, IconExport, IconImport, IconMore, IconPause, IconPencil, IconPlay, IconPlus, IconRedo, IconReplay, IconRobot,
-  IconSidebar, IconSwap, IconTrash, IconUndo,
+  IconCopy, IconGrip, IconSidebar, IconSwap, IconTrash, IconUndo,
 } from '../components/icons';
+import { duplicateAt, moveItem, slotToIndex } from '../../core/reorder';
 import { commandByName } from '../../state/robotData';
 import { settings, updateSettings } from '../../state/settings';
 import { navigate } from '../router';
@@ -126,6 +127,61 @@ export function EditorView({ name }: { name: string }) {
     setPoints(cur.filter((_, k) => k !== i));
     setSel(null);
   };
+  const duplicateNode = (i: number) => {
+    const r = duplicateAt(live.current.points, i);
+    if (r.index === null) return;
+    setPoints(r.points);
+    setSel(r.index);
+  };
+
+  // ---------- 列表拖拽重排 ----------
+  /** 拖动中的状态：from 为被拖项，slot 为插入槽位（0..length，插在该项之前）。 */
+  const [reorder, setReorder] = useState<{ from: number; slot: number } | null>(null);
+  const reorderRef = useRef<{ from: number; slot: number; pid: number } | null>(null);
+
+  const slotAt = (clientY: number): number => {
+    const items = listRef.current?.querySelectorAll<HTMLLIElement>(':scope > li');
+    if (!items) return 0;
+    for (let k = 0; k < items.length; k++) {
+      const r = (items[k] as HTMLLIElement).getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return k;
+    }
+    return items.length;
+  };
+  const onGripDown = (e: PointerEvent, i: number) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    reorderRef.current = { from: i, slot: i, pid: e.pointerId };
+    setReorder({ from: i, slot: i });
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const onGripMove = (e: PointerEvent) => {
+    const r = reorderRef.current;
+    if (!r || r.pid !== e.pointerId) return;
+    // 靠近侧栏上下边缘时自动滚动
+    const side = listRef.current?.closest('.ed-side');
+    if (side) {
+      const b = side.getBoundingClientRect();
+      if (e.clientY < b.top + 36) side.scrollBy({ top: -12 });
+      else if (e.clientY > b.bottom - 36) side.scrollBy({ top: 12 });
+    }
+    const slot = slotAt(e.clientY);
+    if (slot !== r.slot) { r.slot = slot; setReorder({ from: r.from, slot }); }
+  };
+  const endGrip = (e: PointerEvent, cancelled: boolean) => {
+    const r = reorderRef.current;
+    if (!r || r.pid !== e.pointerId) return;
+    reorderRef.current = null;
+    setReorder(null);
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (cancelled) return;
+    const to = slotToIndex(r.from, r.slot);
+    if (to === r.from) return;
+    setPoints([...moveItem(live.current.points, r.from, to)]);
+    setSel(to);
+  };
+
   const editAt = async (i: number) => {
     const n = live.current.points[i];
     if (!n) return;
@@ -258,6 +314,7 @@ export function EditorView({ name }: { name: string }) {
       const i = sel;
       if (i === null) return;
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeAt(i); return; }
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateNode(i); return; }
       const step = e.shiftKey ? 0.1 : 1;
       const n = live.current.points[i];
       if (!n) return;
@@ -385,7 +442,12 @@ export function EditorView({ name }: { name: string }) {
           {points.length === 0 && <p class="muted side-empty">{S.editor.noNodes}</p>}
           <ol class="node-list" ref={listRef}>
             {points.map((n, i) => (
-              <li key={i} class={i === sel ? 'sel' : ''}>
+              <li key={i} class={`${i === sel ? 'sel' : ''}${reorder?.from === i ? ' dragging' : ''}${dropMark(reorder, i, points.length)}`}>
+                <span class="node-grip" role="button" tabIndex={-1} title={S.editor.dragHandle} aria-label={S.editor.dragHandle}
+                  onPointerDown={((e: PointerEvent) => onGripDown(e, i)) as never}
+                  onPointerMove={onGripMove as never}
+                  onPointerUp={((e: PointerEvent) => endGrip(e, false)) as never}
+                  onPointerCancel={((e: PointerEvent) => endGrip(e, true)) as never}><IconGrip /></span>
                 <button class="node-sum" onClick={() => setSel(i === sel ? null : i)} aria-pressed={i === sel}>
                   <b class={`node-badge ${nodeRole(i, points.length)}`}>{i + 1}</b>
                   <span>{fmt(n.x)}, {fmt(n.y)}</span>
@@ -403,6 +465,7 @@ export function EditorView({ name }: { name: string }) {
                     <div class="node-actions">
                       <button class="ghost" onClick={() => void editAt(i)} title={S.editor.edit}><IconPencil />{S.editor.edit}</button>
                       <span class="spacer" />
+                      <button class="icon ghost" onClick={() => duplicateNode(i)} title={S.editor.duplicate} aria-label={S.editor.duplicate}><IconCopy /></button>
                       <button class="icon ghost" onClick={() => addAfter(i)} title={S.editor.addAfter} aria-label={S.editor.addAfter}><IconPlus /></button>
                       <button class="icon ghost danger" onClick={() => removeAt(i)} title={S.editor.remove} aria-label={S.editor.remove}><IconTrash /></button>
                     </div>
@@ -438,6 +501,14 @@ export function EditorView({ name }: { name: string }) {
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
+
+/** 拖拽重排时的落点标记：落在第 i 项之前 / 最后一项之后；原位（无变化）不显示。 */
+function dropMark(r: { from: number; slot: number } | null, i: number, n: number): string {
+  if (!r || slotToIndex(r.from, r.slot) === r.from) return '';
+  if (r.slot === i) return ' drop-before';
+  if (r.slot === n && i === n - 1) return ' drop-after';
+  return '';
+}
 
 /** 首点 / 末点 / 中间点，场地圆点与列表徽标共用同一配色。 */
 const nodeRole = (i: number, total: number): 'first' | 'last' | 'mid' =>

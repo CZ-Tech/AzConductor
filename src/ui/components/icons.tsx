@@ -20,6 +20,13 @@ export const IconRedo = () => <Svg><path d="M13 6H6.5a3.5 3.5 0 0 0 0 7H10" /><p
 export const IconPencil = () => <Svg><path d="M10.5 3 13 5.5 5.5 13H3v-2.5L10.5 3Z" /></Svg>;
 export const IconTrash = () => <Svg><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" /></Svg>;
 export const IconCopy = () => <Svg><rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5" /><path d="M3 10.5V4a1 1 0 0 1 1-1h6.5" /></Svg>;
+export const IconGrip = () => (
+  <Svg>
+    <circle cx="6" cy="4" r=".9" fill="currentColor" /><circle cx="10" cy="4" r=".9" fill="currentColor" />
+    <circle cx="6" cy="8" r=".9" fill="currentColor" /><circle cx="10" cy="8" r=".9" fill="currentColor" />
+    <circle cx="6" cy="12" r=".9" fill="currentColor" /><circle cx="10" cy="12" r=".9" fill="currentColor" />
+  </Svg>
+);
 export const IconMirror = () => <Svg><path d="M8 2v12M5 5 2 8l3 3M11 5l3 3-3 3" /></Svg>;
 export const IconSwap = () => <Svg><path d="M3 5.5h9M9.5 3 12 5.5 9.5 8M13 10.5H4M6.5 8 4 10.5 6.5 13" /></Svg>;
 export const IconImport = () => <Svg><path d="M8 3v7M5 7.5 8 10l3-2.5M3 11v2h10v-2" /></Svg>;

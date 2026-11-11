@@ -90,6 +90,8 @@ export const S = {
     edit: '编辑控制点',
     remove: '删除控制点',
     addAfter: '在此点后添加控制点',
+    duplicate: '复制控制点 (Ctrl+D)',
+    dragHandle: '拖动以调整控制点顺序',
     addLast: '添加控制点',
     ghost: '显示幽灵机器人',
     swapSides: '对换左右侧',

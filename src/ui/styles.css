@@ -309,9 +309,22 @@ button.conn {
 .node-list li { border-radius: var(--radius); margin-bottom: 1px; transition: background-color .12s; }
 .node-list li:hover:not(.sel) { background: var(--hover); }
 .node-list li.sel { background: var(--brand-weak); }
+.node-list li { position: relative; }
+.node-list li.dragging { opacity: .45; }
+.node-list li.drop-before::before, .node-list li.drop-after::after {
+  content: ''; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 1px; background: var(--brand-solid); pointer-events: none;
+}
+.node-list li.drop-before::before { top: -2px; }
+.node-list li.drop-after::after { bottom: -2px; }
+.node-grip {
+  position: absolute; left: 2px; top: 0; width: 22px; height: 40px; display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: var(--radius-sm);
+}
+.node-grip:hover { color: var(--ink-2); }
+.node-list li.dragging .node-grip { cursor: grabbing; }
 button.node-sum {
   width: 100%; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0 10px; justify-items: start;
-  background: none; border: none; border-radius: var(--radius); padding: 6px 8px; min-height: 40px; font-weight: 400; text-align: left;
+  background: none; border: none; border-radius: var(--radius); padding: 6px 8px 6px 26px; min-height: 40px; font-weight: 400; text-align: left;
 }
 button.node-sum:hover:not(:disabled), button.node-sum:active:not(:disabled) { background: none; }
 .node-badge {
@@ -324,7 +337,7 @@ button.node-sum:hover:not(:disabled), button.node-sum:active:not(:disabled) { ba
 .node-sum span { font-size: 13px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .node-sum small { justify-self: end; font-size: 12px; color: var(--ink-3); font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .node-sum em { grid-column: 2 / -1; font-size: 12px; color: var(--warn-ink); font-style: normal; font-weight: 500; }
-.node-detail { padding: 2px 8px 8px; }
+.node-detail { padding: 2px 8px 8px 26px; }
 .node-quick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 label.nq { margin: 0; font-size: 11.5px; }
 .nq span { display: block; margin-bottom: 2px; }
