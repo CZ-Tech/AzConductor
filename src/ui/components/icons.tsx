@@ -28,6 +28,7 @@ export const IconGrip = () => (
   </Svg>
 );
 export const IconMirror = () => <Svg><path d="M8 2v12M5 5 2 8l3 3M11 5l3 3-3 3" /></Svg>;
+export const IconRotate180 = () => <Svg><circle cx="8" cy="8" r=".9" fill="currentColor" /><circle cx="4.5" cy="4.5" r="1.5" /><circle cx="11.5" cy="11.5" r="1.5" /></Svg>;
 export const IconSwap = () => <Svg><path d="M3 5.5h9M9.5 3 12 5.5 9.5 8M13 10.5H4M6.5 8 4 10.5 6.5 13" /></Svg>;
 export const IconImport = () => <Svg><path d="M8 3v7M5 7.5 8 10l3-2.5M3 11v2h10v-2" /></Svg>;
 export const IconExport = () => <Svg><path d="M8 10V3M5 5.5 8 3l3 2.5M3 11v2h10v-2" /></Svg>;
