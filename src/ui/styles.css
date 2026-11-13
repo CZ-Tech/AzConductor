@@ -309,6 +309,9 @@ button.conn {
 .node-list li { border-radius: var(--radius); margin-bottom: 1px; transition: background-color .12s; }
 .node-list li:hover:not(.sel) { background: var(--hover); }
 .node-list li.sel { background: var(--brand-weak); }
+/* 回放已到达的控制点：琥珀色底 + 左侧指示条，与品牌蓝的选中态区分 */
+.node-list li.current, .node-list li.current:hover:not(.sel) { background: var(--warn-weak); box-shadow: inset 3px 0 0 var(--f-ghost); }
+.node-list li.sel.current, .node-list li.sel.current:hover { background: var(--brand-weak); }
 .node-list li { position: relative; }
 .node-list li.dragging { opacity: .45; }
 .node-list li.drop-before::before, .node-list li.drop-after::after {

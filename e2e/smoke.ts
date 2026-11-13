@@ -160,6 +160,12 @@ async function main() {
     await page.getByRole('button', { name: '播放' }).click();
     await until(async () => !(await page.locator('.timeline .time').innerText()).startsWith('0.00'), 'playback advances', 3000);
     check(!(await page.locator('.timeline .time').innerText()).startsWith('0.00 /'), '回放推进时间');
+    check(await page.locator('.node-list li.current').count() === 1, '回放时列表高亮当前路径点');
+    check(await page.locator('.node-list li.current .node-badge').innerText() === '1', '回放开始时高亮第 1 个点');
+    check(
+      await until(async () => (await page.locator('.node-list li.current .node-badge').innerText()) === '2', 'highlight follows arrival', 3000),
+      '回放到达第 2 个点时高亮跟随',
+    );
     await page.getByRole('button', { name: '暂停' }).click().catch(() => undefined);
 
     // 回到路径页，等待同步推送到机器

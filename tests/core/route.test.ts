@@ -137,6 +137,59 @@ describe('RouteCore 基本行为', () => {
   });
 });
 
+describe('nodeIndexAt（回放列表高亮）', () => {
+  it('到达控制点的瞬间才切换，运动与等待期间停在已到达的点', () => {
+    const route = new RouteCore([
+      flat(0, { delayAfterArrive: 1 }),
+      flat(10, { duration: 2, delayAfterArrive: 3 }),
+      flat(20, { duration: 2 }),
+    ]);
+    expect(route.segmentEndTimes).toEqual([3, 8]);
+    expect(route.totalTime).toBe(8);
+    expect(route.nodeIndexAt(0)).toBe(0); // 起点等待
+    expect(route.nodeIndexAt(1)).toBe(0);
+    expect(route.nodeIndexAt(2.999)).toBe(0); // 第一段运动途中
+    expect(route.nodeIndexAt(3)).toBe(1); // 到达第 2 点
+    expect(route.nodeIndexAt(5)).toBe(1); // 在点 1 等待
+    expect(route.nodeIndexAt(7.999)).toBe(1);
+    expect(route.nodeIndexAt(8)).toBe(2); // 到达终点
+  });
+
+  it('时间钳制到 [0,total]；空路径返回 -1；单点路径恒为 0', () => {
+    expect(new RouteCore([]).nodeIndexAt(3)).toBe(-1);
+    expect(new RouteCore([flat(0)]).nodeIndexAt(3)).toBe(0);
+    expect(new RouteCore([flat(0, { delayAfterArrive: 2 })]).nodeIndexAt(1)).toBe(0);
+    const route = new RouteCore([flat(0), flat(10, { duration: 2 })]);
+    expect(route.nodeIndexAt(-5)).toBe(0);
+    expect(route.nodeIndexAt(100)).toBe(1);
+  });
+
+  it('零时长段：到达时刻重合，直接落在后面的点', () => {
+    const route = new RouteCore([flat(0), flat(10, { duration: 0 }), flat(20, { duration: 1 })]);
+    expect(route.segmentEndTimes).toEqual([0, 1]);
+    expect(route.nodeIndexAt(0)).toBe(1);
+    expect(route.nodeIndexAt(0.5)).toBe(1);
+    expect(route.nodeIndexAt(1)).toBe(2);
+  });
+
+  it('索引有界，随时间单调不减，终点停在最后一点', () => {
+    const r = rng(123);
+    for (let i = 0; i < 40; i++) {
+      const nodes = randomRoute(r, 2 + Math.floor(r() * 6));
+      const route = new RouteCore(nodes);
+      let last = 0;
+      for (let s = 0; s <= 50; s++) {
+        const idx = route.nodeIndexAt((route.totalTime * s) / 50);
+        expect(idx).toBeGreaterThanOrEqual(last);
+        expect(idx).toBeGreaterThanOrEqual(0);
+        expect(idx).toBeLessThanOrEqual(nodes.length - 1);
+        last = idx;
+      }
+      expect(route.nodeIndexAt(route.totalTime)).toBe(nodes.length - 1);
+    }
+  });
+});
+
 describe('svgPathD', () => {
   it('少于 2 点为空串', () => {
     expect(svgPathD([])).toBe('');

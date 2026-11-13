@@ -65,6 +65,8 @@ export function EditorView({ name }: { name: string }) {
   const total = core.totalTime;
   const issues = useMemo(() => validateNodes(points), [points]);
   const ghostPose = ghost ? core.pointAt(t) : null;
+  /** 回放已到达的控制点；未开始回放（t=0 且未播放）时不高亮。 */
+  const activeIndex = playing || t > 0 ? core.nodeIndexAt(t) : -1;
 
   // 选中索引越界修正
   useEffect(() => {
@@ -75,6 +77,12 @@ export function EditorView({ name }: { name: string }) {
   useEffect(() => {
     if (sel !== null) listRef.current?.querySelector('li.sel')?.scrollIntoView({ block: 'nearest' });
   }, [sel]);
+
+  // 回放到达新的控制点时，让列表跟随滚动（只在播放中跟随，避免干扰手动滚动）
+  useEffect(() => {
+    if (!playing || activeIndex < 0) return;
+    listRef.current?.querySelector('li.current')?.scrollIntoView({ block: 'nearest' });
+  }, [playing, activeIndex]);
 
   // 播放循环（真实 dt）
   useEffect(() => {
@@ -442,7 +450,8 @@ export function EditorView({ name }: { name: string }) {
           {points.length === 0 && <p class="muted side-empty">{S.editor.noNodes}</p>}
           <ol class="node-list" ref={listRef}>
             {points.map((n, i) => (
-              <li key={i} class={`${i === sel ? 'sel' : ''}${reorder?.from === i ? ' dragging' : ''}${dropMark(reorder, i, points.length)}`}>
+              <li key={i} class={`${i === sel ? 'sel' : ''}${i === activeIndex ? ' current' : ''}${reorder?.from === i ? ' dragging' : ''}${dropMark(reorder, i, points.length)}`}
+                aria-current={i === activeIndex ? 'step' : undefined}>
                 <span class="node-grip" role="button" tabIndex={-1} title={S.editor.dragHandle} aria-label={S.editor.dragHandle}
                   onPointerDown={((e: PointerEvent) => onGripDown(e, i)) as never}
                   onPointerMove={onGripMove as never}
