@@ -10,6 +10,7 @@ import { FieldSvg, PathCurve, RobotGlyph, px } from '../components/field';
 import { toast } from '../components/dialogs';
 import { openConnectionDialog } from '../components/connection';
 import { CommandPanel } from '../components/commandPanel';
+import { TuningPanel } from '../components/tuningPanel';
 import { IconPlay, IconStop, IconTerminal } from '../components/icons';
 import { describeApiError, isHttpError } from '../../net/transport';
 import { drawErrorChart, type ErrorSample } from '../chart';
@@ -214,6 +215,7 @@ export function RunView() {
             <button class={canStart ? 'primary' : ''} disabled={!canStart || busy} onClick={() => void act('start')}><IconPlay />{S.run.start}</button>
             <button class="stop" disabled={!canStop || busy} onClick={() => void act('stop')}><IconStop />{S.run.stop}</button>
           </div>
+          <TuningPanel />
           <dl class="telemetry">
             <div><dt>{S.run.telemetry.x}</dt><dd>{num(p?.x, 2)}</dd></div>
             <div><dt>{S.run.telemetry.y}</dt><dd>{num(p?.y, 2)}</dd></div>

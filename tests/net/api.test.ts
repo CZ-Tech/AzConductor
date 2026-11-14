@@ -36,6 +36,34 @@ async function connected(): Promise<{ robot: MockRobotServer; client: RobotApiCl
   return s;
 }
 
+describe('runtime tuning', () => {
+  it('exposes annotated fields, patches live values and resets without affecting defaults', async () => {
+    const { robot, client } = await connected();
+    const before = ok(await client.tuning());
+    const brake = before.fields.find((f) => f.name === 'Auto.SAFE_BRAKE_DECEL');
+    expect(brake?.value).toBe(30);
+    expect(brake?.defaultValue).toBe(30);
+    const patched = ok(await client.patchTuning({ 'Auto.SAFE_BRAKE_DECEL': 35.5 }, before.revision));
+    expect(patched.fields.find((f) => f.name === brake?.name)?.value).toBe(35.5);
+    expect(patched.fields.find((f) => f.name === brake?.name)?.defaultValue).toBe(30);
+    expect(robot.requests.at(-1)?.method).toBe('PATCH');
+    const restored = ok(await client.resetTuning(patched.revision));
+    expect(restored.fields.find((f) => f.name === brake?.name)?.value).toBe(30);
+  });
+
+  it('rejects stale and invalid batches without partially changing fields', async () => {
+    const { client } = await connected();
+    const initial = ok(await client.tuning());
+    expect(httpFail(await client.patchTuning({ 'Auto.K_CROSS_P': 0.2 }, initial.revision + 1)).status).toBe(409);
+    expect(httpFail(await client.patchTuning({
+      'Auto.K_CROSS_P': 0.2, 'Auto.ARC_SAMPLES': 3.5,
+    }, initial.revision)).status).toBe(400);
+    const again = ok(await client.tuning());
+    expect(again.revision).toBe(initial.revision);
+    expect(again.fields.find((f) => f.name === 'Auto.K_CROSS_P')?.value).toBe(0.1);
+  });
+});
+
 describe('session', () => {
   it('opens a session on the exact v2 endpoint and stores the token', async () => {
     const { robot, client } = await setup();

@@ -247,6 +247,25 @@ async function main() {
     const cmdOp = 'RemoteCommand Test';
     check((await page.locator('#run-op option', { hasText: cmdOp }).count()) === 1, '下拉框列出 TeleOp（RemoteCommand Test）');
     await page.locator('#run-op').selectOption(cmdOp);
+    // @AutoConfig fields are discovered from the robot at runtime, not hard-coded in the UI.
+    await page.locator('.tuning-toggle').click();
+    check(await until(async () => (await page.locator('.tuning-field').count()) >= 5, 'tuning fields'), '自动驾驶参数面板动态加载固件字段');
+    const brakeField = page.locator('.tuning-field', { hasText: 'Auto.SAFE_BRAKE_DECEL' });
+    const brakeInput = brakeField.locator('input');
+    check((await brakeInput.inputValue()) === '30', '面板显示 Java 源码默认减速度');
+    await brakeInput.fill('35.5');
+    await page.getByRole('button', { name: '应用修改' }).click();
+    const tuningValues = async () => {
+      const r = await fetch(`${robot.url}/api/v2/tuning`, { headers: { 'X-Az-Session': robot.sessionToken! } });
+      return (await r.json()) as { fields: { name: string; value: number }[] };
+    };
+    check(await until(async () => (await tuningValues()).fields.find((f) => f.name === 'Auto.SAFE_BRAKE_DECEL')?.value === 35.5,
+      'runtime tuning applied'), '浏览器 PATCH 直接修改机器人运行时值');
+    check((await brakeField.innerText()).includes('源码：30'), '热更新不改变源码默认值');
+    await page.getByRole('button', { name: '恢复源码默认值' }).click();
+    check(await until(async () => (await tuningValues()).fields.find((f) => f.name === 'Auto.SAFE_BRAKE_DECEL')?.value === 30,
+      'runtime tuning reset'), '面板恢复默认值后机器人参数复原');
+    await page.locator('.tuning-toggle').click();
     const panel = page.locator('#cmd-panel');
     const runBtn = (n: string) => page.getByRole('button', { name: `运行 ${n}`, exact: true });
     const field = (n: string, i: number) => page.locator(`[id="cmd-${n}-${i}"]`);

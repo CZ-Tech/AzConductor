@@ -69,6 +69,7 @@ export interface ConnectionData {
   opMode: OpModeSnapshot | null;
   routeRevision: number;
   commandRevision: number;
+  tuningRevision: number;
   /** `t` of the last heartbeat event. */
   lastHeartbeat: number | null;
   /** Local clock time (ms) at which the last event of any kind arrived. */
@@ -84,6 +85,7 @@ export type ConnectionEvent =
   | { type: 'opmode'; data: OpModeSnapshot }
   | { type: 'routes'; data: { revision: number } }
   | { type: 'commands'; data: { revision: number } }
+  | { type: 'tuning'; data: { revision: number } }
   | { type: 'heartbeat'; data: { t: number } };
 
 export type ConnectionListener = (event: ConnectionEvent) => void;
@@ -106,7 +108,7 @@ export interface RobotConnectionOptions {
 
 const EMPTY_DATA: ConnectionData = {
   hello: null, pose: null, runtime: null, execution: null, opMode: null,
-  routeRevision: 0, commandRevision: 0, lastHeartbeat: null, lastEventAt: null,
+  routeRevision: 0, commandRevision: 0, tuningRevision: 0, lastHeartbeat: null, lastEventAt: null,
 };
 
 export const DEFAULT_BACKOFF_MIN_MS = 1000;
@@ -353,6 +355,12 @@ export class RobotConnection {
           const data = decodeRevision(raw);
           this.dataValue = { ...this.dataValue, commandRevision: data.revision };
           this.emit({ type: 'commands', data });
+          break;
+        }
+        case 'tuning': {
+          const data = decodeRevision(raw);
+          this.dataValue = { ...this.dataValue, tuningRevision: data.revision };
+          this.emit({ type: 'tuning', data });
           break;
         }
         case 'heartbeat': {

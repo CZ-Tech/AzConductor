@@ -67,7 +67,7 @@ describe('HTTP surface', () => {
     expect(r.text).toBe('');
     expect(r.headers.get('access-control-allow-origin')).toBe('*');
     expect(r.headers.get('access-control-allow-private-network')).toBe('true');
-    expect(r.headers.get('access-control-allow-methods')).toBe('GET, PUT, POST, DELETE, OPTIONS');
+    expect(r.headers.get('access-control-allow-methods')).toBe('GET, PUT, PATCH, POST, DELETE, OPTIONS');
     expect(r.headers.get('access-control-allow-headers')).toBe('Content-Type, X-Az-Session, If-Match, Last-Event-ID');
     expect(r.headers.get('access-control-expose-headers')).toBe('ETag, X-Route-Revision');
     expect(r.headers.get('access-control-max-age')).toBe('600');

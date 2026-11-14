@@ -1,3 +1,14 @@
+.tuning-panel { border: 1px solid var(--border, #7775); border-radius: 10px; margin: 12px 0; }
+.tuning-toggle { width: 100%; text-align: left; padding: 12px; font-weight: 600; }
+.tuning-content { padding: 0 12px 12px; max-height: min(60vh, 600px); overflow-y: auto; }
+.tuning-content p { font-size: 12px; }
+.tuning-group { border: 0; border-top: 1px solid var(--border, #7775); padding: 10px 0; margin: 0; min-width: 0; }
+.tuning-group legend { font-weight: 600; font-size: 13px; padding-top: 8px; }
+.tuning-field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(75px, 110px); gap: 4px 8px; margin: 8px 0; align-items: center; font-size: 12px; }
+.tuning-field-name { overflow-wrap: anywhere; font-family: monospace; }
+.tuning-field input:not([type="checkbox"]), .tuning-field select { width: 100%; min-width: 0; box-sizing: border-box; }
+.tuning-field small { grid-column: 1 / -1; }
+.tuning-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 10px; }
 /* ============ 设计令牌 ============
    配色与形状沿用 DeepSeek 官网（--dsw-* / --ds-*）：中性蓝灰色阶、品牌蓝（浅 #3964fe / 深 #5686fe）、
    细边框、三级阴影、卡片 16px、弹窗 24px。

@@ -16,6 +16,7 @@ import {
   decodeRouteWrite,
   decodeRuntimeSnapshot,
   decodeSessionOpen,
+  decodeTuning,
   type CommandCatalog,
   type CommandRunResponse,
   type ExecutionSnapshot,
@@ -28,6 +29,8 @@ import {
   type RouteWriteResponse,
   type RuntimeSnapshot,
   type SessionOpenResponse,
+  type TuningSnapshot,
+  type TuningValue,
 } from './models';
 import {
   FetchTransport,
@@ -217,6 +220,24 @@ export class RobotApiClient {
 
   async commandCatalog(): Promise<Result<CommandCatalog>> {
     return this.decode(await this.send('GET', '/api/v2/commands'), decodeCommandCatalog);
+  }
+
+  async tuning(): Promise<Result<TuningSnapshot>> {
+    return this.decode(await this.send('GET', '/api/v2/tuning'), decodeTuning);
+  }
+
+  async patchTuning(values: Record<string, TuningValue>, expectedRevision: number): Promise<Result<TuningSnapshot>> {
+    assertRevision(expectedRevision);
+    return this.decode(await this.send('PATCH', '/api/v2/tuning', {
+      body: JSON.stringify({ expectedRevision, values }),
+    }), decodeTuning);
+  }
+
+  async resetTuning(expectedRevision: number): Promise<Result<TuningSnapshot>> {
+    assertRevision(expectedRevision);
+    return this.decode(await this.send('POST', '/api/v2/tuning/reset', {
+      body: JSON.stringify({ expectedRevision }),
+    }), decodeTuning);
   }
 
   /**

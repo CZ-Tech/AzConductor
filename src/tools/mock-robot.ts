@@ -22,6 +22,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { makeNode, type ControlNode } from '../core/node';
 import { RouteCore } from '../core/route';
 import { decodeRobotRoute, encodeRobotRoute } from '../core/wire';
+import type { TuningField, TuningValue } from '../net/models';
 
 // ---------------------------------------------------------------------------------------------
 // Public types
@@ -109,7 +110,7 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** HttpExchange.BROWSER_ACCESS_HEADERS (+ Vary). */
 const BROWSER_ACCESS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, PUT, PATCH, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-Az-Session, If-Match, Last-Event-ID',
   'Access-Control-Expose-Headers': 'ETag, X-Route-Revision',
   'Access-Control-Allow-Private-Network': 'true',
@@ -256,6 +257,7 @@ interface StreamClient {
   lastExecutionRevision: number;
   lastRouteRevision: number;
   lastCommandRevision: number;
+  lastTuningRevision: number;
   lastOpModeRevision: number;
   runtimeSent: boolean;
   lastOpModeActive: boolean;
@@ -304,6 +306,14 @@ export class MockRobotServer {
   private execSnap: MockExecutionSnapshot;
   private commandList: MockCommand[] = [];
   private commandRevision = 1;
+  private tuningRevision = 1;
+  private tuningFields: TuningField[] = [
+    { name: 'Auto.SAFE_BRAKE_DECEL', group: '自动驾驶', type: 'double', value: 30, defaultValue: 30 },
+    { name: 'Auto.BRAKE_REVERSE_POWER', group: '自动驾驶', type: 'double', value: 0.75, defaultValue: 0.75 },
+    { name: 'Auto.K_CROSS_P', group: '自动驾驶', type: 'double', value: 0.1, defaultValue: 0.1 },
+    { name: 'Auto.ARC_SAMPLES', group: '自动驾驶', type: 'int', value: 240, defaultValue: 240 },
+    { name: 'Auto.LOG_VERBOSE', group: '自动驾驶', type: 'boolean', value: false, defaultValue: false },
+  ];
   private runtime: MockRuntimeSnapshot = { seq: 0, tNanos: 0, opModeActive: false, opModeName: null, x: 0, y: 0, heading: 0 };
   private lastRequestId = 0;
   private run: ActiveRun | null = null;
@@ -741,6 +751,15 @@ export class MockRobotServer {
       if (method !== 'POST') return methodNotAllowed();
       return this.handleCommandRun(ctx);
     }
+    if (path === `${PREFIX}/tuning`) {
+      if (method === 'GET') return json(200, this.tuningJson());
+      if (method !== 'PATCH') return methodNotAllowed();
+      return this.handleTuning(ctx, false);
+    }
+    if (path === `${PREFIX}/tuning/reset`) {
+      if (method !== 'POST') return methodNotAllowed();
+      return this.handleTuning(ctx, true);
+    }
     if (method === 'GET' && path === `${PREFIX}/runtime`) {
       return json(200, `{"runtime":${runtimeJson(this.runtime)},"pose":${poseJson(this.runtime)}}`);
     }
@@ -1017,7 +1036,7 @@ export class MockRobotServer {
     const client: StreamClient = {
       res, token, timer: null,
       lastPoseSeq: -1, lastExecutionRevision: -1, lastRouteRevision: -1,
-      lastCommandRevision: -1, lastOpModeRevision: -1,
+      lastCommandRevision: -1, lastTuningRevision: -1, lastOpModeRevision: -1,
       runtimeSent: false, lastOpModeActive: false, lastOpModeName: null,
       lastHeartbeat: Number.NEGATIVE_INFINITY, closed: false,
     };
@@ -1070,6 +1089,10 @@ export class MockRobotServer {
       writeEvent(c, 'commands', this.commandRevision, `{"revision":${this.commandRevision}}`);
       c.lastCommandRevision = this.commandRevision;
     }
+    if (this.tuningRevision !== c.lastTuningRevision) {
+      writeEvent(c, 'tuning', this.tuningRevision, `{"revision":${this.tuningRevision}}`);
+      c.lastTuningRevision = this.tuningRevision;
+    }
     const now = nowMs();
     if (now - c.lastHeartbeat >= this.opts.heartbeatMs) {
       const t = Date.now();
@@ -1090,6 +1113,42 @@ export class MockRobotServer {
     const items = this.commandList.map((c) =>
       `{"name":${JSON.stringify(c.name)},"paramNames":${JSON.stringify(c.paramNames)},"paramTypes":${JSON.stringify(c.paramTypes)},"paramDefaults":${JSON.stringify(c.paramDefaults)}}`).join(',');
     return `{"revision":${this.commandRevision},"commands":[${items}]}`;
+  }
+
+  private tuningJson(): string {
+    return JSON.stringify({ revision: this.tuningRevision, fields: this.tuningFields });
+  }
+
+  private handleTuning(ctx: Ctx, reset: boolean): void {
+    const send = (status: number, value: unknown) =>
+      this.sendJson(ctx.res, status, JSON.stringify(value), ctx.record);
+    let body: Record<string, unknown>;
+    try { body = parseObject(ctx.body); } catch { return send(400, { error: 'invalid_tuning_request' }); }
+    if (!Number.isSafeInteger(body['expectedRevision'])) return send(400, { error: 'invalid_tuning_request' });
+    if (body['expectedRevision'] !== this.tuningRevision) {
+      return send(409, { error: 'state_changed', actual: this.tuningRevision });
+    }
+    if (reset) {
+      this.tuningFields = this.tuningFields.map((f) => ({ ...f, value: f.defaultValue }));
+    } else {
+      const values = body['values'];
+      if (typeof values !== 'object' || values === null || Array.isArray(values)
+        || Object.keys(values).length === 0) return send(400, { error: 'invalid_tuning_value' });
+      const updates = values as Record<string, unknown>;
+      for (const [name, value] of Object.entries(updates)) {
+        const f = this.tuningFields.find((x) => x.name === name);
+        if (!f) return send(400, { error: 'invalid_tuning_value', message: 'Unknown tuning field: ' + name });
+        const valid = f.type === 'boolean' ? typeof value === 'boolean'
+          : f.type === 'String' || f.type === 'enum' ? typeof value === 'string'
+            : typeof value === 'number' && Number.isFinite(value)
+              && (f.type !== 'int' && f.type !== 'long' || Number.isSafeInteger(value));
+        if (!valid) return send(400, { error: 'invalid_tuning_value', message: 'Invalid value/type for ' + name });
+      }
+      this.tuningFields = this.tuningFields.map((f) =>
+        f.name in updates ? { ...f, value: updates[f.name] as TuningValue } : f);
+    }
+    this.tuningRevision++;
+    return send(200, { revision: this.tuningRevision, fields: this.tuningFields });
   }
 }
 

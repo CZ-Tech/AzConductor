@@ -32,6 +32,16 @@ export interface OpModeList { opModes: OpModeDescriptor[] }
 export interface OpModeSnapshot { revision: number; controllerAvailable: boolean; phase: OpModePhase; activeName: string | null }
 export interface OpModeActionResponse { accepted: boolean; action: string; name: string }
 export interface RuntimeSnapshot { runtime: RuntimeEvent; pose: PoseEvent }
+export type TuningValue = number | boolean | string;
+export interface TuningField {
+  name: string;
+  group: string;
+  type: 'double' | 'float' | 'int' | 'long' | 'boolean' | 'String' | 'enum';
+  value: TuningValue;
+  defaultValue: TuningValue;
+  options?: string[];
+}
+export interface TuningSnapshot { revision: number; fields: TuningField[] }
 
 /** Error body of any non-2xx response (all fields optional). */
 export interface ApiErrorBody {
@@ -110,6 +120,31 @@ const EXEC_STATES: readonly string[] = ['NOT_READY', 'IDLE', 'RUNNING'];
 export function decodeHealth(raw: unknown): HealthInfo {
   const o = obj(raw, 'health');
   return { status: str(o, 'status', 'ok'), protocol: num(o, 'protocol', 2), sessionOwned: bool(o, 'sessionOwned', false) };
+}
+export function decodeTuning(raw: unknown): TuningSnapshot {
+  const o = obj(raw, 'tuning');
+  const types = ['double', 'float', 'int', 'long', 'boolean', 'String', 'enum'];
+  return {
+    revision: num(o, 'revision'),
+    fields: arr(o, 'fields').map((v) => {
+      const f = obj(v, 'tuning field');
+      const type = str(f, 'type');
+      if (!types.includes(type)) throw new DecodeError('unsupported tuning type: ' + type);
+      const value = f['value'], defaultValue = f['defaultValue'];
+      const valid = (x: unknown): x is TuningValue => {
+        if (type === 'boolean') return typeof x === 'boolean';
+        if (type === 'enum' || type === 'String') return typeof x === 'string';
+        return typeof x === 'number' && Number.isFinite(x);
+      };
+      if (!valid(value) || !valid(defaultValue)) throw new DecodeError('invalid tuning value');
+      const field: TuningField = {
+        name: str(f, 'name'), group: str(f, 'group'),
+        type: type as TuningField['type'], value, defaultValue,
+      };
+      if (type === 'enum') field.options = strArr(f, 'options');
+      return field;
+    }),
+  };
 }
 export function decodeSessionOpen(raw: unknown): SessionOpenResponse {
   const o = obj(raw, 'session');
