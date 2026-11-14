@@ -196,7 +196,9 @@ export function EditorView({ name }: { name: string }) {
     const r = await showNodeEditor(n, i, true);
     if (!r) return;
     if (r.kind === 'delete') removeAt(i);
-    else patchNode(i, r.node);
+    // The form returns a complete node. Merging it as a partial patch revives
+    // optional properties that the user deliberately cleared in the dialog.
+    else setPoints(live.current.points.map((p, k) => (k === i ? r.node : p)));
   };
 
   // ---------- 指针交互 ----------

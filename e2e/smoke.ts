@@ -156,6 +156,40 @@ async function main() {
     const total = await page.locator('.side-head .muted').innerText();
     check(/总时长/.test(total), `编辑节点后总时长刷新：${total}`);
 
+    // 可选字段必须能从已有值清空：先保存非空值，再清空、保存并重新打开。
+    const node2 = page.locator('[data-kind=node][data-i="2"]');
+    const optionalValues = { maxSpeed: '30', endSpeed: '5', brakeZoneIn: '12', brakeForwardPower: '0.5' };
+    const openNode2 = async () => {
+      await node2.click({ button: 'right' });
+      await page.locator('dialog').waitFor();
+      const toggle = page.locator('dialog .nf-toggle');
+      if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+    };
+    await openNode2();
+    for (const [key, value] of Object.entries(optionalValues)) await page.locator(`#nf-${key}`).fill(value);
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await openNode2();
+    for (const [key, value] of Object.entries(optionalValues)) {
+      check(await page.locator(`#nf-${key}`).inputValue() === value, `${key} 非空值保存后重新打开仍保留`);
+    }
+    await page.locator('#nf-brakeZoneIn').fill('');
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await openNode2();
+    check(await page.locator('#nf-endSpeed').inputValue() === '5', '保留目标速度');
+    check(await page.locator('#nf-brakeZoneIn').inputValue() === '', '设置目标速度时制动区仍可留空');
+    for (const key of Object.keys(optionalValues)) await page.locator(`#nf-${key}`).fill('');
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await openNode2();
+    for (const key of Object.keys(optionalValues)) {
+      check(await page.locator(`#nf-${key}`).inputValue() === '', `${key} 清空保存后重新打开仍为空`);
+    }
+    check(await page.locator('#nf-delayAfterArrive').inputValue() === '1.5', '清空可选字段不影响其他节点数据');
+    await page.getByRole('button', { name: '取消' }).click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+
     // 回放
     await page.getByRole('button', { name: '播放' }).click();
     await until(async () => !(await page.locator('.timeline .time').innerText()).startsWith('0.00'), 'playback advances', 3000);
