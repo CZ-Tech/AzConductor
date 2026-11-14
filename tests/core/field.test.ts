@@ -19,6 +19,9 @@ import {
   mirrorLogical,
   mirrorNodes,
   mirrorScreen,
+  pointSymmetryLogical,
+  pointSymmetryNodes,
+  pointSymmetryScreen,
   nodeAtLogical,
   robotScreenRotation,
   screenDeltaToLogicalDelta,
@@ -344,5 +347,69 @@ describe('镜像', () => {
       expect(mirrorNodes(m)).toStrictEqual(nodes);
     }
     expect(mirrorNodes([])).toEqual([]);
+  });
+});
+
+describe('中心对称（按场地原点）', () => {
+  it('pointSymmetryLogical / Screen：两个坐标都取反', () => {
+    expect(pointSymmetryLogical(3, 4)).toEqual({ x: -3, y: -4 });
+    expect(pointSymmetryScreen(3, 4)).toEqual({ sx: -3, sy: -4 });
+  });
+
+  it('逻辑中心对称与屏幕中心对称一致', () => {
+    const r = rng(21);
+    for (let i = 0; i < 50; i++) {
+      const x = between(r, -72, 72);
+      const y = between(r, -72, 72);
+      const m = pointSymmetryLogical(x, y);
+      const s = logicalToScreen(x, y);
+      expect(logicalToScreen(m.x, m.y)).toEqual(pointSymmetryScreen(s.sx, s.sy));
+    }
+  });
+
+  it('pointSymmetryNodes：x/y/dx/dy 取反，heading 加 180° 并规格化，dHeading 与其余字段不变', () => {
+    const base = {
+      x: 1, y: 2, dx: 3, dy: 4, dHeading: 5, duration: 2,
+      marker: 'm', command: 'c', commandParams: ['p'], delayAfterArrive: 1, maxPower: 0.5, maxSpeed: 10,
+    };
+    const [a] = pointSymmetryNodes([makeNode({ ...base, heading: 30 })]);
+    expect(a).toEqual({ ...makeNode({ ...base, heading: 30 }), x: -1, y: -2, dx: -3, dy: -4, heading: -150 });
+    expect(pointSymmetryNodes([makeNode({ ...base, heading: -30 })])[0]?.heading).toBe(150);
+    expect(pointSymmetryNodes([makeNode({ ...base, heading: 0 })])[0]?.heading).toBe(180);
+    expect(pointSymmetryNodes([makeNode({ ...base, heading: 180 })])[0]?.heading).toBe(0);
+    expect(pointSymmetryNodes([makeNode({ ...base, heading: 90 })])[0]?.heading).toBe(-90);
+  });
+
+  it('等于先沿 x 轴镜像再沿 y 轴镜像（位置与速度）', () => {
+    const r = rng(22);
+    for (let i = 0; i < 30; i++) {
+      for (const n of randomRoute(r, 3)) {
+        const [p] = pointSymmetryNodes([n]);
+        expect(p?.x).toBeCloseTo(-n.x, 9);
+        expect(p?.y).toBeCloseTo(-n.y, 9);
+        expect(p?.dx).toBeCloseTo(-n.dx, 9);
+        expect(p?.dy).toBeCloseTo(-n.dy, 9);
+      }
+    }
+  });
+
+  it('属性：是对合（两次回到原路径，heading 按 360° 等价）且保持长度', () => {
+    const r = rng(23);
+    for (let i = 0; i < 50; i++) {
+      const nodes = randomRoute(r, 1 + Math.floor(r() * 6));
+      const m = pointSymmetryNodes(nodes);
+      expect(m).toHaveLength(nodes.length);
+      const back = pointSymmetryNodes(m);
+      back.forEach((b, k) => {
+        const o = nodes[k]!;
+        expect(b.x).toBeCloseTo(o.x, 9);
+        expect(b.y).toBeCloseTo(o.y, 9);
+        expect(b.dx).toBeCloseTo(o.dx, 9);
+        expect(b.dy).toBeCloseTo(o.dy, 9);
+        expect(wrapHeading(b.heading)).toBeCloseTo(wrapHeading(o.heading), 9);
+        expect(b.dHeading).toBe(o.dHeading);
+      });
+    }
+    expect(pointSymmetryNodes([])).toEqual([]);
   });
 });

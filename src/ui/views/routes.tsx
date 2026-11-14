@@ -1,6 +1,6 @@
 import { docStore } from '../../state/docStore';
 import { RouteCore } from '../../core/route';
-import { mirrorNodes } from '../../core/field';
+import { mirrorNodes, pointSymmetryNodes } from '../../core/field';
 import { exportArchiveJson, exportRouteJson } from '../../core/archive';
 import { askConfirm, askText, toast } from '../components/dialogs';
 import { importIntoStore, showExportDialog } from '../components/ioDialogs';
@@ -8,7 +8,7 @@ import { RoutePreview } from '../components/field';
 import { SyncPanel } from '../components/syncPanel';
 import { Menu, MenuItem, MenuSeparator } from '../components/menu';
 import {
-  IconArrowDown, IconArrowUp, IconCopy, IconExport, IconImport, IconMirror, IconMore, IconPencil, IconPlus, IconTrash,
+  IconArrowDown, IconArrowUp, IconCopy, IconExport, IconImport, IconMirror, IconMore, IconPencil, IconPlus, IconRotate180, IconTrash,
 } from '../components/icons';
 import { navigate } from '../router';
 import { S } from '../strings';
@@ -38,6 +38,12 @@ export function RoutesView() {
     if (!ok) return;
     const n = await askText({ title: S.routes.mirrorTitle, label: S.routes.nameLabel, initial: `${r.name}${S.routes.mirrorSuffix}` });
     if (n) store.createRoute(n, mirrorNodes(r.points));
+  };
+  const pointSymmetry = async (r: RouteData) => {
+    const ok = await askConfirm({ title: S.routes.pointSymmetryTitle, message: S.routes.pointSymmetryMessage(r.name) });
+    if (!ok) return;
+    const n = await askText({ title: S.routes.pointSymmetryTitle, label: S.routes.nameLabel, initial: `${r.name}${S.routes.pointSymmetrySuffix}` });
+    if (n) store.createRoute(n, pointSymmetryNodes(r.points));
   };
 
   return (
@@ -77,6 +83,7 @@ export function RoutesView() {
                     <MenuItem icon={<IconPencil />} onSelect={() => void rename(r.name)}>{S.common.rename}</MenuItem>
                     <MenuItem icon={<IconCopy />} onSelect={() => store.duplicateRoute(r.name)}>{S.common.duplicate}</MenuItem>
                     <MenuItem icon={<IconMirror />} onSelect={() => void mirror(r)}>{S.routes.mirror}</MenuItem>
+                    <MenuItem icon={<IconRotate180 />} onSelect={() => void pointSymmetry(r)}>{S.routes.pointSymmetry}</MenuItem>
                     <MenuItem icon={<IconExport />} onSelect={() => void showExportDialog(S.io.exportTitle, exportRouteJson(r.points), `${r.name}.json`)}>{S.routes.export}</MenuItem>
                     <MenuSeparator />
                     <MenuItem icon={<IconArrowUp />} disabled={i === 0} onSelect={() => store.moveRoute(i, i - 1)}>{S.routes.moveUp}</MenuItem>

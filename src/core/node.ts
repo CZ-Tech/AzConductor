@@ -71,6 +71,17 @@ export function mirrorY(n: ControlNode): ControlNode {
   return { ...n, y: -n.y, dy: -n.dy, heading: -n.heading, dHeading: -n.dHeading };
 }
 
+/**
+ * 绕场地坐标原点中心对称（旋转 180°）：x、y、dx、dy 取反，heading 加 180° 并规格化到 (-180, 180]；
+ * dHeading 不变（旋转 180° 不改变转向）。
+ */
+export function rotate180(n: ControlNode): ControlNode {
+  let heading = n.heading + 180;
+  while (heading <= -180) heading += 360;
+  while (heading > 180) heading -= 360;
+  return { ...n, x: -n.x, y: -n.y, dx: -n.dx, dy: -n.dy, heading };
+}
+
 /** 新路径点继承几何与巡航功率，不继承动作/延迟/末端制动 */
 export function nextWaypoint(n: ControlNode, x: number, y: number): ControlNode {
   const r: ControlNode = {

@@ -103,6 +103,25 @@ export class RouteCore {
     return traj.pointAtTime(traj.duration);
   }
 
+  /**
+   * 绝对时间 t 时已到达的最后一个控制点索引（0 起），用于播放时同步高亮列表。
+   * 运动与等待期间停留在刚到达（或刚出发）的点上，直到 segmentEndTimes[i] 时刻到达下一点。
+   * 空路径返回 -1。
+   */
+  nodeIndexAt(time: number): number {
+    const count = this.nodes.length;
+    if (count === 0) return -1;
+    const t = Math.min(Math.max(time, 0), this.totalTime);
+    // totalTime 与 segmentEndTimes 的浮点求和顺序不同，末尾可能差一个 ulp；收尾时直接落到最后一点
+    if (t >= this.totalTime) return count - 1;
+    let index = 0;
+    for (const end of this.segmentEndTimes) {
+      if (end > t) break;
+      index++;
+    }
+    return index;
+  }
+
   /** 每段 n 等分采样的逻辑坐标折线（含首点），用于误差计算；单点路径返回该点；空路径返回 []。 */
   polyline(n: number): Vec2[] {
     return polyline(this.nodes, n);

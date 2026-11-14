@@ -6,7 +6,7 @@
  * fieldXAngleDeg = atan2(1,0) = 90°，机器人屏幕旋转角 = fieldXAngleDeg − heading = 90 − heading（度，顺时针为正的屏幕角）。
  * SVG viewBox = "-72 -72 144 144"，逻辑与屏幕原点均为中心，单位 1 inch = 1 SVG 单位。
  */
-import { makeNode, mirrorY, nextWaypoint, type ControlNode } from './node';
+import { makeNode, mirrorY, nextWaypoint, rotate180, type ControlNode } from './node';
 import type { Vec2 } from './route';
 
 export const FIELD_SIZE = 144;
@@ -168,4 +168,19 @@ export function mirrorScreen(sx: number, sy: number): ScreenPoint {
 /** 整条路径镜像（蓝→红）。 */
 export function mirrorNodes(nodes: readonly ControlNode[]): ControlNode[] {
   return nodes.map(mirrorY);
+}
+
+/** 逻辑点绕场地原点中心对称（x、y 都取反）。 */
+export function pointSymmetryLogical(x: number, y: number): Vec2 {
+  return { x: -x, y: -y };
+}
+
+/** 屏幕点对应的中心对称（sx、sy 都取反；屏幕与逻辑原点同为场地中心）。 */
+export function pointSymmetryScreen(sx: number, sy: number): ScreenPoint {
+  return { sx: -sx, sy: -sy };
+}
+
+/** 整条路径按场地坐标原点中心对称（旋转 180°）。 */
+export function pointSymmetryNodes(nodes: readonly ControlNode[]): ControlNode[] {
+  return nodes.map(rotate180);
 }
