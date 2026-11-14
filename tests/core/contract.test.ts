@@ -66,19 +66,27 @@ describe('SplineRouteContractTest（Kotlin 移植）', () => {
     expect(viaImport.ok && viaImport.kind).toBe('archive');
   });
 
+  it('旧存档与自动、显式零和手动制动距离均无损往返', () => {
+    const old = '[{"robotName":"default","routes":[{"name":"old","points":[{"x":0,"y":0,"brakeZoneIn":0},{"x":1,"y":0,"brakeZoneIn":7},{"x":2,"y":0}]}]}]';
+    const doc = decodeRoutesDoc(JSON.parse(old));
+    const points = doc[0]!.routes[0]!.points;
+    expect(points.map((p) => p.brakeZoneIn)).toEqual([0, 7, undefined]);
+    expect('brakeZoneIn' in points[2]!).toBe(false);
+    expect(decodeRoutesDoc(JSON.parse(serializeRoutesDoc(doc)))).toStrictEqual(doc);
+    expect(decodeRobotRoute(JSON.parse(JSON.stringify(encodeRobotRoute(points))))).toStrictEqual(points);
+  });
+
   it('validatorOnlyRejectsInvalidFields', () => {
     const points = [
       point(),
       { ...point(5), endSpeed: 0, dHeading: 20, command: 'shoot', delayAfterArrive: 1 },
     ];
     const issues = validateNodes(points);
-    expect(issues.some((i) => i.field === 'brakeZoneIn')).toBe(true);
+    expect(issues.some((i) => i.field === 'brakeZoneIn')).toBe(false);
     expect(issues.some((i) => i.field === 'dHeading')).toBe(false);
     expect(issues.some((i) => i.field === 'command')).toBe(false);
     expect(issues.some((i) => i.field === 'endSpeed')).toBe(false);
-    expect(issues).toEqual([
-      { index: 1, field: 'brakeZoneIn', message: '设置 endSpeed 后必须提供大于 0 的制动区距离' },
-    ]);
+    expect(issues).toEqual([]);
   });
 
   it('waypointInsertionDoesNotCloneCommandsAndStoppingActions', () => {
@@ -99,7 +107,8 @@ describe('SplineRouteContractTest（Kotlin 移植）', () => {
     expect(next.commandParams).toEqual([]);
     expect(next.endSpeed).toBeUndefined();
     expect('endSpeed' in next).toBe(false);
-    expect(next.brakeZoneIn).toBe(0);
+    expect(next.brakeZoneIn).toBeUndefined();
+    expect('brakeZoneIn' in next).toBe(false);
     expect(next.maxPower).toBe(0.5);
     expect(next.maxSpeed).toBe(24);
     expect(next.x).toBe(12);
@@ -216,9 +225,16 @@ describe('validateNodes 逐条文案（与 Kotlin 逐字一致）', () => {
     expect(one({ brakeForwardPower: 1 })).toEqual([]);
   });
 
-  it('设置 endSpeed 后 brakeZoneIn 必须 > 0', () => {
+  it('设置 endSpeed 时允许自动或正数，显式 0 仅在无 endSpeed 时合法', () => {
+    for (const brakeZoneIn of [undefined, 5]) {
+      expect(one({ endSpeed: 0, brakeZoneIn })).toEqual([]);
+    }
+    expect(one({ brakeZoneIn: 0 })).toEqual([]);
     expect(one({ endSpeed: 0, brakeZoneIn: 0 })).toEqual([
-      { index: 0, field: 'brakeZoneIn', message: '设置 endSpeed 后必须提供大于 0 的制动区距离' },
+      { index: 0, field: 'brakeZoneIn', message: '设置 endSpeed 后制动区距离必须大于 0，或留空自动计算' },
+    ]);
+    expect(one({ brakeZoneIn: Infinity })).toEqual([
+      { index: 0, field: 'brakeZoneIn', message: '制动区距离不得为负数' },
     ]);
   });
 
@@ -299,9 +315,18 @@ describe('validateRobotIssues / validateRobotJson', () => {
     expect(validateRobotIssues([{ wait: 1 }])).toEqual([]);
   });
 
-  it('不含 delayAfterArrive 的帧默认值合法；endSpeed 无 brakeZoneIn 报错', () => {
-    expect(validateRobotIssues([{ x: 0, y: 0, endSpeed: 0 }])).toEqual([
-      { index: 0, field: 'brakeZoneIn', message: '设置 endSpeed 后必须提供大于 0 的制动区距离' },
+  it('endSpeed 支持自动或正数制动区，但不允许显式 0', () => {
+    expect(validateRobotIssues([{ x: 0, y: 0, endSpeed: 0 }])).toEqual([]);
+    expect(validateRobotIssues([{ x: 0, y: 0, brakeZoneIn: 0 }])).toEqual([]);
+    expect(validateRobotJson('[{"x":0,"y":0,"endSpeed":0,"brakeZoneIn":0}]')).toEqual([
+      { index: 0, field: 'brakeZoneIn', message: '设置 endSpeed 后制动区距离必须大于 0，或留空自动计算' },
+    ]);
+    expect(validateRobotIssues([{ x: 0, y: 0, endSpeed: 0, brakeZoneIn: 4 }])).toEqual([]);
+    expect(validateRobotIssues([{ x: 0, y: 0, brakeZoneIn: -1 }])).toEqual([
+      { index: 0, field: 'brakeZoneIn', message: '制动区距离不得为负数' },
+    ]);
+    expect(validateRobotIssues([{ x: 0, y: 0, brakeZoneIn: null }])).toEqual([
+      { index: 0, field: 'brakeZoneIn', message: 'brakeZoneIn 必须为有限数值' },
     ]);
   });
 

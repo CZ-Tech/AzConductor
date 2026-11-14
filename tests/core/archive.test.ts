@@ -255,7 +255,7 @@ describe('encodeRoutesDoc / parseRoutesDoc（localStorage robot_routes 格式）
     {
       robotName: 'default',
       routes: [
-        { name: 'A', points: [makeNode({ x: 0, y: 0, delayAfterArrive: 1 }), makeNode({ x: 5, y: 5, maxSpeed: 12 })] },
+        { name: 'A', points: [makeNode({ x: 0, y: 0, delayAfterArrive: 1 }), makeNode({ x: 5, y: 5, maxSpeed: 12, brakeZoneIn: 0 })] },
         { name: '空', points: [] },
       ],
     },
@@ -267,7 +267,7 @@ describe('encodeRoutesDoc / parseRoutesDoc（localStorage robot_routes 格式）
     expect(Object.keys(enc[0]!.routes[0]!)).toEqual(['name', 'points']);
     expect(Object.keys(enc[0]!.routes[0]!.points[0]!)).toEqual([
       'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'command', 'commandParams',
-      'delayAfterArrive', 'maxPower', 'brakeZoneIn',
+      'delayAfterArrive', 'maxPower',
     ]);
     expect(enc[0]!.routes[0]!.points[0]!['delayAfterArrive']).toBe(1);
     expect(Object.keys(enc[0]!.routes[0]!.points[1]!)).toEqual([

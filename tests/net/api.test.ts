@@ -255,13 +255,24 @@ describe('routes', () => {
   it('an invalid spline is rejected locally before any HTTP PUT', async () => {
     const { robot, client } = await connected();
     const before = robot.requests.length;
-    const err = fail(await client.putRoute('Auto', '[{"x":1,"y":2,"endSpeed":0}]', 0));
+    const err = fail(await client.putRoute('Auto', '[{"x":1,"y":2,"endSpeed":0,"brakeZoneIn":0}]', 0));
     expect(err.kind).toBe('contract');
     expect(err.message).toContain('制动区');
     expect(robot.requests).toHaveLength(before);
     expect(fail(await client.putRoute('Auto', '[]', 0)).kind).toBe('contract');
     expect(fail(await client.putRoute('Auto', 'not json', 0)).kind).toBe('contract');
     expect(robot.requests).toHaveLength(before);
+  });
+
+  it('uploads automatic braking without a brakeZoneIn field', async () => {
+    const { robot, client } = await connected();
+    const nodes = [makeNode({ x: 0, y: 0 }), makeNode({ x: 20, y: 0, endSpeed: 0 })];
+    ok(await client.putRouteNodes('AutoBrake', nodes, 0));
+    const frames = JSON.parse(robot.getRoute('AutoBrake')?.json ?? '[]') as Array<Record<string, unknown>>;
+    expect(frames[1]).toMatchObject({ x: 20, endSpeed: 0 });
+    expect(frames[1]).not.toHaveProperty('brakeZoneIn');
+    const downloaded = JSON.parse(ok(await client.getRoute('AutoBrake')).json) as Array<Record<string, unknown>>;
+    expect(downloaded[1]).not.toHaveProperty('brakeZoneIn');
   });
 
   it('revisions must be non-negative integers', async () => {

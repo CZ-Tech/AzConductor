@@ -28,7 +28,7 @@ export function randomNode(r: () => number): ControlNode {
     commandParams: r() < 0.3 ? ['a', '"q"', '\u00e9'] : [],
     delayAfterArrive: r() < 0.4 ? between(r, 0.01, 4) : 0,
     maxPower: between(r, 0, 1),
-    brakeZoneIn: r() < 0.3 ? between(r, 1, 20) : 0,
+    brakeZoneIn: r() < 0.3 ? between(r, 1, 20) : r() < 0.5 ? 0 : undefined,
   });
   if (r() < 0.4) n.maxSpeed = between(r, 1, 60);
   if (r() < 0.3) n.endSpeed = r() < 0.3 ? 0 : between(r, 0, 30);

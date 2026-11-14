@@ -17,8 +17,8 @@ export interface ControlNode {
   maxSpeed?: number | undefined;
   /** 到达速度 (in/s)，0 = 完全停止 */
   endSpeed?: number | undefined;
-  /** 到点前制动距离 (in)；设置 endSpeed 时必须 > 0 */
-  brakeZoneIn: number;
+  /** 到点前制动距离 (in)；缺省时自动计算，0 和正数为显式值 */
+  brakeZoneIn?: number | undefined;
   /** 制动时前向功率上限 */
   brakeForwardPower?: number | undefined;
 }
@@ -37,8 +37,8 @@ export function makeNode(partial: Partial<ControlNode> & Pick<ControlNode, 'x' |
     commandParams: partial.commandParams ?? [],
     delayAfterArrive: partial.delayAfterArrive ?? 0,
     maxPower: partial.maxPower ?? 1,
-    brakeZoneIn: partial.brakeZoneIn ?? 0,
   };
+  if (partial.brakeZoneIn !== undefined) n.brakeZoneIn = partial.brakeZoneIn;
   if (partial.maxSpeed !== undefined) n.maxSpeed = partial.maxSpeed;
   if (partial.endSpeed !== undefined) n.endSpeed = partial.endSpeed;
   if (partial.brakeForwardPower !== undefined) n.brakeForwardPower = partial.brakeForwardPower;
@@ -61,7 +61,7 @@ export function nodesClose(a: ControlNode, b: ControlNode): boolean {
     Math.abs(a.delayAfterArrive - b.delayAfterArrive) < EPS &&
     Math.abs(a.maxPower - b.maxPower) < EPS &&
     closeOpt(a.maxSpeed, b.maxSpeed) && closeOpt(a.endSpeed, b.endSpeed) &&
-    Math.abs(a.brakeZoneIn - b.brakeZoneIn) < EPS &&
+    closeOpt(a.brakeZoneIn, b.brakeZoneIn) &&
     closeOpt(a.brakeForwardPower, b.brakeForwardPower)
   );
 }
@@ -75,9 +75,10 @@ export function mirrorY(n: ControlNode): ControlNode {
 export function nextWaypoint(n: ControlNode, x: number, y: number): ControlNode {
   const r: ControlNode = {
     ...n, x, y, marker: '', command: '', commandParams: [],
-    delayAfterArrive: 0, brakeZoneIn: 0,
+    delayAfterArrive: 0,
   };
   delete r.endSpeed;
+  delete r.brakeZoneIn;
   delete r.brakeForwardPower;
   return r;
 }

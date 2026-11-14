@@ -53,7 +53,7 @@ export function encodeStoredNode(n: ControlNode): Record<string, unknown> {
   };
   if (n.maxSpeed != null) f['maxSpeed'] = n.maxSpeed;
   if (n.endSpeed != null) f['endSpeed'] = n.endSpeed;
-  f['brakeZoneIn'] = n.brakeZoneIn;
+  if (n.brakeZoneIn != null) f['brakeZoneIn'] = n.brakeZoneIn;
   if (n.brakeForwardPower != null) f['brakeForwardPower'] = n.brakeForwardPower;
   return f;
 }

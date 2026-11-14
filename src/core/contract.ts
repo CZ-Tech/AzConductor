@@ -50,14 +50,14 @@ export function validateNodes(nodes: readonly ControlNode[]): Issue[] {
     if (p.endSpeed != null && (!fin(p.endSpeed) || p.endSpeed < 0)) {
       issues.push(mk(i, 'endSpeed', '到点目标速度不得为负数，或留空'));
     }
-    if (!fin(p.brakeZoneIn) || p.brakeZoneIn < 0) {
+    if (p.brakeZoneIn != null && (!fin(p.brakeZoneIn) || p.brakeZoneIn < 0)) {
       issues.push(mk(i, 'brakeZoneIn', '制动区距离不得为负数'));
     }
     if (p.brakeForwardPower != null && (!fin(p.brakeForwardPower) || !inUnit(p.brakeForwardPower))) {
       issues.push(mk(i, 'brakeForwardPower', '制动区前进功率必须位于 0 到 1，或留空'));
     }
-    if (p.endSpeed != null && p.brakeZoneIn <= 0) {
-      issues.push(mk(i, 'brakeZoneIn', '设置 endSpeed 后必须提供大于 0 的制动区距离'));
+    if (p.endSpeed != null && p.brakeZoneIn === 0) {
+      issues.push(mk(i, 'brakeZoneIn', '设置 endSpeed 后制动区距离必须大于 0，或留空自动计算'));
     }
   });
   return issues;
@@ -155,7 +155,7 @@ export function validateRobotIssues(frames: unknown): RobotIssue[] {
     const maxPower = number('maxPower', 1);
     const maxSpeed = number('maxSpeed');
     const endSpeed = number('endSpeed');
-    const brakeZone = number('brakeZoneIn', 0);
+    const brakeZone = number('brakeZoneIn');
     const brakeForward = number('brakeForwardPower');
     if (x === null || y === null) return;
     pointFrames.push(index);
@@ -168,8 +168,8 @@ export function validateRobotIssues(frames: unknown): RobotIssue[] {
       commandParams: [],
       delayAfterArrive: delay ?? 0,
       maxPower: maxPower ?? 1,
-      brakeZoneIn: brakeZone ?? 0,
     };
+    if (brakeZone !== null) node.brakeZoneIn = brakeZone;
     if (maxSpeed !== null) node.maxSpeed = maxSpeed;
     if (endSpeed !== null) node.endSpeed = endSpeed;
     if (brakeForward !== null) node.brakeForwardPower = brakeForward;

@@ -287,7 +287,7 @@ describe('新点', () => {
     expect(n.command).toBe('');
     expect(n.commandParams).toEqual([]);
     expect(n.delayAfterArrive).toBe(0);
-    expect(n.brakeZoneIn).toBe(0);
+    expect('brakeZoneIn' in n).toBe(false);
     expect('endSpeed' in n).toBe(false);
     expect('brakeForwardPower' in n).toBe(false);
     // 不修改原节点

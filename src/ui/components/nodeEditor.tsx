@@ -3,7 +3,7 @@ import { useMemo, useState } from 'preact/hooks';
 import type { ControlNode } from '../../core/node';
 import { validateNodes } from '../../core/contract';
 import { commandCatalog } from '../../state/robotData';
-import { NODE_FIELDS, NODE_FIELD_ORDER, NODE_MAIN_SECTIONS, PARKING_BRAKE_ZONE, type FieldSection, type FieldSpec, type NodeFieldKey } from '../nodeFields';
+import { NODE_FIELDS, NODE_FIELD_ORDER, NODE_MAIN_SECTIONS, estimateBrakeZone, parkingBrakeZone, type FieldSection, type FieldSpec, type NodeFieldKey } from '../nodeFields';
 import { showDialog } from './dialogs';
 import { IconChevron, IconClose, IconPlus } from './icons';
 import { S } from '../strings';
@@ -45,8 +45,8 @@ export function fromDraft(d: Draft): { node: ControlNode } | { errors: Partial<R
     marker: d.marker, command: d.command.trim(), commandParams: d.command.trim() ? [...d.commandParams] : [],
     delayAfterArrive: num('delayAfterArrive', d.delayAfterArrive),
     maxPower: num('maxPower', d.maxPower),
-    brakeZoneIn: num('brakeZoneIn', d.brakeZoneIn),
   };
+  const bz = opt('brakeZoneIn', d.brakeZoneIn); if (bz !== undefined) node.brakeZoneIn = bz;
   const ms = opt('maxSpeed', d.maxSpeed); if (ms !== undefined) node.maxSpeed = ms;
   const es = opt('endSpeed', d.endSpeed); if (es !== undefined) node.endSpeed = es;
   const bf = opt('brakeForwardPower', d.brakeForwardPower); if (bf !== undefined) node.brakeForwardPower = bf;
@@ -59,7 +59,7 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
   const [errors, setErrors] = useState<Partial<Record<NodeFieldKey, string>>>({});
   const [showAdv, setShowAdv] = useState(() => {
     const n = p.node;
-    return n.maxPower !== 1 || n.maxSpeed !== undefined || n.endSpeed !== undefined || n.brakeZoneIn !== 0 || n.brakeForwardPower !== undefined;
+    return n.maxPower !== 1 || n.maxSpeed !== undefined || n.endSpeed !== undefined || n.brakeZoneIn !== undefined || n.brakeForwardPower !== undefined;
   });
   const catalog = commandCatalog.value;
   const desc = useMemo(() => catalog?.commands.find((c) => c.name === d.command), [catalog, d.command]);
@@ -90,11 +90,14 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
   };
 
   const parking = () => setD((o) => ({
-    ...o, endSpeed: '0', brakeZoneIn: (Number(o.brakeZoneIn) || 0) <= 0 ? String(PARKING_BRAKE_ZONE) : o.brakeZoneIn,
+    ...o, endSpeed: '0', brakeZoneIn: parkingBrakeZone(o.brakeZoneIn),
   }));
-  const passing = () => setD((o) => ({ ...o, endSpeed: '', brakeZoneIn: '0', brakeForwardPower: '' }));
+  const passing = () => setD((o) => ({ ...o, endSpeed: '', brakeZoneIn: '', brakeForwardPower: '' }));
 
   const hintOf = (k: NodeFieldKey): string => S.node.fields[k][2];
+  const estimate = estimateBrakeZone(d.maxSpeed, d.endSpeed);
+  const brakePlaceholder = !d.endSpeed.trim() ? S.node.brakeNeedsEndSpeed
+    : estimate === undefined ? S.node.brakeAuto : S.node.brakeEstimate(estimate.toFixed(2));
 
   const renderField = (k: NodeFieldKey) => {
     const spec: FieldSpec = NODE_FIELDS[k];
@@ -138,6 +141,7 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
           <div class="nf" key={k}>{label}
             <input id={id} type="number" inputMode="decimal" step="any" value={d[k as Exclude<NodeFieldKey, 'commandParams'>]}
               aria-invalid={err ? 'true' : undefined}
+              placeholder={k === 'brakeZoneIn' ? brakePlaceholder : undefined}
               onInput={(e) => set(k as Exclude<NodeFieldKey, 'commandParams'>, (e.target as HTMLInputElement).value)} />
             {hintOf(k) && !err && <div class="hint">{hintOf(k)}</div>}{errEl}</div>
         );

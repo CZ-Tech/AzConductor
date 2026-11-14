@@ -150,6 +150,32 @@ describe('SyncEngine (port of RouteSyncEngineTest)', () => {
     expect(f.baselines.get(ROBOT_KEY, 'Auto')).not.toBeNull();
   });
 
+  it('keeps legacy explicit zero fingerprint stable and does not push unchanged routes', async () => {
+    const oldWire = '[{"x":1,"dx":20,"y":0,"dy":0,"heading":0,"dHeading":0,"duration":1,"marker":"","command":"","commandParams":[],"maxPower":1,"brakeZoneIn":0}]';
+    const nodes = decodeRobotRoute(JSON.parse(oldWire));
+    expect(canonicalRoute(nodes)).toBe(oldWire);
+    const f = fixture({ Auto: nodes });
+    f.server.seedRaw('Auto', oldWire, 4);
+    f.baselines.put(ROBOT_KEY, { routeName: 'Auto', localFingerprint: fingerprint(oldWire), remoteRevision: 4 });
+    const report = await f.engine.syncOnce();
+    expect(report.pushed).toEqual([]);
+    expect(report.conflicts).toEqual([]);
+    expect(f.server.requests).toEqual([]);
+  });
+
+  it('preserves automatic braking through sync and a subsequent unchanged baseline', async () => {
+    const nodes = decodeRobotRoute([{ x: 0, y: 0 }, { x: 20, y: 0, endSpeed: 0 }]);
+    const f = fixture({ Auto: nodes });
+    expect((await f.engine.syncOnce()).pushed).toEqual(['Auto']);
+    const body = JSON.parse(f.server.routes.get('Auto')!.body) as Array<Record<string, unknown>>;
+    expect(body[1]).toMatchObject({ endSpeed: 0 });
+    expect(body[1]).not.toHaveProperty('brakeZoneIn');
+    const report = await f.engine.syncOnce();
+    expect(report.pushed).toEqual([]);
+    expect(report.conflicts).toEqual([]);
+    expect(f.server.requests.filter((r) => r.method === 'PUT')).toHaveLength(1);
+  });
+
   it('remote-only route is pulled locally', async () => {
     const f = fixture();
     f.server.seed('Auto', J1, 3);

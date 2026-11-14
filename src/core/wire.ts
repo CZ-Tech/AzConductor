@@ -2,7 +2,7 @@
  * 机器人线格式（wire）编解码。移植自 SplineRouteContract.encodeRobotRoute / decodeRobotRoute。
  *
  * - delayAfterArrive 编码为紧随该点的独立 {"wait": 秒} 帧，点帧中不含 delayAfterArrive。
- * - 可选字段 maxSpeed/endSpeed/brakeForwardPower 缺省时省略，永不输出 null。
+ * - 可选字段 maxSpeed/endSpeed/brakeZoneIn/brakeForwardPower 缺省时省略，永不输出 null。
  * - 比较路径一律比较解析后的结构 / canonicalRoute，不要比较原始文本。
  */
 import type { ControlNode } from './node';
@@ -32,7 +32,7 @@ export function encodeNodeFrame(n: ControlNode): Record<string, unknown> {
   };
   if (n.maxSpeed != null) f['maxSpeed'] = n.maxSpeed;
   if (n.endSpeed != null) f['endSpeed'] = n.endSpeed;
-  f['brakeZoneIn'] = n.brakeZoneIn;
+  if (n.brakeZoneIn != null) f['brakeZoneIn'] = n.brakeZoneIn;
   if (n.brakeForwardPower != null) f['brakeForwardPower'] = n.brakeForwardPower;
   return f;
 }
@@ -100,8 +100,8 @@ export function decodeNodeFrame(obj: Record<string, unknown>, frameNo: number): 
     commandParams,
     delayAfterArrive: optNum(obj, 'delayAfterArrive', frameNo, 0),
     maxPower: optNum(obj, 'maxPower', frameNo, 1),
-    brakeZoneIn: optNum(obj, 'brakeZoneIn', frameNo, 0),
   };
+  if (has(obj, 'brakeZoneIn')) node.brakeZoneIn = optNum(obj, 'brakeZoneIn', frameNo, 0);
   const maxSpeed = optNullableNum(obj, 'maxSpeed', frameNo);
   const endSpeed = optNullableNum(obj, 'endSpeed', frameNo);
   const brakeForwardPower = optNullableNum(obj, 'brakeForwardPower', frameNo);

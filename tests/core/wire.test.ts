@@ -50,10 +50,29 @@ describe('nodesClose', () => {
     expect(nodesClose(rest as ControlNode, rest as ControlNode)).toBe(true);
     expect(nodesClose(a, { ...a, maxSpeed: 5 + 1e-9 })).toBe(true);
   });
+  it('自动制动与显式 0 不相等，显式数值按容差比较', () => {
+    const auto = makeNode({ x: 0, y: 0 });
+    const zero = makeNode({ x: 0, y: 0, brakeZoneIn: 0 });
+    expect(nodesClose(auto, zero)).toBe(false);
+    expect(nodesClose(zero, { ...zero, brakeZoneIn: 1e-9 })).toBe(true);
+  });
   it('commandParams 逐项比较', () => {
     expect(nodesClose({ ...a, commandParams: ['1'] }, { ...a, commandParams: ['1'] })).toBe(true);
     expect(nodesClose({ ...a, commandParams: ['1'] }, { ...a, commandParams: ['2'] })).toBe(false);
     expect(nodesClose({ ...a, commandParams: ['1'] }, { ...a, commandParams: [] })).toBe(false);
+  });
+});
+
+describe('制动距离指纹兼容', () => {
+  it('旧显式零指纹保持不变，自动与显式值区分', () => {
+    const legacy = '[{"x":0,"dx":0,"y":0,"dy":0,"heading":0,"dHeading":0,"duration":1,"marker":"","command":"","commandParams":[],"maxPower":1,"brakeZoneIn":0}]';
+    const zero = decodeRobotRoute(JSON.parse(legacy));
+    expect(canonicalRoute(zero)).toBe(legacy);
+    expect(fingerprint(canonicalRoute(zero))).toBe(fingerprint(legacy));
+    const auto = [makeNode({ x: 0, y: 0 })];
+    const manual = [makeNode({ x: 0, y: 0, brakeZoneIn: 4 })];
+    expect(canonicalRoute(auto)).not.toContain('brakeZoneIn');
+    expect(new Set([auto, zero, manual].map((nodes) => fingerprint(canonicalRoute(nodes)))).size).toBe(3);
   });
 });
 
@@ -63,7 +82,7 @@ describe('encodeNodeFrame', () => {
     const f = encodeNodeFrame(n);
     expect(Object.keys(f)).toEqual([
       'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'command', 'commandParams',
-      'maxPower', 'brakeZoneIn',
+      'maxPower',
     ]);
     expect('delayAfterArrive' in f).toBe(false);
   });
@@ -156,6 +175,7 @@ describe('encodeRobotRoute / decodeRobotRoute', () => {
     expect(err([{ y: 0 }])).toBe('第 1 帧缺少 x');
     expect(err([{ x: 'a', y: 0 }])).toBe('第 1 帧 x 必须为数值');
     expect(err([{ x: 0, y: 0 }, { x: 1, y: 1, dx: 'z' }])).toBe('第 2 帧 dx 必须为数值');
+    expect(err([{ x: 0, y: 0, brakeZoneIn: null }])).toBe('第 1 帧 brakeZoneIn 必须为数值');
     expect(err([{ x: 0, y: 0, marker: 5 }])).toBe('第 1 帧 marker 必须为字符串');
     expect(err([{ x: 0, y: 0, command: [] }])).toBe('第 1 帧 command 必须为字符串');
     expect(err([{ x: 0, y: 0, commandParams: 'a' }])).toBe('第 1 帧 commandParams 必须为字符串数组');
@@ -171,7 +191,7 @@ describe('encodeRobotRoute / decodeRobotRoute', () => {
     const [n] = decodeRobotRoute([{ x: 3, y: 4 }]);
     expect(n).toStrictEqual({
       x: 3, dx: 0, y: 4, dy: 0, heading: 0, dHeading: 0, duration: 1,
-      marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0,
+      marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1,
     });
   });
 

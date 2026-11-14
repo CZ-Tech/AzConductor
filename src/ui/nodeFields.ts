@@ -27,7 +27,7 @@ export const NODE_FIELDS = {
   maxPower: { kind: 'number', section: 'advanced', step: '0.05' },
   maxSpeed: { kind: 'optNumber', section: 'advanced', step: '1' },
   endSpeed: { kind: 'optNumber', section: 'advanced', step: '1' },
-  brakeZoneIn: { kind: 'number', section: 'advanced', step: '1' },
+  brakeZoneIn: { kind: 'optNumber', section: 'advanced', step: '1' },
   brakeForwardPower: { kind: 'optNumber', section: 'advanced', step: '0.05' },
 } as const satisfies Record<keyof ControlNode, FieldSpec>;
 
@@ -42,5 +42,16 @@ export const NODE_FIELD_ORDER: readonly NodeFieldKey[] = [
 /** 主表单分组的显示顺序。 */
 export const NODE_MAIN_SECTIONS = ['pose', 'motion', 'command'] as const satisfies readonly FieldSection[];
 
-/** 停车点预设：endSpeed = 0；制动区 ≤ 0 时置 12。 */
-export const PARKING_BRAKE_ZONE = 12;
+/** 静态估算仅供显示，不作为机器人运行时的制动距离。 */
+export function estimateBrakeZone(maxSpeed: string, endSpeed: string): number | undefined {
+  if (!maxSpeed.trim() || !endSpeed.trim()) return undefined;
+  const max = Number(maxSpeed), end = Number(endSpeed);
+  if (!Number.isFinite(max) || !Number.isFinite(end) || max < 0 || end < 0) return undefined;
+  return Math.max(0, max * max - end * end) / (2 * 30) * 1.05;
+}
+
+/** 停车预设只保留正的手动制动距离。 */
+export function parkingBrakeZone(value: string): string {
+  const n = Number(value);
+  return value.trim() && Number.isFinite(n) && n > 0 ? value : '';
+}
