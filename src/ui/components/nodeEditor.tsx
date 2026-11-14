@@ -1,5 +1,7 @@
 /** 节点属性编辑对话框（由字段表驱动）。 */
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { OrientedTrajectory2D } from '../../core/spline';
+import { connData, connState, getConnection } from '../../state/session';
 import type { ControlNode } from '../../core/node';
 import { validateNodes } from '../../core/contract';
 import { commandCatalog } from '../../state/robotData';
@@ -10,9 +12,9 @@ import { S } from '../strings';
 
 export type NodeEditResult = { kind: 'save'; node: ControlNode } | { kind: 'delete' };
 
-export function showNodeEditor(node: ControlNode, index: number, canDelete: boolean): Promise<NodeEditResult | null> {
+export function showNodeEditor(node: ControlNode, index: number, canDelete: boolean, previous?: ControlNode): Promise<NodeEditResult | null> {
   return showDialog<NodeEditResult>(`${S.node.title} · ${S.editor.node(index + 1)}`, (close) => (
-    <NodeForm node={node} canDelete={canDelete} onDone={close} />
+    <NodeForm node={node} previous={previous} canDelete={canDelete} onDone={close} />
   ));
 }
 
@@ -54,8 +56,26 @@ export function fromDraft(d: Draft): { node: ControlNode } | { errors: Partial<R
   return { node };
 }
 
-function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEditResult | null) => void }) {
+function NodeForm(p: { node: ControlNode; previous: ControlNode | undefined; canDelete: boolean; onDone: (r: NodeEditResult | null) => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(p.node));
+  const [decel, setDecel] = useState<{ value: number; live: boolean }>({ value: 30, live: false });
+  const connected = connState.value.kind === 'connected';
+  const tuningRevision = connData.value?.tuningRevision ?? 0;
+  useEffect(() => {
+    setDecel({ value: 30, live: false });
+    if (!connected) return;
+    const connection = getConnection();
+    if (!connection) return;
+    let cancelled = false;
+    void connection.api.tuning().then((r) => {
+      if (cancelled || !r.ok) return;
+      const value = r.value.fields.find((f) => f.name === 'Auto.SAFE_BRAKE_DECEL')?.value;
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        setDecel({ value, live: true });
+      }
+    }).catch(() => { /* Offline/unsupported: keep the clearly labelled default. */ });
+    return () => { cancelled = true; };
+  }, [connected, tuningRevision]);
   const [errors, setErrors] = useState<Partial<Record<NodeFieldKey, string>>>({});
   const [showAdv, setShowAdv] = useState(() => {
     const n = p.node;
@@ -95,9 +115,20 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
   const passing = () => setD((o) => ({ ...o, endSpeed: '', brakeZoneIn: '', brakeForwardPower: '' }));
 
   const hintOf = (k: NodeFieldKey): string => S.node.fields[k][2];
-  const estimate = estimateBrakeZone(d.maxSpeed, d.endSpeed);
+  const geometry = [d.x, d.y, d.dx, d.dy];
+  const numericGeometry = geometry.map((v) => Number(v));
+  const segmentLength = p.previous && geometry.every((v) => v.trim() !== '') && numericGeometry.every(Number.isFinite)
+    ? new OrientedTrajectory2D(p.previous, {
+        x: numericGeometry[0]!, y: numericGeometry[1]!, dx: numericGeometry[2]!, dy: numericGeometry[3]!,
+      }, 1).length : undefined;
+  const startSpeed = p.previous && p.previous.delayAfterArrive <= 0 ? p.previous.endSpeed ?? 0 : 0;
+  const maxSpeed = d.maxSpeed.trim() ? Number(d.maxSpeed) : undefined;
+  const targetSpeed = d.endSpeed.trim() ? Number(d.endSpeed) : undefined;
+  const estimate = segmentLength !== undefined && segmentLength >= 0.05 && targetSpeed !== undefined
+    ? estimateBrakeZone(segmentLength, startSpeed, decel.value, maxSpeed, targetSpeed) : undefined;
   const brakePlaceholder = !d.endSpeed.trim() ? S.node.brakeNeedsEndSpeed
     : estimate === undefined ? S.node.brakeAuto : S.node.brakeEstimate(estimate.toFixed(2));
+  const brakeDetails = `模型预估：减速度 ${decel.value.toFixed(2)} in/s²（${decel.live ? '机器人当前值' : '离线默认值'}），加速度为其 105%；起点速度 ${startSpeed.toFixed(2)} in/s（${p.previous?.endSpeed !== undefined && p.previous.delayAfterArrive <= 0 ? '上一点目标值' : '假定值'}）。实际制动按实时速度计算，预估不保证安全。`;
 
   const renderField = (k: NodeFieldKey) => {
     const spec: FieldSpec = NODE_FIELDS[k];
@@ -143,7 +174,8 @@ function NodeForm(p: { node: ControlNode; canDelete: boolean; onDone: (r: NodeEd
               aria-invalid={err ? 'true' : undefined}
               placeholder={k === 'brakeZoneIn' ? brakePlaceholder : undefined}
               onInput={(e) => set(k as Exclude<NodeFieldKey, 'commandParams'>, (e.target as HTMLInputElement).value)} />
-            {hintOf(k) && !err && <div class="hint">{hintOf(k)}</div>}{errEl}</div>
+            {hintOf(k) && !err && <div class="hint">{hintOf(k)}</div>}
+            {k === 'brakeZoneIn' && !err && !d.brakeZoneIn.trim() && <div class="hint">{estimate !== undefined ? `${brakePlaceholder}；` : ''}{brakeDetails}</div>}{errEl}</div>
         );
     }
   };

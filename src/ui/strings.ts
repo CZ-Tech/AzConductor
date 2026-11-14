@@ -155,7 +155,7 @@ export const S = {
       maxPower: ['巡航功率', 'maxPower', '0 ~ 1'],
       maxSpeed: ['速度上限', 'maxSpeed · in/s', '留空 = 不限'],
       endSpeed: ['到点目标速度', 'endSpeed · in/s', '0 = 完全停止'],
-      brakeZoneIn: ['制动区距离', 'brakeZoneIn · in', '留空自动计算，输入可手动覆盖；预估基于 maxSpeed 和默认减速度 30 in/s²，非实时，不能作为安全保证'],
+      brakeZoneIn: ['制动区距离', 'brakeZoneIn · in', '留空使用自动制动，输入正数可手动覆盖；显示值为按样条长度和理想加减速模型估算。'],
       brakeForwardPower: ['制动区前进功率', 'brakeForwardPower', '留空 = 机器人默认'],
     },
   },

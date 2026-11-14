@@ -42,12 +42,30 @@ export const NODE_FIELD_ORDER: readonly NodeFieldKey[] = [
 /** 主表单分组的显示顺序。 */
 export const NODE_MAIN_SECTIONS = ['pose', 'motion', 'command'] as const satisfies readonly FieldSection[];
 
-/** 静态估算仅供显示，不作为机器人运行时的制动距离。 */
-export function estimateBrakeZone(maxSpeed: string, endSpeed: string): number | undefined {
-  if (!maxSpeed.trim() || !endSpeed.trim()) return undefined;
-  const max = Number(maxSpeed), end = Number(endSpeed);
-  if (!Number.isFinite(max) || !Number.isFinite(end) || max < 0 || end < 0) return undefined;
-  return Math.max(0, max * max - end * end) / (2 * 30) * 1.05;
+/** 静态估算仅供显示，不作为机器人运行时的制动距离。速度及距离须使用一致的单位。 */
+export function estimateBrakeZone(
+  segmentLength: number, startSpeed: number, brakeDeceleration: number,
+  maxSpeed: number | undefined, targetSpeed: number,
+): number | undefined {
+  if (![segmentLength, startSpeed, brakeDeceleration, targetSpeed].every(Number.isFinite) ||
+      segmentLength < 0 || startSpeed < 0 || brakeDeceleration <= 0 || targetSpeed < 0 ||
+      (maxSpeed !== undefined && (!Number.isFinite(maxSpeed) || maxSpeed < 0))) return undefined;
+
+  const acceleration = 1.05 * brakeDeceleration;
+  const brakeDistance = (speed: number) => Math.max(0, speed * speed - targetSpeed * targetSpeed) / (2 * brakeDeceleration) * 1.05;
+  const initialBrakeDistance = brakeDistance(startSpeed);
+  if (!Number.isFinite(acceleration) || !Number.isFinite(initialBrakeDistance)) return undefined;
+  if (initialBrakeDistance > segmentLength) return initialBrakeDistance;
+
+  const accelerationFactor = 1 / (2 * acceleration);
+  const brakingFactor = 1.05 / (2 * brakeDeceleration);
+  const peakSpeedSquared = (segmentLength + startSpeed * startSpeed * accelerationFactor +
+    targetSpeed * targetSpeed * brakingFactor) / (accelerationFactor + brakingFactor);
+  if (!Number.isFinite(peakSpeedSquared)) return undefined;
+  const unconstrainedPeak = Math.max(startSpeed, Math.sqrt(peakSpeedSquared));
+  const peakSpeed = maxSpeed === undefined ? unconstrainedPeak : Math.min(unconstrainedPeak, Math.max(startSpeed, maxSpeed));
+  const result = brakeDistance(peakSpeed);
+  return Number.isFinite(result) ? result : undefined;
 }
 
 /** 停车预设只保留正的手动制动距离。 */
