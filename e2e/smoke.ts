@@ -191,6 +191,8 @@ async function main() {
     check(await page.locator('#nf-maxSpeed').inputValue() === '', '模型预估无需填写速度上限');
     check(/^预估 [\d.]+ in$/.test(await page.locator('#nf-brakeZoneIn').getAttribute('placeholder') ?? ''), '未设置速度上限时显示模型预估');
     check(await until(async () => (await page.locator('dialog').innerText()).includes('机器人当前值'), 'live braking parameter', 3000), '连接后读取机器人当前减速度');
+    const incomingText = await page.locator('dialog').innerText();
+    check(/起点速度 (?!0\.00)\d+\.\d+ in\/s（前序路段推算）/.test(incomingText), '未设上一点目标速度时沿前序路径推算起点速度');
     check(await page.locator('#nf-brakeZoneIn').inputValue() === '', '模型预估不写入手动制动区');
     await page.getByRole('button', { name: '取消' }).click();
     await page.locator('dialog').waitFor({ state: 'detached' });

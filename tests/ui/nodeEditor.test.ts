@@ -1,12 +1,65 @@
 import { describe, expect, it } from 'vitest';
 import { fromDraft } from '../../src/ui/components/nodeEditor';
-import { estimateBrakeZone, parkingBrakeZone } from '../../src/ui/nodeFields';
+import { estimateBrakeZone, estimateStartSpeed, parkingBrakeZone } from '../../src/ui/nodeFields';
+import { makeNode } from '../../src/core/node';
+import { OrientedTrajectory2D } from '../../src/core/spline';
 
 const draft = {
   x: '0', y: '0', dx: '0', dy: '0', heading: '0', dHeading: '0', duration: '1',
   delayAfterArrive: '0', marker: '', command: '', commandParams: [], maxPower: '1',
   maxSpeed: '30', endSpeed: '0', brakeZoneIn: '', brakeForwardPower: '',
 };
+
+describe('目标段起速估算', () => {
+  const point = (x: number, extra: Partial<Parameters<typeof makeNode>[0]> = {}) =>
+    makeNode({ ...extra, x, y: extra.y ?? 0 });
+
+  it('从首点零速累计多个通过点，使用 Hermite 弧长并忽略首点末速度', () => {
+    const nodes = [point(0, { x: 0, y: 0, endSpeed: 999, dy: 8 }), point(10), point(20), point(30)];
+    const length = nodes.slice(1).reduce((sum, n, i) => sum + new OrientedTrajectory2D(nodes[i]!, n, 1).length, 0);
+    const estimate = estimateStartSpeed(nodes, 10);
+    expect(estimate?.source).toBe('estimated');
+    expect(estimate?.speed).toBeCloseTo(Math.sqrt(2 * 10.5 * length));
+    expect(estimateStartSpeed([nodes[0]!], 10)).toEqual({ speed: 0, source: 'initial' });
+  });
+
+  it('采用显式目标速度，即使超过限速，再用于后续估算', () => {
+    const nodes = [point(0), point(10, { x: 10, y: 0, endSpeed: 30, maxSpeed: 5 })];
+    expect(estimateStartSpeed(nodes, 10)).toEqual({ speed: 30, source: 'explicit' });
+    expect(estimateStartSpeed([...nodes, point(20)], 10)?.speed).toBeCloseTo(Math.sqrt(30 ** 2 + 2 * 10.5 * 10));
+  });
+
+  it('等待后从零重新加速，也处理目标段前点的等待', () => {
+    const nodes = [point(0), point(10, { x: 10, y: 0, endSpeed: 20, delayAfterArrive: 1 })];
+    expect(estimateStartSpeed(nodes, 10)).toEqual({ speed: 0, source: 'delay' });
+    expect(estimateStartSpeed([...nodes, point(20)], 10)?.speed).toBeCloseTo(Math.sqrt(210));
+  });
+
+  it('限制加速末速，但不把超限起速瞬间降到限速', () => {
+    expect(estimateStartSpeed([point(0), point(10, { x: 10, y: 0, maxSpeed: 5 })], 10)?.speed).toBe(5);
+    expect(estimateStartSpeed([point(0), point(10, { x: 10, y: 0, endSpeed: 30 }),
+      point(20, { x: 20, y: 0, maxSpeed: 5 })], 10)?.speed).toBe(30);
+  });
+
+  it('纯转向短段停车，即使配置显式末速', () => {
+    const nodes = [point(0), point(10, { x: 10, y: 0, endSpeed: 20 }),
+      point(10.01, { x: 10.01, y: 0, heading: 90, endSpeed: 12 })];
+    expect(estimateStartSpeed(nodes, 10)).toEqual({ speed: 0, source: 'heading-only' });
+    expect(estimateStartSpeed([...nodes, point(20.01)], 10)?.speed).toBeCloseTo(Math.sqrt(210));
+  });
+
+  it('拒绝空列表、无效减速度、几何、等待和后续速度', () => {
+    expect(estimateStartSpeed([], 10)).toBeUndefined();
+    for (const value of [0, -1, NaN, Infinity]) expect(estimateStartSpeed([point(0)], value)).toBeUndefined();
+    for (const extra of [{ x: NaN, y: 0 }, { x: 1, y: 0, dx: Infinity },
+      { x: 1, y: 0, delayAfterArrive: -1 }, { x: 1, y: 0, endSpeed: -1 },
+      { x: 1, y: 0, maxSpeed: NaN }, { x: 1, y: 0, maxSpeed: 0 }]) {
+      expect(estimateStartSpeed([point(0), makeNode(extra)], 10)).toBeUndefined();
+    }
+    expect(estimateStartSpeed([point(0, { x: 0, y: 0, endSpeed: NaN })], 10))
+      .toEqual({ speed: 0, source: 'initial' });
+  });
+});
 
 describe('制动区编辑', () => {
   it('联立加速与放大后的制动距离，支持非零起点和目标速度', () => {
