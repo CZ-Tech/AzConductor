@@ -58,6 +58,14 @@ async function cardAction(page: Page, routeName: string, item: string) {
 async function main() {
   const robot = new MockRobotServer({ host: '127.0.0.1', poseHz: 30, runDurationMs: 30_000 }); // 回合都以 STOP 结束；指令 OpMode 需要足够长的 RUNNING 窗口
   seedSampleRobot(robot);
+  robot.setCommands([...robot.commands, {
+    name: 'optional.flag', paramNames: ['on'], paramTypes: ['boolean'], paramDefaults: [null],
+    signatures: [
+      { paramNames: [], paramTypes: [], paramDefaults: [] },
+      { paramNames: ['on'], paramTypes: ['boolean'], paramDefaults: [null] },
+    ],
+    acceptedArgCounts: [0, 1], hasUnifiedSignature: true, requiredParamCount: 0, paramRequired: [false],
+  }]);
   await robot.start(0);
   log(`mock robot ${robot.url} routes=${robot.routeNames.join(',')} opmodes=${robot.opModes.map((o) => o.name).join(',')}`);
 
@@ -197,6 +205,19 @@ async function main() {
     await page.getByRole('button', { name: '取消' }).click();
     await page.locator('dialog').waitFor({ state: 'detached' });
 
+    // 新目录：节点上的 0/1 重载可直接保存无参调用，不能补一个空字符串。
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    await page.locator('#nf-command').fill('intaker.intakerIn');
+    check((await page.locator('dialog').innerText()).includes('可选'), '节点编辑器识别重载可选参数');
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    check(await page.locator('#nf-command').inputValue() === 'intaker.intakerIn', '无参重载保存后重新打开仍保留命令');
+    await page.getByRole('button', { name: '取消' }).click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+
     // 回放
     await page.getByRole('button', { name: '播放' }).click();
     await until(async () => !(await page.locator('.timeline .time').innerText()).startsWith('0.00'), 'playback advances', 3000);
@@ -213,6 +234,12 @@ async function main() {
     await page.getByRole('button', { name: /返回/ }).click();
     check(await until(() => robot.routeNames.includes('E2E 路径'), 'route pushed', 8000), '本地新路径自动上传到机器');
     check(await until(async () => (await page.locator('.sync-panel').innerText()).includes('已同步'), 'synced label'), '同步面板显示已同步');
+
+    const nodeRouteResponse = await fetch(`${robot.url}/api/v2/routes/${encodeURIComponent('E2E 路径')}`, { headers: { 'X-Az-Session': robot.sessionToken! } });
+    const savedNodeRoute = await nodeRouteResponse.json() as { command?: string; commandParams?: string[] }[];
+    const noArgNode = savedNodeRoute.find((node) => node.command === 'intaker.intakerIn');
+    check(noArgNode !== undefined && (noArgNode.commandParams?.length ?? 0) === 0, '节点无参重载上传后仍是空参数数组');
+    check(await page.locator('dialog').count() === 0, '合法无参重载离开编辑器不会误报缺参');
 
     // 机器侧修改 → SSE routes 事件 → 本地拉取
     robot.mutateRemoteRoute(remote0, '[{"x":0,"y":0,"dx":10,"dy":0,"heading":0,"duration":0},{"x":20,"y":20,"dx":10,"dy":0,"duration":2}]');
@@ -326,9 +353,9 @@ async function main() {
     // 带参数的指令：本地校验后才能运行
     check(await runBtn('shoot').isDisabled(), '必填参数未填时不可运行');
     await field('shoot', 0).fill('1.5');
-    check(await runBtn('shoot').isDisabled() && (await panel.locator('.field-error').innerText()).includes('整数'), 'int 参数填小数时提示并禁止运行');
+    check(await runBtn('shoot').isDisabled() && (await page.locator('[id="cmd-shoot-0-error"]').innerText()).includes('整数'), 'int 参数填小数时提示并禁止运行');
     await field('shoot', 0).fill('3000000000');
-    check(await runBtn('shoot').isDisabled() && (await panel.locator('.field-error').innerText()).includes('范围'), 'int 参数超范围时提示并禁止运行');
+    check(await runBtn('shoot').isDisabled() && (await page.locator('[id="cmd-shoot-0-error"]').innerText()).includes('范围'), 'int 参数超范围时提示并禁止运行');
     await field('shoot', 0).fill('  3 ');
     await field('shoot', 1).fill('');
     check(await runBtn('shoot').isEnabled(), '带默认值的参数清空后仍可运行');
@@ -342,6 +369,52 @@ async function main() {
     await runBtn('shooter.spin').click();
     check(await until(() => robot.commandRuns.length === 2, 'spin run'), '点号命名的指令可运行');
     check(runs()[1] === 'shooter.spin(900,0.8,true,)', `全部默认值随指令下发 (${runs()[1]})`);
+
+    // 新目录：可选尾参为空时必须是真正的无参调用，不能补未知默认值。
+    const intakeItem = panel.locator('.cmd-item').filter({ hasText: 'intaker.intakerIn' });
+    check(await field('intaker.intakerIn', 0).inputValue() === '' && (await intakeItem.innerText()).includes('可选'), '重载可选参数初始为空并标记可选');
+    await runBtn('intaker.intakerIn').click();
+    const intakeRuns = () => robot.commandRuns.filter((c) => c.name === 'intaker.intakerIn');
+    check(await until(() => intakeRuns().length === 1, 'zero-arg overload'), '可选参数留空时可运行无参重载');
+    check(intakeRuns()[0]?.args.length === 0, '无参重载 POST 的 args 是空数组');
+    await field('intaker.intakerIn', 0).fill(' 0.4 ');
+    await runBtn('intaker.intakerIn').click();
+    check(await until(() => intakeRuns().length === 2, 'one-arg overload'), '填写可选参数后运行单参重载');
+    check(intakeRuns()[1]?.args.join(',') === '0.4', '单参重载只发送已填参数且去掉数字首尾空格');
+    await panel.locator('.cmd-filter').fill('shoot');
+    check(!await intakeItem.isVisible(), '筛选隐藏不匹配指令');
+    await panel.locator('.cmd-filter').fill('');
+    check(await field('intaker.intakerIn', 0).inputValue() === ' 0.4 ', '恢复筛选后保留指令草稿');
+
+    // 可选 boolean 的空值与明确 false 必须是不同调用。
+    const flagRuns = () => robot.commandRuns.filter((c) => c.name === 'optional.flag');
+    check(await field('optional.flag', 0).inputValue() === '', '可选 boolean 初始选择省略而非 false');
+    await runBtn('optional.flag').click();
+    check(await until(() => flagRuns().length === 1, 'omitted boolean'), '可选 boolean 留空可运行无参重载');
+    check(flagRuns()[0]?.args.length === 0, '省略 boolean 发送空数组');
+    await field('optional.flag', 0).selectOption('false');
+    await runBtn('optional.flag').click();
+    check(await until(() => flagRuns().length === 2, 'explicit false'), '明确 false 可运行有参重载');
+    check(flagRuns()[1]?.args.join(',') === 'false', 'false 没有被误判成省略');
+
+    // 参数数量有断档且类型不同：显式选择签名，不按最长签名解释短调用。
+    const differentSignature = page.locator('[id="cmd-overload.different-signature"]');
+    check(await differentSignature.isVisible(), '不可合并重载显示调用签名选择');
+    await field('overload.different', 0).selectOption('true');
+    await runBtn('overload.different').click();
+    const differentRuns = () => robot.commandRuns.filter((c) => c.name === 'overload.different');
+    check(await until(() => differentRuns().length === 1, 'short boolean signature'), '短重载按自己的 boolean 参数运行');
+    check(differentRuns()[0]?.args.join(',') === 'true', '短重载未被转换成长签名的 int 参数');
+    await differentSignature.selectOption('1');
+    check(await field('overload.different', 0).inputValue() === '' && await runBtn('overload.different').isDisabled(), '切换长签名重置草稿并等待必填 count');
+    await field('overload.different', 0).fill('3');
+    await field('overload.different', 1).fill('0.5');
+    await field('overload.different', 2).fill('manual');
+    await runBtn('overload.different').click();
+    check(await until(() => differentRuns().length === 2, 'long signature'), '长重载按三个参数运行');
+    check(differentRuns()[1]?.args.join(',') === '3,0.5,manual', '长重载传入完整精确签名');
+    await differentSignature.selectOption('0');
+    check(await field('overload.different', 0).inputValue() === 'false', '切回短签名不重用长签名数值');
 
     // 旧固件：没有这个端点（路由层 404 not_found）；不能显示成“已受理”或笼统失败
     const cors = { 'Access-Control-Allow-Origin': '*' };

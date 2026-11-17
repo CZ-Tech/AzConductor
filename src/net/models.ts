@@ -18,8 +18,21 @@ export interface RouteManifest { routes: RouteManifestEntry[]; changeRevision: n
 export interface RobotRoutePayload { name: string; revision: number; json: string }
 export interface RouteWriteResponse { name: string; revision: number }
 export interface ExecutionSnapshot { state: ExecutionState; requestId: number; subject: string | null; revision: number }
-/** `paramDefaults[i]` is the default text of parameter i, `null` for a required one (always one entry per parameter). */
-export interface CommandDescriptor { name: string; paramNames: string[]; paramTypes: string[]; paramDefaults: (string | null)[] }
+/** `null` means no known default, not necessarily required; each array has one entry per parameter. */
+export interface CommandParameterSignature {
+  paramNames: string[];
+  paramTypes: string[];
+  paramDefaults: (string | null)[];
+}
+/** The base signature is the longest one. New metadata is an all-or-nothing wire extension. */
+export interface CommandDescriptor extends CommandParameterSignature {
+  name: string;
+  signatures?: CommandParameterSignature[];
+  acceptedArgCounts?: number[];
+  hasUnifiedSignature?: boolean;
+  requiredParamCount?: number | null;
+  paramRequired?: boolean[] | null;
+}
 export interface CommandCatalog { revision: number; commands: CommandDescriptor[] }
 export interface CommandRunResponse { accepted: boolean; name: string }
 export interface PoseEvent { seq: number; tNanos: number; x: number; y: number; heading: number }
@@ -170,16 +183,75 @@ export function decodeExecution(raw: unknown): ExecutionSnapshot {
   if (!EXEC_STATES.includes(state)) throw new DecodeError(`unknown execution state '${state}'`);
   return { state: state as ExecutionState, requestId: num(o, 'requestId', 0), subject: strOrNull(o, 'subject'), revision: num(o, 'revision', 0) };
 }
+const COMMAND_METADATA_KEYS = ['signatures', 'acceptedArgCounts', 'hasUnifiedSignature', 'requiredParamCount', 'paramRequired'] as const;
+
+function sameItems(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
+}
+
+/** Unlike the legacy decoder, new signatures must carry all three equally sized arrays. */
+function decodeCommandSignature(o: Obj): CommandParameterSignature {
+  for (const key of ['paramNames', 'paramTypes', 'paramDefaults']) {
+    if (!Array.isArray(o[key])) throw new DecodeError(`command signature: missing array '${key}'`);
+  }
+  const strings = (key: string): string[] => Array.from(arr(o, key), (v) => {
+    if (typeof v !== 'string') throw new DecodeError(`command signature: '${key}' contains a non-string`);
+    return v;
+  });
+  const paramNames = strings('paramNames');
+  const paramTypes = strings('paramTypes');
+  const rawDefaults = arr(o, 'paramDefaults');
+  if (paramTypes.length !== paramNames.length || rawDefaults.length !== paramNames.length) {
+    throw new DecodeError('command signature: inconsistent parameter array lengths');
+  }
+  const paramDefaults = Array.from(rawDefaults, (v) => {
+    if (v !== null && typeof v !== 'string') throw new DecodeError('command signature: invalid default');
+    return v;
+  });
+  return { paramNames, paramTypes, paramDefaults };
+}
+
+function decodeCommandDescriptor(raw: unknown): CommandDescriptor {
+  const c = obj(raw, 'command');
+  const name = str(c, 'name');
+  if (!COMMAND_METADATA_KEYS.some((key) => key in c)) {
+    const paramNames = strArr(c, 'paramNames');
+    return { name, paramNames, paramTypes: strArr(c, 'paramTypes'), paramDefaults: defaultsArr(c, paramNames.length) };
+  }
+  if (!COMMAND_METADATA_KEYS.every((key) => key in c)) throw new DecodeError('command metadata: incomplete field group');
+  const base = decodeCommandSignature(c);
+  const rawSignatures = c['signatures'];
+  if (!Array.isArray(rawSignatures) || rawSignatures.length === 0) throw new DecodeError('command metadata: expected nonempty signatures');
+  const signatures = Array.from(rawSignatures, (v) => decodeCommandSignature(obj(v, 'command signature')));
+  const acceptedArgCounts = signatures.map((s) => s.paramNames.length);
+  if (acceptedArgCounts.some((n, i) => i > 0 && n <= (acceptedArgCounts[i - 1] as number))) {
+    throw new DecodeError('command metadata: signatures must have unique, increasing arity');
+  }
+  const longest = signatures[signatures.length - 1] as CommandParameterSignature;
+  for (const key of ['paramNames', 'paramTypes', 'paramDefaults'] as const) {
+    if (!sameItems(base[key], longest[key])) throw new DecodeError('command metadata: base is not the longest signature');
+  }
+  if (!Array.isArray(c['acceptedArgCounts']) || !sameItems(c['acceptedArgCounts'], acceptedArgCounts)) {
+    throw new DecodeError('command metadata: acceptedArgCounts does not match signatures');
+  }
+  const min = acceptedArgCounts[0] as number;
+  const hasUnifiedSignature = acceptedArgCounts.every((n, i) => n === min + i)
+    && signatures.every((s) => s.paramNames.every((v, i) => v === longest.paramNames[i])
+      && s.paramTypes.every((v, i) => v === longest.paramTypes[i]));
+  if (c['hasUnifiedSignature'] !== hasUnifiedSignature) throw new DecodeError('command metadata: incorrect unified signature flag');
+  const requiredParamCount = hasUnifiedSignature ? min : null;
+  const paramRequired = hasUnifiedSignature ? longest.paramNames.map((_, i) => i < min) : null;
+  if (c['requiredParamCount'] !== requiredParamCount) throw new DecodeError('command metadata: incorrect requiredParamCount');
+  const rawRequired = c['paramRequired'];
+  if (paramRequired === null ? rawRequired !== null : !Array.isArray(rawRequired) || !sameItems(rawRequired, paramRequired)) {
+    throw new DecodeError('command metadata: incorrect paramRequired flags');
+  }
+  return { name, ...base, signatures, acceptedArgCounts, hasUnifiedSignature, requiredParamCount, paramRequired };
+}
+
 export function decodeCommandCatalog(raw: unknown): CommandCatalog {
   const o = obj(raw, 'commands');
-  return {
-    revision: num(o, 'revision', 0),
-    commands: arr(o, 'commands').map((e) => {
-      const c = obj(e, 'command');
-      const paramNames = strArr(c, 'paramNames');
-      return { name: str(c, 'name'), paramNames, paramTypes: strArr(c, 'paramTypes'), paramDefaults: defaultsArr(c, paramNames.length) };
-    }),
-  };
+  return { revision: num(o, 'revision', 0), commands: arr(o, 'commands').map(decodeCommandDescriptor) };
 }
 export function decodeCommandRun(raw: unknown): CommandRunResponse {
   const o = obj(raw, 'command run');

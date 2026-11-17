@@ -1,12 +1,13 @@
 /** 运行页左侧栏：手动试运行已连接机器人目录里的指令。 */
 import { useRef, useState } from 'preact/hooks';
-import { argError, argsValid, draftArgs, paramKind, resolveArgs, type ArgError } from '../../core/commandArgs';
+import { argsValid, commandVariants, draftArgs, resolveArgs } from '../../core/commandArgs';
 import type { CommandDescriptor } from '../../net/models';
 import type { ApiError } from '../../net/transport';
 import { describeApiError, isHttpError } from '../../net/transport';
 import { commandCatalog } from '../../state/robotData';
 import { connData, connState, getConnection } from '../../state/session';
 import { IconClose, IconPlay } from './icons';
+import { CommandArguments } from './commandArguments';
 import { S } from '../strings';
 
 const MAX_LOG = 8;
@@ -27,49 +28,31 @@ function describeRunError(e: ApiError): string {
   return describeApiError(e);
 }
 
-function ParamField(p: { id: string; name: string; type: string; value: string; fallback: string | null; error: ArgError | null; onInput: (v: string) => void }) {
-  const kind = paramKind(p.type);
-  const label = <label for={p.id}>{p.name}<span>{p.type}{p.fallback !== null && ` · ${S.commands.optional}`}</span></label>;
-  if (kind === 'boolean') {
-    return (
-      <div class="cmd-param">{label}
-        <select id={p.id} value={p.value} onChange={(e) => p.onInput((e.target as HTMLSelectElement).value)}>
-          <option value="false">false</option>
-          <option value="true">true</option>
-        </select>
-      </div>
-    );
-  }
-  const msg = p.error ? S.commands.argErrors[p.error] : '';
+function CommandItem(p: { cmd: CommandDescriptor; hidden: boolean; disabled: boolean; onRun: (args: string[]) => void }) {
+  const { cmd } = p;
+  const variants = commandVariants(cmd);
+  const [variantIndex, setVariantIndex] = useState(0);
+  const [args, setArgs] = useState(() => draftArgs(variants[0] ?? cmd));
+  const variant = variants[variantIndex];
+  const canRun = !p.hidden && !p.disabled && variant !== undefined && argsValid(variant, args);
+  const selectVariant = (index: number) => {
+    const next = variants[index];
+    if (!next) return;
+    setVariantIndex(index);
+    setArgs(draftArgs(next));
+  };
   return (
-    <div class="cmd-param">{label}
-      <input id={p.id} type="text" inputMode={kind === 'integer' ? 'numeric' : kind === 'number' ? 'decimal' : 'text'} autocomplete="off"
-        value={p.value} placeholder={p.fallback !== null ? S.commands.defaultValue(p.fallback) : undefined}
-        aria-invalid={msg ? 'true' : undefined} onInput={(e) => p.onInput((e.target as HTMLInputElement).value)} />
-      {msg && <div class="field-error">{msg}</div>}
-    </div>
-  );
-}
-
-function CommandItem(p: { cmd: CommandDescriptor; args: string[]; disabled: boolean; onArgs: (a: string[]) => void; onRun: () => void }) {
-  const { cmd, args } = p;
-  const canRun = !p.disabled && argsValid(cmd, args);
-  return (
-    <li class="cmd-item">
-      <form onSubmit={(e) => { e.preventDefault(); if (canRun) p.onRun(); }}>
+    <li class="cmd-item" hidden={p.hidden}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        if (canRun && variant && argsValid(variant, args)) p.onRun(resolveArgs(variant, args));
+      }}>
         <div class="cmd-head">
           <code>{cmd.name}</code>
           <button type="submit" class="cmd-run" disabled={!canRun} aria-label={S.commands.runNamed(cmd.name)}><IconPlay />{S.commands.run}</button>
         </div>
-        {cmd.paramNames.length > 0 && (
-          <div class="cmd-params">
-            {cmd.paramNames.map((name, i) => (
-              <ParamField key={name} id={`cmd-${cmd.name}-${i}`} name={name} type={cmd.paramTypes[i] ?? 'String'} value={args[i] ?? ''}
-                fallback={cmd.paramDefaults[i] ?? null} error={argError(cmd, i, args[i])}
-                onInput={(v) => p.onArgs(args.map((a, k) => (k === i ? v : a)))} />
-            ))}
-          </div>
-        )}
+        <CommandArguments idPrefix={`cmd-${cmd.name}`} command={cmd} variantIndex={variantIndex} args={args}
+          onVariant={selectVariant} onArgs={setArgs} />
       </form>
     </li>
   );
@@ -82,7 +65,6 @@ export function CommandPanel({ open, onClose }: { open: boolean; onClose: () => 
   const catalog = commandCatalog.value;
   const connected = st.kind === 'connected';
 
-  const [drafts, setDrafts] = useState<Record<string, string[]>>({});
   const [filter, setFilter] = useState('');
   const [log, setLog] = useState<LogEntry[]>([]);
   const [sending, setSending] = useState(false);
@@ -97,14 +79,20 @@ export function CommandPanel({ open, onClose }: { open: boolean; onClose: () => 
     : opMode.phase === 'INIT' ? S.commands.needStart
     : null;
 
-  const run = async (cmd: CommandDescriptor, draft: string[]) => {
+  const run = async (cmd: CommandDescriptor, args: string[], catalogRevision: number) => {
     const c = getConnection();
-    if (!c || !opMode || inFlight.current) return;
-    // 补全后的完整参数表：留空的用默认值，数字去掉首尾空格，长度恒等于参数个数
-    const args = resolveArgs(cmd, draft);
+    const liveData = connData.value;
+    const liveOpMode = liveData?.opMode;
+    const latestCatalog = commandCatalog.value;
+    const latestCmd = latestCatalog?.commands.find((item) => item.name === cmd.name);
+    // 子项已按所选签名 resolve；这里绝不再按最长签名补全。
+    // 目录或连接状态在渲染后变化时，宁可拒绝这次点击，也不发送旧签名。
+    if (!c || connState.value.kind !== 'connected' || !liveOpMode || liveOpMode.phase !== 'RUNNING'
+      || !liveOpMode.controllerAvailable || liveData?.execution?.state === 'RUNNING' || inFlight.current
+      || latestCatalog?.revision !== catalogRevision || !latestCmd || latestCmd !== cmd || !argsValid(latestCmd, args)) return;
     inFlight.current = true;
     setSending(true);
-    const r = await c.api.runCommand(cmd.name, args, opMode.revision);
+    const r = await c.api.runCommand(cmd.name, args, liveOpMode.revision);
     inFlight.current = false;
     setSending(false);
     const accepted = r.ok && r.value.accepted;
@@ -139,15 +127,12 @@ export function CommandPanel({ open, onClose }: { open: boolean; onClose: () => 
         {connected && !catalog && <p class="muted cmd-note">{S.commands.loading}</p>}
         {connected && catalog && commands.length === 0 && <p class="muted cmd-note">{S.commands.empty}</p>}
         {commands.length > 0 && shown.length === 0 && <p class="muted cmd-note">{S.commands.noMatch}</p>}
-        {shown.length > 0 && (
+        {commands.length > 0 && (
           <ul class="cmd-list">
-            {shown.map((cmd) => {
-              const args = draftArgs(cmd, drafts[cmd.name]);
-              return (
-                <CommandItem key={cmd.name} cmd={cmd} args={args} disabled={blocked !== null || sending}
-                  onArgs={(a) => setDrafts((d) => ({ ...d, [cmd.name]: a }))} onRun={() => void run(cmd, args)} />
-              );
-            })}
+            {commands.map((cmd) => (
+              <CommandItem key={`${catalog?.revision}-${cmd.name}`} cmd={cmd} hidden={q !== '' && !cmd.name.toLowerCase().includes(q)}
+                disabled={blocked !== null || sending} onRun={(args) => { if (catalog) void run(cmd, args, catalog.revision); }} />
+            ))}
           </ul>
         )}
         {log.length > 0 && (

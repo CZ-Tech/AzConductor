@@ -244,7 +244,8 @@ export class RobotApiClient {
    * `POST /api/v2/commands/run` — queue one catalog command on the robot.
    *
    * Implemented by the firmware (RobotApiRouter.handleCommandRun); older firmware answers 404
-   * `not_found`. `args` are strings in parameter order and must be complete — callers fill
+   * `not_found`. `args` are strings in the selected signature's parameter order. New catalogs
+   * call exact arities (omitted optional arguments stay omitted); only legacy catalogs fill
    * defaults first (`resolveArgs`). `expectedRevision` is the OpMode revision, as in the op mode
    * actions; 202 means queued, not finished (and a later command on the same subsystem replaces
    * it). Only accepted while an OpMode that attached a dispatcher is RUNNING. Never retry this

@@ -22,7 +22,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { makeNode, type ControlNode } from '../core/node';
 import { RouteCore } from '../core/route';
 import { decodeRobotRoute, encodeRobotRoute } from '../core/wire';
-import type { TuningField, TuningValue } from '../net/models';
+import type { CommandParameterSignature, TuningField, TuningValue } from '../net/models';
 
 // ---------------------------------------------------------------------------------------------
 // Public types
@@ -38,8 +38,32 @@ export interface MockOpMode {
   /** Like the firmware's `RemoteCommand Test` TeleOp: attaches the command dispatcher while RUNNING. */
   commands?: boolean;
 }
-/** `paramDefaults[i]` is the default text of parameter i (`null` = required); defaulted ones are trailing. */
-export interface MockCommand { name: string; paramNames: string[]; paramTypes: string[]; paramDefaults?: (string | null)[] }
+/** Legacy catalogs infer trailing optional arguments from defaults; new catalogs select exact signatures. */
+export interface MockCommand {
+  name: string;
+  paramNames: string[];
+  paramTypes: string[];
+  paramDefaults?: (string | null)[];
+  signatures?: CommandParameterSignature[];
+  acceptedArgCounts?: number[];
+  hasUnifiedSignature?: boolean;
+  requiredParamCount?: number | null;
+  paramRequired?: boolean[] | null;
+}
+
+function copyCommand(c: MockCommand): MockCommand {
+  return {
+    name: c.name, paramNames: [...c.paramNames], paramTypes: [...c.paramTypes],
+    paramDefaults: c.paramNames.map((_, i) => c.paramDefaults?.[i] ?? null),
+    ...(c.signatures !== undefined ? { signatures: c.signatures.map((s) => ({
+      paramNames: [...s.paramNames], paramTypes: [...s.paramTypes], paramDefaults: [...s.paramDefaults],
+    })) } : {}),
+    ...(c.acceptedArgCounts !== undefined ? { acceptedArgCounts: [...c.acceptedArgCounts] } : {}),
+    ...(c.hasUnifiedSignature !== undefined ? { hasUnifiedSignature: c.hasUnifiedSignature } : {}),
+    ...(c.requiredParamCount !== undefined ? { requiredParamCount: c.requiredParamCount } : {}),
+    ...(c.paramRequired !== undefined ? { paramRequired: c.paramRequired === null ? null : [...c.paramRequired] } : {}),
+  };
+}
 export interface MockOpModeSnapshot {
   revision: number;
   controllerAvailable: boolean;
@@ -509,14 +533,11 @@ export class MockRobotServer {
     this.execSnap = { state, requestId, subject, revision: this.execSnap.revision + 1 };
   }
 
-  get commands(): readonly MockCommand[] { return this.commandList; }
+  get commands(): readonly MockCommand[] { return this.commandList.map(copyCommand); }
 
   /** Replace the command catalog (revision +1, announced on the stream as `commands`). */
   setCommands(list: readonly MockCommand[]): void {
-    this.commandList = list.map((c) => ({
-      name: c.name, paramNames: [...c.paramNames], paramTypes: [...c.paramTypes],
-      paramDefaults: c.paramNames.map((_, i) => c.paramDefaults?.[i] ?? null),
-    }));
+    this.commandList = list.map(copyCommand);
     this.commandRevision++;
   }
   get commandsRevision(): number { return this.commandRevision; }
@@ -894,8 +915,8 @@ export class MockRobotServer {
 
   /**
    * `POST /api/v2/commands/run` — port of `RobotApiRouter.handleCommandRun` (firmware b83b346):
-   * same check order and error codes. Trailing parameters with a default may be omitted; the
-   * recorded `commandRuns` args are the completed list, as the firmware's `Overload.complete` builds it.
+   * same check order and error codes. New catalogs select exact overloads by arity; legacy
+   * catalogs complete trailing defaults. `commandRuns` records the selected overload's arguments.
    */
   private handleCommandRun(ctx: Ctx): void {
     const { res, record } = ctx;
@@ -1110,9 +1131,7 @@ export class MockRobotServer {
   }
 
   private commandsJson(): string {
-    const items = this.commandList.map((c) =>
-      `{"name":${JSON.stringify(c.name)},"paramNames":${JSON.stringify(c.paramNames)},"paramTypes":${JSON.stringify(c.paramTypes)},"paramDefaults":${JSON.stringify(c.paramDefaults)}}`).join(',');
-    return `{"revision":${this.commandRevision},"commands":[${items}]}`;
+    return JSON.stringify({ revision: this.commandRevision, commands: this.commandList });
   }
 
   private tuningJson(): string {
@@ -1195,7 +1214,7 @@ function optLong(o: Record<string, unknown>, key: string): number {
 
 /**
  * Port of `RobotApiRouter.parseCommandArguments` + `CommandArgs.convertAll` (arguments stay text here).
- * Returns the completed argument list (omitted trailing defaults filled in) or an error message.
+ * Returns the exact new signature's arguments, a legacy default-completed list, or an error message.
  */
 function completeCommandArgs(cmd: MockCommand, rawArgs: unknown): string[] | string {
   const values: string[] = [];
@@ -1205,6 +1224,15 @@ function completeCommandArgs(cmd: MockCommand, rawArgs: unknown): string[] | str
       if (typeof rawArgs[i] !== 'string') return `args[${i}] is not a string`;
       values.push(rawArgs[i] as string);
     }
+  }
+  if (cmd.signatures !== undefined) {
+    const signature = cmd.signatures.find((s) => s.paramNames.length === values.length);
+    if (!signature) return `${cmd.name} does not accept ${values.length} argument(s)`;
+    for (let i = 0; i < values.length; i++) {
+      const bad = javaConvertError(values[i] as string, signature.paramTypes[i] ?? '');
+      if (bad) return `Argument ${i}: ${bad}`;
+    }
+    return values;
   }
   const n = cmd.paramNames.length;
   const defaults = cmd.paramDefaults ?? [];
@@ -1300,5 +1328,23 @@ export function seedSampleRobot(robot: MockRobotServer): void {
     { name: 'setLift', paramNames: ['height'], paramTypes: ['double'] },
     // Firmware names commands "<subsystem>.<method>" and publishes defaults for trailing parameters
     { name: 'shooter.spin', paramNames: ['rpm', 'power', 'reverse', 'label'], paramTypes: ['int', 'double', 'boolean', 'String'], paramDefaults: [null, '0.8', 'true', ''] },
+    // New firmware: omission selects the no-argument method even without a known default.
+    {
+      name: 'intaker.intakerIn', paramNames: ['power'], paramTypes: ['double'], paramDefaults: [null],
+      signatures: [
+        { paramNames: [], paramTypes: [], paramDefaults: [] },
+        { paramNames: ['power'], paramTypes: ['double'], paramDefaults: [null] },
+      ],
+      acceptedArgCounts: [0, 1], hasUnifiedSignature: true, requiredParamCount: 0, paramRequired: [false],
+    },
+    // A gap and changed prefix require explicit signature selection, not optional-prefix controls.
+    {
+      name: 'overload.different', paramNames: ['count', 'power', 'label'], paramTypes: ['int', 'double', 'String'], paramDefaults: [null, '0.8', ''],
+      signatures: [
+        { paramNames: ['enabled'], paramTypes: ['boolean'], paramDefaults: [null] },
+        { paramNames: ['count', 'power', 'label'], paramTypes: ['int', 'double', 'String'], paramDefaults: [null, '0.8', ''] },
+      ],
+      acceptedArgCounts: [1, 3], hasUnifiedSignature: false, requiredParamCount: null, paramRequired: null,
+    },
   ]);
 }

@@ -4,6 +4,8 @@ import { OrientedTrajectory2D } from '../../core/spline';
 import { connData, connState, getConnection } from '../../state/session';
 import type { ControlNode } from '../../core/node';
 import { validateNodes } from '../../core/contract';
+import { argsValid, commandVariants, draftArgs, resolveArgs, variantForArgs } from '../../core/commandArgs';
+import { CommandArguments } from './commandArguments';
 import { commandCatalog } from '../../state/robotData';
 import { NODE_FIELDS, NODE_FIELD_ORDER, NODE_MAIN_SECTIONS, estimateBrakeZone, estimateStartSpeed, parkingBrakeZone, type FieldSection, type FieldSpec, type NodeFieldKey } from '../nodeFields';
 import { showDialog } from './dialogs';
@@ -86,13 +88,17 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => { setD((o) => ({ ...o, [k]: v })); setErrors((e) => { const n = { ...e }; delete n[k]; return n; }); };
 
+  const variantIndex = desc ? variantForArgs(desc, d.commandParams) : -1;
   const setCommand = (name: string) => {
+    if (name === d.command) return;
     const dsc = catalog?.commands.find((c) => c.name === name);
-    setD((o) => {
-      let params = o.commandParams;
-      if (dsc) params = Array.from({ length: dsc.paramNames.length }, (_, i) => o.commandParams[i] ?? '');
-      return { ...o, command: name, commandParams: params };
-    });
+    const variant = dsc ? commandVariants(dsc)[0] : undefined;
+    // 显式换命令才重置；打开对话框及目录更新都不补齐或截断已存参数。
+    setD((o) => ({ ...o, command: name, commandParams: variant ? draftArgs(variant) : [] }));
+  };
+  const selectVariant = (index: number) => {
+    const variant = desc ? commandVariants(desc)[index] : undefined;
+    if (variant) set('commandParams', draftArgs(variant));
   };
 
   const save = (e: Event) => {
@@ -105,7 +111,12 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
       for (const i of issues) if (i.field && i.field in NODE_FIELDS) m[i.field as NodeFieldKey] ??= i.message;
       if (Object.keys(m).length) { setErrors(m); if (m.maxPower || m.maxSpeed || m.endSpeed || m.brakeZoneIn || m.brakeForwardPower) setShowAdv(true); return; }
     }
-    // 参数未填写：与 Kotlin 一致，允许保存（离开编辑器时再提示）
+    // 合法参数才规范化（新目录省略可选尾参，旧目录补默认值）；无效草稿原样保留。
+    const currentDesc = commandCatalog.value?.commands.find((c) => c.name === r.node.command);
+    if (currentDesc && argsValid(currentDesc, r.node.commandParams)) {
+      r.node.commandParams = resolveArgs(currentDesc, r.node.commandParams);
+    }
+    // 参数未填写或不符合当前签名：仍允许保存，离开编辑器时再提示。
     p.onDone({ kind: 'save', node: r.node });
   };
 
@@ -159,15 +170,21 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
         return (
           <div class="nf wide" key={k}>
             <label class="nf-label"><span>{zh}</span></label>
-            {d.commandParams.map((v, i) => (
-              <div class="param-row" key={i}>
-                <input type="text" aria-label={S.node.paramN(i + 1)} value={v}
-                  placeholder={desc ? `${desc.paramNames[i] ?? S.node.paramN(i + 1)} (${desc.paramTypes[i] ?? ''})` : S.node.paramN(i + 1)}
-                  onInput={(e) => { const arr = [...d.commandParams]; arr[i] = (e.target as HTMLInputElement).value; set('commandParams', arr); }} />
-                {!desc && <button type="button" class="icon ghost" aria-label={S.node.removeParam} title={S.node.removeParam} onClick={() => set('commandParams', d.commandParams.filter((_, j) => j !== i))}><IconClose /></button>}
-              </div>
-            ))}
-            {!desc && <button type="button" class="ghost" onClick={() => set('commandParams', [...d.commandParams, ''])}><IconPlus />{S.node.addParam}</button>}
+            {desc ? <>
+              <CommandArguments idPrefix="nf-command" command={desc} variantIndex={variantIndex} args={d.commandParams}
+                onVariant={selectVariant} onArgs={(args) => set('commandParams', args)} />
+              {!argsValid(desc, d.commandParams) && <div class="hint">{S.commands.invalidArgs}</div>}
+            </> : <>
+              {d.commandParams.map((v, i) => (
+                <div class="param-row" key={i}>
+                  <input type="text" aria-label={S.node.paramN(i + 1)} value={v} placeholder={S.node.paramN(i + 1)}
+                    onInput={(e) => { const arr = [...d.commandParams]; arr[i] = (e.target as HTMLInputElement).value; set('commandParams', arr); }} />
+                  <button type="button" class="icon ghost" aria-label={S.node.removeParam} title={S.node.removeParam} onClick={() => set('commandParams', d.commandParams.filter((_, j) => j !== i))}><IconClose /></button>
+                </div>
+              ))}
+              <button type="button" class="ghost" onClick={() => set('commandParams', [...d.commandParams, ''])}><IconPlus />{S.node.addParam}</button>
+            </>}
+            {errEl}
           </div>
         );
       default:

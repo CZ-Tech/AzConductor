@@ -3,6 +3,7 @@ import { docStore } from '../../state/docStore';
 import type { ControlNode } from '../../core/node';
 import { RouteCore } from '../../core/route';
 import { validateNodes } from '../../core/contract';
+import { argsValid } from '../../core/commandArgs';
 import { exportRouteJson, exportRobotWireJson } from '../../core/archive';
 import {
   FIELD_HALF, appendedNode, clampToField, headingFromPointer, logicalToScreen, nodeAtLogical,
@@ -37,8 +38,7 @@ function hasMissingParams(points: readonly ControlNode[]): boolean {
   return points.some((p) => {
     if (!p.command) return false;
     const d = commandByName(p.command);
-    const need = d ? d.paramNames.length : p.commandParams.length;
-    return p.commandParams.length < need || p.commandParams.some((v) => v.trim() === '');
+    return d ? !argsValid(d, p.commandParams) : p.commandParams.some((v) => v.trim() === '');
   });
 }
 

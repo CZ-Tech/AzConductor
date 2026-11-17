@@ -4,7 +4,8 @@
  * SessionLease / OpModeLifecycleService of the real robot.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { MockRobotServer } from '../../src/tools/mock-robot';
+import { MockRobotServer, seedSampleRobot, type MockCommand } from '../../src/tools/mock-robot';
+import { DecodeError, decodeCommandCatalog } from '../../src/net/models';
 import { SseParser, type SseMessage } from '../../src/net/transport';
 import { Cleanup, ROUTE_A, ROUTE_B, sleep, waitFor } from './_util';
 
@@ -512,6 +513,205 @@ describe('op mode lifecycle', () => {
     const r = await act(robot, t, 'init', { name: 'Auto A', expectedRevision: stale });
     expect(r.status).toBe(409);
     expect(r.json().error).toBe('state_changed');
+  });
+});
+
+describe('exact command overload HTTP contract', () => {
+  const optionalName = 'intaker.intakerIn';
+  const differentName = 'overload.different';
+  const run = (robot: MockRobotServer, token: string, name: string, args: unknown) =>
+    call(robot, 'POST', '/api/v2/commands/run', { token, body: JSON.stringify({ name, args, expectedRevision: robot.opModeRevision }) });
+
+  async function ready(start = true) {
+    const robot = await cleanup.mock({ runDurationMs: 60_000 });
+    seedSampleRobot(robot);
+    const token = await login(robot);
+    if (start) {
+      for (const action of ['init', 'start']) {
+        const reply = await call(robot, 'POST', `/api/v2/opmode/${action}`, {
+          token, body: JSON.stringify({ name: 'RemoteCommand Test', expectedRevision: robot.opModeRevision }),
+        });
+        expect(reply.status).toBe(202);
+      }
+    }
+    return { robot, token };
+  }
+
+  it('publishes exact signatures and explicit nulls while keeping legacy response fields unchanged', async () => {
+    const { robot, token } = await ready(false);
+    const response = await call(robot, 'GET', '/api/v2/commands', { token });
+    expect(response.status).toBe(200);
+    const catalog = decodeCommandCatalog(response.json());
+    expect(catalog.commands.find((c) => c.name === optionalName)).toEqual({
+      name: optionalName, paramNames: ['power'], paramTypes: ['double'], paramDefaults: [null],
+      signatures: [
+        { paramNames: [], paramTypes: [], paramDefaults: [] },
+        { paramNames: ['power'], paramTypes: ['double'], paramDefaults: [null] },
+      ],
+      acceptedArgCounts: [0, 1], hasUnifiedSignature: true, requiredParamCount: 0, paramRequired: [false],
+    });
+    expect(catalog.commands.find((c) => c.name === differentName)).toMatchObject({
+      acceptedArgCounts: [1, 3], hasUnifiedSignature: false, requiredParamCount: null, paramRequired: null,
+    });
+    expect(response.json().commands.find((c: { name: string }) => c.name === 'shoot')).toEqual({
+      name: 'shoot', paramNames: ['count', 'power'], paramTypes: ['int', 'double'], paramDefaults: [null, '0.8'],
+    });
+  });
+
+  it('rejects partial or forged metadata received over HTTP rather than downgrading to legacy', async () => {
+    const { robot, token } = await ready(false);
+    const partial = robot.commands.find((c) => c.name === optionalName)!;
+    delete partial.requiredParamCount;
+    robot.setCommands([partial]);
+    const response = await call(robot, 'GET', '/api/v2/commands', { token });
+    expect(response.status).toBe(200);
+    expect(() => decodeCommandCatalog(response.json())).toThrow(DecodeError);
+    const forged = robot.commands[0]!;
+    forged.requiredParamCount = 0;
+    forged.paramRequired = [true];
+    robot.setCommands([forged]);
+    const bad = await call(robot, 'GET', '/api/v2/commands', { token });
+    expect(() => decodeCommandCatalog(bad.json())).toThrow(DecodeError);
+  });
+
+  it('defensively copies input and exposed catalog metadata, including every nested array', async () => {
+    const { robot, token } = await ready(false);
+    const command = robot.commands.find((c) => c.name === optionalName)!;
+    const gap = robot.commands.find((c) => c.name === differentName)!;
+    const expected = structuredClone([command, gap]);
+    robot.setCommands([command, gap]);
+    command.paramNames[0] = 'changed';
+    command.paramTypes[0] = 'String';
+    command.paramDefaults![0] = 'bad';
+    command.signatures![1]!.paramNames[0] = 'changed';
+    command.signatures![1]!.paramTypes[0] = 'String';
+    command.signatures![1]!.paramDefaults[0] = 'bad';
+    command.acceptedArgCounts!.push(2);
+    command.paramRequired![0] = true;
+    command.hasUnifiedSignature = false;
+    command.requiredParamCount = null;
+    const exposed = robot.commands[0]!;
+    exposed.signatures![0]!.paramNames.push('also changed');
+    exposed.acceptedArgCounts!.push(3);
+    exposed.paramRequired![0] = true;
+    const response = await call(robot, 'GET', '/api/v2/commands', { token });
+    expect(response.json().commands).toEqual(expected);
+    expect(decodeCommandCatalog(response.json()).commands).toEqual(expected);
+  });
+
+  it('calls the 0/1 overload with null default using exactly the supplied arguments', async () => {
+    const { robot, token } = await ready();
+    for (const args of [[], ['0.4'], null, undefined]) {
+      expect((await run(robot, token, optionalName, args)).status).toBe(202);
+    }
+    expect(robot.commandRuns).toEqual([
+      { name: optionalName, args: [] }, { name: optionalName, args: ['0.4'] },
+      { name: optionalName, args: [] }, { name: optionalName, args: [] },
+    ]);
+  });
+
+  it('does not expand an omitted explicit default, but accepts it when explicitly supplied', async () => {
+    const { robot, token } = await ready();
+    const command = robot.commands.find((c) => c.name === optionalName)!;
+    command.paramDefaults = ['0.8'];
+    command.signatures![1]!.paramDefaults = ['0.8'];
+    robot.setCommands([command]);
+    expect((await run(robot, token, optionalName, [])).status).toBe(202);
+    expect((await run(robot, token, optionalName, ['0.8'])).status).toBe(202);
+    expect(robot.commandRuns).toEqual([{ name: optionalName, args: [] }, { name: optionalName, args: ['0.8'] }]);
+    // A known default alone never creates a callable arity on new firmware.
+    command.signatures = [command.signatures![1]!];
+    command.acceptedArgCounts = [1];
+    command.requiredParamCount = 1;
+    command.paramRequired = [true];
+    robot.setCommands([command]);
+    expect((await run(robot, token, optionalName, [])).json().error).toBe('invalid_command_args');
+    expect(robot.commandRuns).toHaveLength(2);
+  });
+
+  it('selects the short signature types instead of the longest prefix and refuses arity gaps', async () => {
+    const { robot, token } = await ready();
+    expect((await run(robot, token, differentName, ['true'])).status).toBe(202);
+    expect((await run(robot, token, differentName, ['FALSE'])).status).toBe(202);
+    expect((await run(robot, token, differentName, ['2', '0.5', 'label'])).status).toBe(202);
+    for (const args of [[], ['1'], ['1', '0.8'], ['true', '0.8', 'label'], ['1', '0.8', 'label', 'extra']]) {
+      const reply = await run(robot, token, differentName, args);
+      expect(reply.status, JSON.stringify(args)).toBe(400);
+      expect(reply.json().error).toBe('invalid_command_args');
+    }
+    expect(robot.commandRuns).toEqual([
+      { name: differentName, args: ['true'] }, { name: differentName, args: ['FALSE'] },
+      { name: differentName, args: ['2', '0.5', 'label'] },
+    ]);
+  });
+
+  it('also selects exact types when contiguous arities have incompatible prefixes', async () => {
+    const { robot, token } = await ready();
+    const command: MockCommand = {
+      name: 'changed', paramNames: ['count', 'label'], paramTypes: ['int', 'String'], paramDefaults: [null, null],
+      signatures: [
+        { paramNames: ['enabled'], paramTypes: ['boolean'], paramDefaults: [null] },
+        { paramNames: ['count', 'label'], paramTypes: ['int', 'String'], paramDefaults: [null, null] },
+      ],
+      acceptedArgCounts: [1, 2], hasUnifiedSignature: false, requiredParamCount: null, paramRequired: null,
+    };
+    robot.setCommands([command]);
+    expect((await run(robot, token, 'changed', ['true'])).status).toBe(202);
+    expect((await run(robot, token, 'changed', ['4', ''])).status).toBe(202);
+    expect((await run(robot, token, 'changed', ['4'])).status).toBe(400);
+    expect((await run(robot, token, 'changed', ['true', 'text'])).status).toBe(400);
+    expect(robot.commandRuns).toEqual([{ name: 'changed', args: ['true'] }, { name: 'changed', args: ['4', ''] }]);
+  });
+
+  it('rejects invalid exact conversions and malformed POST args without recording command runs', async () => {
+    const { robot, token } = await ready();
+    const invalid: [string, unknown][] = [
+      [optionalName, ['not-a-number']], [optionalName, ['NaN']], [optionalName, ['Infinity']],
+      [optionalName, ['1e999']], [optionalName, ['0.1', '0.2']], [optionalName, [0.4]],
+      [optionalName, [null]], [optionalName, {}], [optionalName, '0.4'],
+      [differentName, ['maybe']], [differentName, ['1.5', '0.8', 'label']],
+      [differentName, ['2147483648', '0.8', 'label']], [differentName, [' 1', '0.8', 'label']],
+      [differentName, ['1', 'NaN', 'label']], [differentName, ['1', '0.8']],
+    ];
+    for (const [name, args] of invalid) {
+      const reply = await run(robot, token, name, args);
+      expect(reply.status, JSON.stringify([name, args])).toBe(400);
+      expect(reply.json().error).toBe('invalid_command_args');
+      expect(robot.commandRuns).toEqual([]);
+    }
+    expect(robot.requestsTo('/api/v2/commands/run', 'POST')).toHaveLength(invalid.length);
+  });
+
+  it('keeps authentication, revision, controller, lookup, args and lifecycle error ordering', async () => {
+    const { robot, token } = await ready(false);
+    const post = (body: unknown, auth = token) => call(robot, 'POST', '/api/v2/commands/run', { token: auth, body: JSON.stringify(body) });
+    expect((await post({}, 'wrong')).json().error).toBe('invalid_session');
+    expect((await post({})).json().error).toBe('missing_command_name');
+    expect((await post({ name: optionalName })).json().error).toBe('expected_revision_required');
+    expect((await post({ name: 'unknown', args: ['bad'], expectedRevision: 99 })).json().error).toBe('state_changed');
+    robot.setControllerAvailable(false);
+    expect((await run(robot, token, 'unknown', ['bad'])).json().error).toBe('controller_unavailable');
+    robot.setControllerAvailable(true);
+    expect((await run(robot, token, 'unknown', ['bad'])).json().error).toBe('command_not_found');
+    // Bad arguments are checked before STOPPED lifecycle readiness, as on the firmware.
+    expect((await run(robot, token, optionalName, ['bad'])).json().error).toBe('invalid_command_args');
+    const stopped = await run(robot, token, optionalName, []);
+    expect(stopped.status).toBe(409);
+    expect(stopped.json().error).toBe('command_not_ready');
+    expect(robot.commandRuns).toEqual([]);
+  });
+
+  it('keeps legacy default completion separate from exact signature omission', async () => {
+    const { robot, token } = await ready();
+    expect((await run(robot, token, 'shoot', ['3'])).status).toBe(202);
+    expect((await run(robot, token, 'shooter.spin', ['900'])).status).toBe(202);
+    expect((await run(robot, token, 'intakeOn', [])).status).toBe(202);
+    expect((await run(robot, token, optionalName, [])).status).toBe(202);
+    expect(robot.commandRuns).toEqual([
+      { name: 'shoot', args: ['3', '0.8'] },
+      { name: 'shooter.spin', args: ['900', '0.8', 'true', ''] },
+      { name: 'intakeOn', args: [] }, { name: optionalName, args: [] },
+    ]);
   });
 });
 
