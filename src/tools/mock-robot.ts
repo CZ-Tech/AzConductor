@@ -13,7 +13,7 @@
  *   await robot.stop();
  *
  * Differences from the real robot, on purpose: the mock listens on loopback by default, a route
- * PUT body is stored verbatim (the real router does not validate it either), and opmode actions
+ * PUT body is stored verbatim after the firmware's route-envelope validation, and opmode actions
  * take effect synchronously (the real backend publishes the new phase a moment later).
  */
 import { randomBytes } from 'node:crypto';
@@ -21,7 +21,10 @@ import http from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { makeNode, type ControlNode } from '../core/node';
 import { RouteCore } from '../core/route';
-import { decodeRobotRoute, encodeRobotRoute } from '../core/wire';
+import { decodeRobotRoute, encodeRobotRoute, type RobotRouteV2 } from '../core/wire';
+import { unwrapRobotFrames } from '../core/routeFormat';
+
+type MockRouteInput = string | readonly ControlNode[] | readonly unknown[] | RobotRouteV2;
 import type { CommandParameterSignature, TuningField, TuningValue } from '../net/models';
 
 // ---------------------------------------------------------------------------------------------
@@ -444,13 +447,13 @@ export class MockRobotServer {
   // ===========================================================================================
 
   /** Insert/overwrite a route without bumping its revision logic: it gets exactly `revision`. */
-  seedRoute(name: string, route: string | readonly ControlNode[] | readonly unknown[], revision = 1): void {
+  seedRoute(name: string, route: MockRouteInput, revision = 1): void {
     this.routeMap.set(name, { name, json: routeToJson(route), revision });
     this.routeChangeRevision++;
   }
 
   /** Simulate another computer writing the route: revision +1 (or 1 if new), change revision +1. */
-  mutateRemoteRoute(name: string, route: string | readonly ControlNode[] | readonly unknown[]): MockRouteEntry {
+  mutateRemoteRoute(name: string, route: MockRouteInput): MockRouteEntry {
     const cur = this.routeMap.get(name);
     const entry: MockRouteEntry = { name, json: routeToJson(route), revision: cur ? cur.revision + 1 : 1 };
     this.routeMap.set(name, entry);
@@ -835,6 +838,12 @@ export class MockRobotServer {
     if (method === 'PUT') {
       const expected = parseIfMatch(ctx.headers['if-match']);
       if (expected === null) return json(428, '{"error":"if_match_required"}');
+      try {
+        // The router checks only the envelope, not front-end model representability or geometry.
+        unwrapRobotFrames(JSON.parse(ctx.body));
+      } catch (e) {
+        return json(400, JSON.stringify({ error: 'invalid_route_json', message: e instanceof Error ? e.message : 'Invalid route JSON' }));
+      }
       const hook = this.beforeNextPut;
       if (hook) {
         this.beforeNextPut = null;
@@ -1276,11 +1285,14 @@ function javaConvertError(value: string, type: string): string | null {
   }
 }
 
-function routeToJson(route: string | readonly ControlNode[] | readonly unknown[]): string {
+function routeToJson(route: MockRouteInput): string {
   if (typeof route === 'string') return route;
-  const first = route[0];
-  // ControlNode[] (no `wait` frames yet) → wire format; already-encoded frames pass through.
-  const isNodes = first !== undefined && typeof first === 'object' && first !== null && 'commandParams' in first;
+  if (!Array.isArray(route)) return JSON.stringify(route);
+  const first: unknown = route[0];
+  // delayAfterArrive belongs to the complete internal node model, unlike wire commands.
+  const isNodes = first !== undefined && typeof first === 'object' && first !== null &&
+    'delayAfterArrive' in first && typeof first.delayAfterArrive === 'number' &&
+    'commands' in first && Array.isArray(first.commands);
   return JSON.stringify(isNodes ? encodeRobotRoute(route as readonly ControlNode[]) : route);
 }
 
@@ -1298,9 +1310,12 @@ function node(x: number, y: number, extra: Partial<ControlNode> = {}): ControlNo
 export function seedSampleRobot(robot: MockRobotServer): void {
   robot.seedRoute('Red Near', [
     node(-60, 36, { heading: 0, duration: 0 }),
-    node(-36, 36, { dx: 40, heading: 45, duration: 2, delayAfterArrive: 0.5, marker: 'shoot' }),
+    node(-36, 36, { dx: 40, heading: 45, duration: 2, delayAfterArrive: 0.5, marker: 'shoot', commands: [
+      { name: 'auto.shoot', params: ['3200', '500', '250'] },
+      { name: 'auto.waitMillis', params: ['100'] },
+    ] }),
     node(-12, 12, { dx: 30, dy: -20, heading: 90, duration: 2.5 }),
-    node(-12, -24, { dy: -30, heading: 135, duration: 2, command: 'intakeOn' }),
+    node(-12, -24, { dy: -30, heading: 135, duration: 2, commands: [{ name: 'intakeOn', params: [] }] }),
   ]);
   robot.seedRoute('Blue Far', [
     node(60, -36, { heading: 180, duration: 0 }),
@@ -1322,6 +1337,9 @@ export function seedSampleRobot(robot: MockRobotServer): void {
   ]);
 
   robot.setCommands([
+    // Ordinary directory commands: accepted into the dispatcher only; no hardware/Java aggregate simulation.
+    { name: 'auto.shoot', paramNames: ['rpm', 'spinupMillis', 'feedMillis'], paramTypes: ['double', 'long', 'long'] },
+    { name: 'auto.waitMillis', paramNames: ['millis'], paramTypes: ['long'] },
     { name: 'intakeOn', paramNames: [], paramTypes: [] },
     { name: 'intakeOff', paramNames: [], paramTypes: [] },
     { name: 'shoot', paramNames: ['count', 'power'], paramTypes: ['int', 'double'], paramDefaults: [null, '0.8'] },

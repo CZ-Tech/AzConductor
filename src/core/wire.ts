@@ -5,14 +5,14 @@
  * - 可选字段 maxSpeed/endSpeed/brakeZoneIn/brakeForwardPower 缺省时省略，永不输出 null。
  * - 比较路径一律比较解析后的结构 / canonicalRoute，不要比较原始文本。
  */
-import type { ControlNode } from './node';
+import { cloneCommands, type ControlNode } from './node';
 import { primitiveContent, primitiveDouble } from './contract';
+import { decodeCommands, unwrapRobotFrames, WireError } from './routeFormat';
+export { WireError } from './routeFormat';
 
-export class WireError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'WireError';
-  }
+export interface RobotRouteV2 {
+  version: 2;
+  frames: Record<string, unknown>[];
 }
 
 /** 点帧键序（与 Kotlin ControlNode 声明顺序一致，去掉 delayAfterArrive）。 */
@@ -26,8 +26,7 @@ export function encodeNodeFrame(n: ControlNode): Record<string, unknown> {
     dHeading: n.dHeading,
     duration: n.duration,
     marker: n.marker,
-    command: n.command,
-    commandParams: [...n.commandParams],
+    commands: cloneCommands(n.commands),
     maxPower: n.maxPower,
   };
   if (n.maxSpeed != null) f['maxSpeed'] = n.maxSpeed;
@@ -37,13 +36,13 @@ export function encodeNodeFrame(n: ControlNode): Record<string, unknown> {
   return f;
 }
 
-export function encodeRobotRoute(nodes: readonly ControlNode[]): unknown[] {
-  const frames: unknown[] = [];
+export function encodeRobotRoute(nodes: readonly ControlNode[]): RobotRouteV2 {
+  const frames: Record<string, unknown>[] = [];
   for (const n of nodes) {
     frames.push(encodeNodeFrame(n));
     if (n.delayAfterArrive > 0) frames.push({ wait: n.delayAfterArrive });
   }
-  return frames;
+  return { version: 2, frames };
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -79,14 +78,6 @@ function optStr(obj: Record<string, unknown>, key: string, frameNo: number): str
 export function decodeNodeFrame(obj: Record<string, unknown>, frameNo: number): ControlNode {
   const x = reqNum(obj, 'x', frameNo);
   const y = reqNum(obj, 'y', frameNo);
-  let commandParams: string[] = [];
-  if (has(obj, 'commandParams')) {
-    const cp = obj['commandParams'];
-    if (!Array.isArray(cp) || cp.some((s) => typeof s !== 'string')) {
-      throw new WireError(`第 ${frameNo} 帧 commandParams 必须为字符串数组`);
-    }
-    commandParams = [...(cp as string[])];
-  }
   const node: ControlNode = {
     x,
     dx: optNum(obj, 'dx', frameNo, 0),
@@ -96,8 +87,7 @@ export function decodeNodeFrame(obj: Record<string, unknown>, frameNo: number): 
     dHeading: optNum(obj, 'dHeading', frameNo, 0),
     duration: optNum(obj, 'duration', frameNo, 1),
     marker: optStr(obj, 'marker', frameNo),
-    command: optStr(obj, 'command', frameNo),
-    commandParams,
+    commands: decodeCommands(obj, frameNo),
     delayAfterArrive: optNum(obj, 'delayAfterArrive', frameNo, 0),
     maxPower: optNum(obj, 'maxPower', frameNo, 1),
   };
@@ -111,8 +101,8 @@ export function decodeNodeFrame(obj: Record<string, unknown>, frameNo: number): 
   return node;
 }
 
-export function decodeRobotRoute(frames: unknown): ControlNode[] {
-  if (!Array.isArray(frames)) throw new WireError('机器人路径必须是 JSON 数组');
+export function decodeRobotRoute(value: unknown): ControlNode[] {
+  const frames = unwrapRobotFrames(value);
   const nodes: ControlNode[] = [];
   frames.forEach((frame: unknown, index: number) => {
     const frameNo = index + 1;
@@ -124,8 +114,8 @@ export function decodeRobotRoute(frames: unknown): ControlNode[] {
       }
       if (nodes.length === 0) throw new WireError('起始点之前的 wait 无法在控制点模型中表示');
       const m = primitiveContent(frame['marker']);
-      const c = primitiveContent(frame['command']);
-      if (!((m === null || m === '') && (c === null || c === ''))) {
+      const commands = decodeCommands(frame, frameNo);
+      if (!((m === null || m === '') && commands.length === 0)) {
         throw new WireError('带事件的独立 wait 无法无损导入控制点模型');
       }
       const last = nodes.length - 1;
@@ -138,9 +128,26 @@ export function decodeRobotRoute(frames: unknown): ControlNode[] {
   return nodes;
 }
 
-/** 规范化文本：encode(decode(encode(nodes))) 的 JSON，键序固定。仅用于指纹，比较请用解析后的结构。 */
+/** 版本无关的语义规范；0/1 命令保持旧编码及键序，保留已有同步基线指纹。 */
 export function canonicalRoute(nodes: readonly ControlNode[]): string {
-  return JSON.stringify(encodeRobotRoute(decodeRobotRoute(encodeRobotRoute(nodes))));
+  const normalized = decodeRobotRoute(encodeRobotRoute(nodes));
+  const frames: Record<string, unknown>[] = [];
+  for (const node of normalized) {
+    const frame = encodeNodeFrame(node);
+    const canonical: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(frame)) {
+      if (key === 'commands' && node.commands.length <= 1) {
+        const command = node.commands[0];
+        canonical['command'] = command?.name ?? '';
+        canonical['commandParams'] = [...(command?.params ?? [])];
+      } else {
+        canonical[key] = value;
+      }
+    }
+    frames.push(canonical);
+    if (node.delayAfterArrive > 0) frames.push({ wait: node.delayAfterArrive });
+  }
+  return JSON.stringify(frames);
 }
 
 const FNV_OFFSET = 0xcbf29ce484222325n;

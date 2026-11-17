@@ -1,14 +1,47 @@
 import { describe, expect, it } from 'vitest';
-import { fromDraft } from '../../src/ui/components/nodeEditor';
+import { fromDraft, toDraft } from '../../src/ui/components/nodeEditor';
+import { commandDraft } from '../../src/ui/components/nodeCommands';
 import { estimateBrakeZone, estimateStartSpeed, parkingBrakeZone } from '../../src/ui/nodeFields';
 import { makeNode } from '../../src/core/node';
 import { OrientedTrajectory2D } from '../../src/core/spline';
 
 const draft = {
   x: '0', y: '0', dx: '0', dy: '0', heading: '0', dHeading: '0', duration: '1',
-  delayAfterArrive: '0', marker: '', command: '', commandParams: [], maxPower: '1',
+  delayAfterArrive: '0', marker: '', commands: [], maxPower: '1',
   maxSpeed: '30', endSpeed: '0', brakeZoneIn: '', brakeForwardPower: '',
 };
+
+describe('有序指令草稿', () => {
+  it('完整保留几何、高级字段、重复指令及原参数长度，UI id 不落盘', () => {
+    const node = makeNode({ x: 1, y: 2, dx: 3, dy: 4, heading: 50, dHeading: 6,
+      duration: 7, delayAfterArrive: 8, marker: 'tag', maxPower: 0.9, maxSpeed: 20,
+      endSpeed: 0, brakeZoneIn: 0, brakeForwardPower: 0.2,
+      commands: [{ name: 'same', params: ['a', '', 'extra'] }, { name: 'same', params: [] }] });
+    const d = toDraft(node);
+    expect(new Set(d.commands.map((c) => c.uiId)).size).toBe(2);
+    const result = fromDraft(d);
+    expect(result).toEqual({ node });
+    expect(JSON.stringify(result)).not.toContain('uiId');
+    d.commands[0]!.params[0] = 'changed';
+    expect(node.commands[0]!.params[0]).toBe('a');
+    expect('node' in result && result.node.commands[0]!.params[0]).toBe('a');
+  });
+
+  it('空白新增行可忽略，但带参数的无名行必须报错', () => {
+    expect(fromDraft({ ...draft, commands: [commandDraft()] })).toMatchObject({ node: { commands: [] } });
+    expect(fromDraft({ ...draft, commands: [commandDraft({ name: '  ', params: [''] })] })).toHaveProperty('errors.commands');
+  });
+
+  it('重排保留行身份和独立参数，保存保持顺序及无效参数草稿', () => {
+    const a = commandDraft({ name: 'same', params: ['1'] });
+    const b = commandDraft({ name: 'same', params: ['2', ''] });
+    const d = { ...draft, commands: [b, a] };
+    expect(d.commands.map((c) => c.uiId)).toEqual([b.uiId, a.uiId]);
+    expect(fromDraft(d)).toMatchObject({ node: { commands: [
+      { name: 'same', params: ['2', ''] }, { name: 'same', params: ['1'] },
+    ] } });
+  });
+});
 
 describe('目标段起速估算', () => {
   const point = (x: number, extra: Partial<Parameters<typeof makeNode>[0]> = {}) =>

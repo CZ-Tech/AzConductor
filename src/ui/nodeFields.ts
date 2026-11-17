@@ -4,7 +4,7 @@
 import type { ControlNode } from '../core/node';
 import { OrientedTrajectory2D } from '../core/spline';
 
-export type FieldKind = 'text' | 'number' | 'optNumber' | 'command' | 'params';
+export type FieldKind = 'text' | 'number' | 'optNumber' | 'commands';
 /** 表单分组；`advanced` 放进折叠区。 */
 export type FieldSection = 'pose' | 'motion' | 'command' | 'advanced';
 export interface FieldSpec {
@@ -15,8 +15,7 @@ export interface FieldSpec {
 
 export const NODE_FIELDS = {
   marker: { kind: 'text', section: 'command' },
-  command: { kind: 'command', section: 'command' },
-  commandParams: { kind: 'params', section: 'command' },
+  commands: { kind: 'commands', section: 'command' },
   heading: { kind: 'number', section: 'motion', step: '1' },
   dHeading: { kind: 'number', section: 'motion', step: '1' },
   duration: { kind: 'number', section: 'motion', step: '0.1' },
@@ -36,7 +35,7 @@ export type NodeFieldKey = keyof typeof NODE_FIELDS;
 
 /** 表单显示顺序（各字段按 section 分组呈现）。 */
 export const NODE_FIELD_ORDER: readonly NodeFieldKey[] = [
-  'x', 'y', 'dx', 'dy', 'heading', 'dHeading', 'duration', 'delayAfterArrive', 'marker', 'command', 'commandParams',
+  'x', 'y', 'dx', 'dy', 'heading', 'dHeading', 'duration', 'delayAfterArrive', 'marker', 'commands',
   'maxPower', 'maxSpeed', 'endSpeed', 'brakeZoneIn', 'brakeForwardPower',
 ];
 

@@ -159,8 +159,8 @@ export function RunView() {
   // ---------- 任务列表 ----------
   const tasks = useMemo(() => {
     if (!nodes || !core) return [];
-    return nodes.map((n, i) => ({ n, i, t: i === 0 ? core.initialDelay : core.segmentEndTimes[i - 1] ?? 0 }))
-      .filter((x) => x.n.command || x.n.marker);
+    return nodes.map((n, i) => ({ n, i, t: i === 0 ? 0 : core.segmentEndTimes[i - 1] ?? 0 }))
+      .filter((x) => x.n.commands.length > 0 || x.n.marker);
   }, [nodes, core]);
 
   const hint = !connected ? null
@@ -180,7 +180,7 @@ export function RunView() {
             {nodes && <PathCurve nodes={nodes} color="var(--f-casing)" widthPx={11} />}{nodes && <PathCurve nodes={nodes} color="var(--f-path)" widthPx={5} />}
             {nodes && nodes.map((n, i) => {
               const c = logicalToScreen(n.x, n.y);
-              const tagged = !!(n.command || n.marker);
+              const tagged = !!(n.commands.length > 0 || n.marker);
               return (
                 <g key={i} transform={`translate(${c.sx} ${c.sy})`} pointer-events="none">
                   <circle style={`r:${px(tagged ? 11 : 6.5)};stroke-width:${px(3)}`} fill={tagged ? 'var(--f-command)' : 'var(--f-casing)'} stroke={tagged ? 'var(--f-casing)' : 'var(--f-path)'} />
@@ -247,8 +247,9 @@ export function RunView() {
                 {tasks.map((t) => (
                   <li key={t.i}>
                     <b>{S.editor.node(t.i + 1)}</b>
-                    <span class="mono">{t.t.toFixed(1)}s</span>
-                    <span>{t.n.command ? `${t.n.command}(${t.n.commandParams.join(', ')})` : ''}{t.n.marker ? ` [${t.n.marker}]` : ''}</span>
+                    <span class="mono">{S.run.previewArrival(t.t.toFixed(1))}</span>
+                    {t.n.marker && <span>{t.n.marker}</span>}
+                    <ol class="task-commands">{t.n.commands.map((command, i) => <li key={i}><code>{command.name}({command.params.join(', ')})</code></li>)}</ol>
                   </li>
                 ))}
               </ul>

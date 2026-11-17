@@ -24,8 +24,10 @@ export function randomNode(r: () => number): ControlNode {
     dHeading: between(r, -90, 90),
     duration: r() < 0.1 ? 0 : between(r, 0.1, 5),
     marker: r() < 0.3 ? `m${Math.floor(r() * 100)}` : '',
-    command: r() < 0.3 ? `cmd\u4e2d\u6587${Math.floor(r() * 100)}` : '',
-    commandParams: r() < 0.3 ? ['a', '"q"', '\u00e9'] : [],
+    commands: Array.from({ length: Math.floor(r() * 4) }, () => ({
+      name: `cmd\u4e2d\u6587${Math.floor(r() * 100)}`,
+      params: r() < 0.3 ? ['a', '"q"', '\u00e9'] : [],
+    })),
     delayAfterArrive: r() < 0.4 ? between(r, 0.01, 4) : 0,
     maxPower: between(r, 0, 1),
     brakeZoneIn: r() < 0.3 ? between(r, 1, 20) : r() < 0.5 ? 0 : undefined,

@@ -281,14 +281,13 @@ describe('新点', () => {
   it('appendedNode：继承几何与巡航功率，不继承动作 / 延迟 / 末端制动', () => {
     const last = makeNode({
       x: 0, y: 0, dx: 30, dy: 7, heading: 45, dHeading: 3, duration: 3,
-      marker: 'A', command: 'shoot', commandParams: ['1'], delayAfterArrive: 2,
+      marker: 'A', commands: [{ name: 'shoot', params: ['1'] }], delayAfterArrive: 2,
       endSpeed: 0, brakeZoneIn: 10, brakeForwardPower: 0.2, maxPower: 0.5, maxSpeed: 24,
     });
     const n = appendedNode(last);
     expect(n).toMatchObject({ dx: 30, dy: 7, heading: 45, dHeading: 3, duration: 3, maxPower: 0.5, maxSpeed: 24 });
     expect(n.marker).toBe('');
-    expect(n.command).toBe('');
-    expect(n.commandParams).toEqual([]);
+    expect(n.commands).toEqual([]);
     expect(n.delayAfterArrive).toBe(0);
     expect('brakeZoneIn' in n).toBe(false);
     expect('endSpeed' in n).toBe(false);
@@ -331,7 +330,7 @@ describe('镜像', () => {
   it('mirrorNodes：y/dy/heading/dHeading 取反，其余不变', () => {
     const n = makeNode({
       x: 1, y: 2, dx: 3, dy: 4, heading: 30, dHeading: 5, duration: 2,
-      marker: 'm', command: 'c', commandParams: ['p'], delayAfterArrive: 1, maxPower: 0.5, maxSpeed: 10,
+      marker: 'm', commands: [{ name: 'c', params: ['p'] }], delayAfterArrive: 1, maxPower: 0.5, maxSpeed: 10,
     });
     const [m] = mirrorNodes([n]);
     expect(m).toEqual({ ...n, y: -2, dy: -4, heading: -30, dHeading: -5 });
@@ -370,7 +369,7 @@ describe('中心对称（按场地原点）', () => {
   it('pointSymmetryNodes：x/y/dx/dy 取反，heading 加 180° 并规格化，dHeading 与其余字段不变', () => {
     const base = {
       x: 1, y: 2, dx: 3, dy: 4, dHeading: 5, duration: 2,
-      marker: 'm', command: 'c', commandParams: ['p'], delayAfterArrive: 1, maxPower: 0.5, maxSpeed: 10,
+      marker: 'm', commands: [{ name: 'c', params: ['p'] }], delayAfterArrive: 1, maxPower: 0.5, maxSpeed: 10,
     };
     const [a] = pointSymmetryNodes([makeNode({ ...base, heading: 30 })]);
     expect(a).toEqual({ ...makeNode({ ...base, heading: 30 }), x: -1, y: -2, dx: -3, dy: -4, heading: -150 });

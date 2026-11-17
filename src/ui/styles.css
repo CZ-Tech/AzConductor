@@ -412,6 +412,13 @@ label.nf-label { display: flex; align-items: baseline; justify-content: space-be
 .nf-label span { flex: none; }
 .nf-label code { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--ink-3); }
 .param-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.node-commands { min-width: 0; }
+.node-command-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 10px; }
+.node-command-card { min-width: 0; padding: 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--paper-2); display: grid; gap: 8px; }
+.node-command-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.node-command-head .nf-label { margin: 0; }
+.node-command-card input, .node-command-card select { min-width: 0; max-width: 100%; }
+.node-command-name { width: 100%; }
 button.nf-toggle { background: none; border: none; padding: 4px 0; min-height: 0; margin-bottom: 8px; font-size: 13px; font-weight: 650; }
 button.nf-toggle:hover:not(:disabled) { background: none; color: var(--brand); }
 .nf-toggle .ico { transition: transform .15s; }
@@ -499,9 +506,11 @@ button.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--danger-s
 .run-route select { min-height: 34px; }
 .run-tasks { font-size: 13px; }
 .task-list { list-style: none; margin: 2px 0 0; padding: 0; }
-.task-list li { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; }
-.task-list li:last-child { border-bottom: 0; }
-.task-list li b { min-width: 3em; font-weight: 600; }
+.task-list > li { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.task-list > li:last-child { border-bottom: 0; }
+.task-list > li b { min-width: 3em; font-weight: 600; }
+.task-commands { flex-basis: 100%; margin: 0; padding-left: 24px; overflow-wrap: anywhere; }
+.task-commands li { padding: 3px 0; }
 
 /* ============ 响应式 ============ */
 @media (pointer: coarse) {

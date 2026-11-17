@@ -1,4 +1,15 @@
-/** 路径规划控制节点。字段与 Kotlin ControlNode 完全一致。可选字段缺省时必须省略，永不输出 null。 */
+/** 按顺序触发的普通目录命令；不解释 DSL。 */
+export interface NodeCommand {
+  name: string;
+  params: string[];
+}
+
+/** 深复制命令列表及每条命令的参数，供编辑器和复制操作使用。 */
+export function cloneCommands(commands: readonly NodeCommand[]): NodeCommand[] {
+  return commands.map(({ name, params }) => ({ name, params: [...params] }));
+}
+
+/** 路径规划控制节点。可选字段缺省时必须省略，永不输出 null。 */
 export interface ControlNode {
   x: number;
   dx: number;
@@ -8,8 +19,7 @@ export interface ControlNode {
   dHeading: number;
   duration: number;
   marker: string;
-  command: string;
-  commandParams: string[];
+  commands: NodeCommand[];
   delayAfterArrive: number;
   /** 本段功率上限 [0,1] */
   maxPower: number;
@@ -33,8 +43,7 @@ export function makeNode(partial: Partial<ControlNode> & Pick<ControlNode, 'x' |
     dHeading: partial.dHeading ?? 0,
     duration: partial.duration ?? 1,
     marker: partial.marker ?? '',
-    command: partial.command ?? '',
-    commandParams: partial.commandParams ?? [],
+    commands: cloneCommands(partial.commands ?? []),
     delayAfterArrive: partial.delayAfterArrive ?? 0,
     maxPower: partial.maxPower ?? 1,
   };
@@ -55,9 +64,12 @@ export function nodesClose(a: ControlNode, b: ControlNode): boolean {
     Math.abs(a.dx - b.dx) < EPS && Math.abs(a.dy - b.dy) < EPS &&
     Math.abs(a.heading - b.heading) < EPS && Math.abs(a.dHeading - b.dHeading) < EPS &&
     Math.abs(a.duration - b.duration) < EPS &&
-    a.marker === b.marker && a.command === b.command &&
-    a.commandParams.length === b.commandParams.length &&
-    a.commandParams.every((p, i) => p === b.commandParams[i]) &&
+    a.marker === b.marker && a.commands.length === b.commands.length &&
+    a.commands.every((c, i) => {
+      const other = b.commands[i];
+      return other !== undefined && c.name === other.name &&
+        c.params.length === other.params.length && c.params.every((p, j) => p === other.params[j]);
+    }) &&
     Math.abs(a.delayAfterArrive - b.delayAfterArrive) < EPS &&
     Math.abs(a.maxPower - b.maxPower) < EPS &&
     closeOpt(a.maxSpeed, b.maxSpeed) && closeOpt(a.endSpeed, b.endSpeed) &&
@@ -68,25 +80,21 @@ export function nodesClose(a: ControlNode, b: ControlNode): boolean {
 
 /** 沿 x 轴镜像（y、dy、heading、dHeading 取反），蓝方→红方 */
 export function mirrorY(n: ControlNode): ControlNode {
-  return { ...n, y: -n.y, dy: -n.dy, heading: -n.heading, dHeading: -n.dHeading };
+  return { ...n, commands: cloneCommands(n.commands), y: -n.y, dy: -n.dy, heading: -n.heading, dHeading: -n.dHeading };
 }
 
-/**
- * 绕场地坐标原点中心对称（旋转 180°）：x、y、dx、dy 取反，heading 加 180° 并规格化到 (-180, 180]；
- * dHeading 不变（旋转 180° 不改变转向）。
- */
+/** 绕场地原点旋转 180°；dHeading 不变。 */
 export function rotate180(n: ControlNode): ControlNode {
   let heading = n.heading + 180;
   while (heading <= -180) heading += 360;
   while (heading > 180) heading -= 360;
-  return { ...n, x: -n.x, y: -n.y, dx: -n.dx, dy: -n.dy, heading };
+  return { ...n, commands: cloneCommands(n.commands), x: -n.x, y: -n.y, dx: -n.dx, dy: -n.dy, heading };
 }
 
 /** 新路径点继承几何与巡航功率，不继承动作/延迟/末端制动 */
 export function nextWaypoint(n: ControlNode, x: number, y: number): ControlNode {
   const r: ControlNode = {
-    ...n, x, y, marker: '', command: '', commandParams: [],
-    delayAfterArrive: 0,
+    ...n, x, y, marker: '', commands: [], delayAfterArrive: 0,
   };
   delete r.endSpeed;
   delete r.brakeZoneIn;

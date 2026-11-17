@@ -45,12 +45,12 @@ describe('SplineRouteContractTest（Kotlin 移植）', () => {
       point(),
       { ...point(50), maxPower: 0.7, maxSpeed: 24, endSpeed: 0, brakeZoneIn: 12, brakeForwardPower: 0.2 },
     ];
-    // 裸 ControlNode[] JSON（Kotlin: json.encodeToString(original)）
+    // 单路径导出为 v2 frames wrapper
     const robotJson = exportRouteJson(original);
     const r = importText(robotJson);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.kind).toBe('nodes');
+    expect(r.kind).toBe('wire');
     const decoded = r.routes[0]!.points;
     expect(decoded).toStrictEqual(original);
     expect(validateNodes(decoded)).toEqual([]);
@@ -79,12 +79,12 @@ describe('SplineRouteContractTest（Kotlin 移植）', () => {
   it('validatorOnlyRejectsInvalidFields', () => {
     const points = [
       point(),
-      { ...point(5), endSpeed: 0, dHeading: 20, command: 'shoot', delayAfterArrive: 1 },
+      { ...point(5), endSpeed: 0, dHeading: 20, commands: [{ name: 'shoot', params: [] }], delayAfterArrive: 1 },
     ];
     const issues = validateNodes(points);
     expect(issues.some((i) => i.field === 'brakeZoneIn')).toBe(false);
     expect(issues.some((i) => i.field === 'dHeading')).toBe(false);
-    expect(issues.some((i) => i.field === 'command')).toBe(false);
+    expect(issues.some((i) => i.field === 'commands')).toBe(false);
     expect(issues.some((i) => i.field === 'endSpeed')).toBe(false);
     expect(issues).toEqual([]);
   });
@@ -92,9 +92,8 @@ describe('SplineRouteContractTest（Kotlin 移植）', () => {
   it('waypointInsertionDoesNotCloneCommandsAndStoppingActions', () => {
     const prior = {
       ...point(),
-      command: 'shoot',
+      commands: [{ name: 'shoot', params: ['1'] }],
       marker: 'A',
-      commandParams: ['1'],
       delayAfterArrive: 2,
       endSpeed: 0,
       brakeZoneIn: 10,
@@ -103,8 +102,7 @@ describe('SplineRouteContractTest（Kotlin 移植）', () => {
     };
     const next = nextWaypoint(prior, 12, 10);
     expect(next.marker).toBe('');
-    expect(next.command).toBe('');
-    expect(next.commandParams).toEqual([]);
+    expect(next.commands).toEqual([]);
     expect(next.endSpeed).toBeUndefined();
     expect('endSpeed' in next).toBe(false);
     expect(next.brakeZoneIn).toBeUndefined();
@@ -141,7 +139,7 @@ describe('SplineRouteContractTest（Kotlin 移植）', () => {
       { ...point(20), duration: 2, delayAfterArrive: 2.5, endSpeed: 0, brakeZoneIn: 10 },
     ];
     const wire = JSON.stringify(encodeRobotRoute(original));
-    const frames = JSON.parse(wire) as Array<Record<string, unknown>>;
+    const frames = (JSON.parse(wire) as { frames: Array<Record<string, unknown>> }).frames;
     expect(frames).toHaveLength(4);
     expect('delayAfterArrive' in frames[0]!).toBe(false);
     expect(String(frames[1]!['wait'])).toBe('1.5');
@@ -250,10 +248,10 @@ describe('validateNodes 逐条文案（与 Kotlin 逐字一致）', () => {
 
 describe('validateRobotIssues / validateRobotJson', () => {
   it('非数组', () => {
-    expect(validateRobotIssues({})).toEqual([{ field: 'json', message: '路径必须是控制点 JSON 数组' }]);
+    expect(validateRobotIssues({})).toEqual([{ field: 'json', message: '机器人路径 version 必须为数字 2' }]);
     expect(validateRobotIssues(null)).toEqual([{ field: 'json', message: '路径必须是控制点 JSON 数组' }]);
     expect(validateRobotJson('not json')).toEqual([{ field: 'json', message: '路径必须是控制点 JSON 数组' }]);
-    expect(validateRobotJson('{"routes":[]}')).toEqual([{ field: 'json', message: '路径必须是控制点 JSON 数组' }]);
+    expect(validateRobotJson('{"routes":[]}')).toEqual([{ field: 'json', message: '机器人路径 version 必须为数字 2' }]);
   });
 
   it('空数组', () => {

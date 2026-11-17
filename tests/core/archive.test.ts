@@ -20,7 +20,7 @@ import {
   type RouteData,
   type RoutesDoc,
 } from '../../src/core/archive';
-import { decodeRobotRoute } from '../../src/core/wire';
+import { decodeRobotRoute, encodeRobotRoute } from '../../src/core/wire';
 import { randomRoute, rng } from './_util';
 
 const err = (r: ImportResult): string => {
@@ -133,10 +133,10 @@ describe('importText 错误信息', () => {
   });
 
   it('不是数组', () => {
-    expect(err(importText('{"routes":[]}'))).toBe('导入内容必须是 JSON 数组');
-    expect(err(importText('3'))).toBe('导入内容必须是 JSON 数组');
-    expect(err(importText('null'))).toBe('导入内容必须是 JSON 数组');
-    expect(err(importText('"x"'))).toBe('导入内容必须是 JSON 数组');
+    expect(err(importText('{"routes":[]}'))).toBe('机器人路径 version 必须为数字 2');
+    expect(err(importText('3'))).toBe('机器人路径必须是 JSON 数组或 version 2 路径对象');
+    expect(err(importText('null'))).toBe('机器人路径必须是 JSON 数组或 version 2 路径对象');
+    expect(err(importText('"x"'))).toBe('机器人路径必须是 JSON 数组或 version 2 路径对象');
   });
 
   it('线格式错误透传 WireError 文案', () => {
@@ -172,29 +172,29 @@ describe('导出函数', () => {
     makeNode({ x: 20, y: 5, duration: 2, delayAfterArrive: 2.5, endSpeed: 0, brakeZoneIn: 10, maxSpeed: 24 }),
   ];
 
-  it('exportRouteJson：默认缩进 2 空格，裸节点含 delayAfterArrive，可被导入识别为 nodes', () => {
+  it('exportRouteJson：默认缩进 2 空格，v2 wrapper 与机器人导出一致', () => {
     const text = exportRouteJson(nodes);
-    expect(text).toBe(JSON.stringify(nodes.map(encodeStoredNode), null, 2));
-    expect(text).toContain('\n  {');
-    expect(text).toContain('"delayAfterArrive": 1.5');
-    expect(text).not.toContain('"wait"');
+    expect(text).toBe(JSON.stringify(encodeRobotRoute(nodes), null, 2));
+    expect(text).toContain('\n  "version": 2');
+    expect(text).not.toContain('delayAfterArrive');
+    expect(text).toContain('"wait": 1.5');
     const r = ok(importText(text));
-    expect(r.kind).toBe('nodes');
+    expect(r.kind).toBe('wire');
     expect(r.routes[0]!.points).toStrictEqual(nodes);
   });
 
   it('exportRouteJson(pretty=false) 为紧凑文本', () => {
     const text = exportRouteJson(nodes, false);
     expect(text).not.toContain('\n');
-    expect(text.startsWith('[{"x":0,"dx":0,"y":0,"dy":0')).toBe(true);
-    expect(JSON.parse(text)).toHaveLength(2);
+    expect(JSON.parse(text)).toEqual(encodeRobotRoute(nodes));
+    expect(text).toBe(exportRobotWireJson(nodes));
   });
 
   it('exportRobotWireJson：默认紧凑，wait 帧，无 delayAfterArrive，可被导入识别为 wire', () => {
     const text = exportRobotWireJson(nodes);
     expect(text).not.toContain('\n');
     expect(text).not.toContain('delayAfterArrive');
-    const frames = JSON.parse(text) as Array<Record<string, unknown>>;
+    const frames = (JSON.parse(text) as { version: 2; frames: Array<Record<string, unknown>> }).frames;
     expect(frames).toHaveLength(4);
     expect(frames[1]).toEqual({ wait: 1.5 });
     expect(frames[3]).toEqual({ wait: 2.5 });
@@ -227,8 +227,8 @@ describe('导出函数', () => {
 
   it('导出空路径列表', () => {
     expect(exportArchiveJson([], false)).toBe('[{"robotName":"default","routes":[]}]');
-    expect(exportRouteJson([], false)).toBe('[]');
-    expect(exportRobotWireJson([])).toBe('[]');
+    expect(exportRouteJson([], false)).toBe('{"version":2,"frames":[]}');
+    expect(exportRobotWireJson([])).toBe('{"version":2,"frames":[]}');
   });
 });
 
@@ -264,14 +264,14 @@ describe('encodeRoutesDoc / parseRoutesDoc（localStorage robot_routes 格式）
   it('存储格式：[{robotName, routes:[{name, points}]}]，点含 delayAfterArrive', () => {
     const enc = encodeRoutesDoc(doc) as Array<{ robotName: string; routes: Array<{ name: string; points: Array<Record<string, unknown>> }> }>;
     expect(Object.keys(enc[0]!)).toEqual(['robotName', 'routes']);
-    expect(Object.keys(enc[0]!.routes[0]!)).toEqual(['name', 'points']);
+    expect(Object.keys(enc[0]!.routes[0]!)).toEqual(['name', 'version', 'points']);
     expect(Object.keys(enc[0]!.routes[0]!.points[0]!)).toEqual([
-      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'command', 'commandParams',
+      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'commands',
       'delayAfterArrive', 'maxPower',
     ]);
     expect(enc[0]!.routes[0]!.points[0]!['delayAfterArrive']).toBe(1);
     expect(Object.keys(enc[0]!.routes[0]!.points[1]!)).toEqual([
-      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'command', 'commandParams',
+      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'commands',
       'delayAfterArrive', 'maxPower', 'maxSpeed', 'brakeZoneIn',
     ]);
   });

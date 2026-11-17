@@ -35,11 +35,10 @@ const LONG_PRESS_MS = 500;
 const fmt = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 
 function hasMissingParams(points: readonly ControlNode[]): boolean {
-  return points.some((p) => {
-    if (!p.command) return false;
-    const d = commandByName(p.command);
-    return d ? !argsValid(d, p.commandParams) : p.commandParams.some((v) => v.trim() === '');
-  });
+  return points.some((p) => p.commands.some((command) => {
+    const d = commandByName(command.name);
+    return d ? !argsValid(d, command.params) : command.params.some((v) => v.trim() === '');
+  }));
 }
 
 export function EditorView({ name }: { name: string }) {
@@ -463,7 +462,7 @@ export function EditorView({ name }: { name: string }) {
                   <b class={`node-badge ${nodeRole(i, points.length)}`}>{i + 1}</b>
                   <span>{fmt(n.x)}, {fmt(n.y)}</span>
                   <small>{fmt(n.heading, 0)}° · {fmt(n.duration, 1)}s</small>
-                  {(n.command || n.marker) && <em>{n.command || n.marker}</em>}
+                  {(n.commands.length > 0 || n.marker) && <em>{n.commands.length ? S.node.commandsSummary(n.commands[0]!.name, n.commands.length) : n.marker}</em>}
                 </button>
                 {i === sel && (
                   <div class="node-detail">
@@ -555,7 +554,7 @@ function NodeDot(p: { node: ControlNode; index: number; total: number; selected:
       <circle class="hit" fill="transparent" />
       <circle class="core" />
       <text class="num" dy=".36em" text-anchor="middle" pointer-events="none">{p.index + 1}</text>
-      {(p.node.command || p.node.marker) && <circle class="tag" />}
+      {(p.node.commands.length > 0 || p.node.marker) && <circle class="tag" />}
     </g>
   );
 }

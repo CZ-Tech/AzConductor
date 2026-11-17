@@ -32,7 +32,7 @@ describe('slotToIndex', () => {
 });
 
 describe('duplicateAt', () => {
-  const a = makeNode({ x: 1, y: 2, command: 'Foo', commandParams: ['1', '2'], marker: 'm', endSpeed: 3, brakeZoneIn: 4 });
+  const a = makeNode({ x: 1, y: 2, commands: [{ name: 'Foo', params: ['1', '2'] }, { name: 'Foo', params: [] }], marker: 'm', endSpeed: 3, brakeZoneIn: 4 });
   const b = makeNode({ x: 5, y: 6 });
 
   it('在原点后插入完整副本', () => {
@@ -42,11 +42,17 @@ describe('duplicateAt', () => {
     expect(r.points[1]).toEqual(a);
     expect(r.points[2]).toBe(b);
   });
-  it('副本不与原点共享 commandParams', () => {
+  it('副本不与原点共享 commands 或任何 params', () => {
     const r = duplicateAt([a], 0);
-    expect(r.points[1]?.commandParams).not.toBe(a.commandParams);
-    r.points[1]?.commandParams.push('x');
-    expect(a.commandParams).toEqual(['1', '2']);
+    const copy = r.points[1]!;
+    expect(copy.commands).not.toBe(a.commands);
+    copy.commands.forEach((command, i) => {
+      expect(command).not.toBe(a.commands[i]);
+      expect(command.params).not.toBe(a.commands[i]!.params);
+    });
+    copy.commands[0]!.params.push('x');
+    copy.commands[1]!.name = 'changed';
+    expect(a.commands).toEqual([{ name: 'Foo', params: ['1', '2'] }, { name: 'Foo', params: [] }]);
   });
   it('可选字段缺省时仍然缺省（不产生 undefined 键之外的 null）', () => {
     const r = duplicateAt([b], 0);

@@ -176,7 +176,8 @@ export class RobotApiClient {
 
   /**
    * PUT with `If-Match: <expectedRevision>` (0 = create). The route JSON is parsed and checked with
-   * `validateRobotFrames` first; on failure nothing is sent and a `contract` error is returned.
+   * `validateRobotFrames` first (legacy bare arrays or numeric version:2/frames, including command
+   * structure); on failure nothing is sent and a `contract` error is returned.
    */
   async putRoute(name: string, routeJson: string, expectedRevision: number): Promise<Result<RouteWriteResponse>> {
     assertRevision(expectedRevision);
@@ -199,7 +200,7 @@ export class RobotApiClient {
     );
   }
 
-  /** Convenience: encode nodes to the robot wire format, then {@link putRoute}. */
+  /** Convenience: encode nodes as one version:2/frames route envelope, then {@link putRoute}. */
   putRouteNodes(name: string, nodes: readonly ControlNode[], expectedRevision: number): Promise<Result<RouteWriteResponse>> {
     return this.putRoute(name, JSON.stringify(encodeRobotRoute(nodes)), expectedRevision);
   }

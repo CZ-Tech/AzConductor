@@ -167,7 +167,7 @@ describe('SyncEngine (port of RouteSyncEngineTest)', () => {
     const nodes = decodeRobotRoute([{ x: 0, y: 0 }, { x: 20, y: 0, endSpeed: 0 }]);
     const f = fixture({ Auto: nodes });
     expect((await f.engine.syncOnce()).pushed).toEqual(['Auto']);
-    const body = JSON.parse(f.server.routes.get('Auto')!.body) as Array<Record<string, unknown>>;
+    const body = (JSON.parse(f.server.routes.get('Auto')!.body) as { frames: Array<Record<string, unknown>> }).frames;
     expect(body[1]).toMatchObject({ endSpeed: 0 });
     expect(body[1]).not.toHaveProperty('brakeZoneIn');
     const report = await f.engine.syncOnce();
@@ -384,9 +384,35 @@ describe('SyncEngine (port of RouteSyncEngineTest)', () => {
 });
 
 describe('structural comparison', () => {
+  it('legacy single command and v2 single-element commands converge without writes', async () => {
+    const old = [{ x: 0, y: 0, command: 'shoot', commandParams: ['1'] }];
+    const nodes = decodeRobotRoute({ version: 2, frames: [{ x: 0, y: 0, commands: [{ name: 'shoot', params: ['1'] }] }] });
+    const f = fixture({ Auto: nodes });
+    f.server.seedRaw('Auto', JSON.stringify(old), 8);
+    const report = await f.engine.syncOnce();
+    expect(report.conflicts).toEqual([]);
+    expect(report.pushed).toEqual([]);
+    expect(report.pulled).toEqual([]);
+    expect(f.server.requests).toEqual([]);
+  });
+
+  it('command parameters and order are semantic differences, not formatting differences', async () => {
+    const commands = [{ name: 'auto.shoot', params: ['3200', '500', '250'] }, { name: 'auto.waitMillis', params: ['100'] }];
+    const local = [{ ...pt(), commands }];
+    const parameterChange = [{ ...pt(), commands: [{ ...commands[0]!, params: ['3300', '500', '250'] }, commands[1]!] }];
+    const orderChange = [{ ...pt(), commands: [...commands].reverse() }];
+    for (const remote of [parameterChange, orderChange]) {
+      const f = fixture({ Auto: local });
+      f.server.seed('Auto', remote, 2);
+      const report = await f.engine.syncOnce();
+      expect(report.conflicts).toHaveLength(1);
+      expect(f.server.requests).toEqual([]);
+      expect(f.local.get('Auto')).toEqual(local);
+    }
+  });
   it('differently formatted but equivalent robot bodies are not a conflict', async () => {
     const f = fixture({ Auto: J1 });
-    const frames = encodeRobotRoute(J1) as Record<string, unknown>[];
+    const frames = encodeRobotRoute(J1).frames;
     // pretty-printed, reversed key order
     const reordered = frames.map((fr) => Object.fromEntries(Object.entries(fr).reverse()));
     f.server.seedRaw('Auto', JSON.stringify(reordered, null, 4), 9);
@@ -399,7 +425,7 @@ describe('structural comparison', () => {
   it('a wait frame equals delayAfterArrive on the previous node', async () => {
     const withDelay: ControlNode[] = [{ ...pt(1), delayAfterArrive: 1.5 }];
     const f = fixture({ Auto: withDelay });
-    const frames = encodeRobotRoute([pt(1)]) as unknown[];
+    const frames = encodeRobotRoute([pt(1)]).frames;
     f.server.seedRaw('Auto', JSON.stringify([...frames, { wait: 1.5 }]), 2);
     const report = await f.engine.syncOnce();
     expect(report.conflicts).toEqual([]);

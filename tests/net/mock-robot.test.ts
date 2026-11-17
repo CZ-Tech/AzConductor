@@ -315,6 +315,34 @@ describe('routes', () => {
     expect(robot.getRoute('A')?.revision).toBe(2);
   });
 
+  it('PUT validates only the route envelope after If-Match and before stale revisions', async () => {
+    const robot = await cleanup.mock();
+    const token = await login(robot);
+    robot.seedRoute('R', ROUTE_A, 5);
+    const put = (body: string, ifMatch?: string) => call(robot, 'PUT', '/api/v2/routes/R', {
+      token, body, headers: ifMatch === undefined ? {} : { 'If-Match': ifMatch },
+    });
+    expect((await put('not json')).status).toBe(428);
+    const before = robot.routesChangeRevision;
+    for (const body of [
+      'not json', '[] trailing', 'null', '{}', '{"frames":[]}', '{"version":2}',
+      '{"version":"2","frames":[]}', '{"version":1,"frames":[]}',
+      '{"version":3,"frames":[]}', '{"version":2,"frames":{}}',
+    ]) {
+      const reply = await put(body, '1'); // deliberately stale: malformed body wins over 412
+      expect(reply.status, body).toBe(400);
+      expect(reply.json().error).toBe('invalid_route_json');
+      expect(typeof reply.json().message).toBe('string');
+    }
+    expect(robot.getRoute('R')?.revision).toBe(5);
+    expect(robot.routesChangeRevision).toBe(before);
+    expect((await put('{"version":2,"frames":[]}', '1')).status).toBe(412);
+    // The Java router deliberately does not validate frame geometry or ControlNode representability.
+    const body = '{"version":2,"frames":[{"wait":1,"commands":[{"name":"auto.waitMillis","params":["1"]}]}]}';
+    expect((await put(body, '5')).status).toBe(200);
+    expect(robot.getRoute('R')?.json).toBe(body);
+  });
+
   it('PUT bumps changeRevision only when it writes; decoded names round-trip', async () => {
     const robot = await cleanup.mock();
     const t = await login(robot);
@@ -373,9 +401,9 @@ describe('routes', () => {
   it('seedRoute accepts node arrays (encoded to the wire format)', async () => {
     const robot = await cleanup.mock();
     const t = await login(robot);
-    robot.seedRoute('FromNodes', [{ x: 1, dx: 0, y: 2, dy: 0, heading: 0, dHeading: 0, duration: 1, marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 }]);
+    robot.seedRoute('FromNodes', [{ x: 1, dx: 0, y: 2, dy: 0, heading: 0, dHeading: 0, duration: 1, marker: '', commands: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 }]);
     const r = await call(robot, 'GET', '/api/v2/routes/FromNodes', { token: t });
-    expect(JSON.parse(r.text)).toEqual([expect.objectContaining({ x: 1, y: 2, maxPower: 1 })]);
+    expect(JSON.parse(r.text)).toEqual({ version: 2, frames: [expect.objectContaining({ x: 1, y: 2, maxPower: 1, commands: [] })] });
   });
 });
 
@@ -832,8 +860,8 @@ describe('simulated run', () => {
   it('INIT → START moves the pose along the bound route, then returns to STOPPED/IDLE', async () => {
     const robot = await cleanup.mock({ poseHz: 50, runDurationMs: 600, heartbeatMs: 60_000 });
     robot.seedRoute('Path', [
-      { x: 0, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 0, marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
-      { x: 48, dx: 0, y: 24, dy: 0, heading: 90, dHeading: 0, duration: 4, marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
+      { x: 0, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 0, marker: '', commands: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
+      { x: 48, dx: 0, y: 24, dy: 0, heading: 90, dHeading: 0, duration: 4, marker: '', commands: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
     ]);
     robot.setOpModes([{ name: 'Auto Path', group: 'Auto', route: 'Path' }, 'Plain']);
     const t = await login(robot);
@@ -871,8 +899,8 @@ describe('simulated run', () => {
   it('STOP aborts the run: pose freezes, execution returns to IDLE', async () => {
     const robot = await cleanup.mock({ poseHz: 50, runDurationMs: 60_000 });
     robot.seedRoute('Path', [
-      { x: 0, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 0, marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
-      { x: 100, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 4, marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
+      { x: 0, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 0, marker: '', commands: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
+      { x: 100, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 4, marker: '', commands: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
     ]);
     robot.setOpModes([{ name: 'Auto Path', group: 'Auto', route: 'Path' }]);
     const t = await login(robot);
@@ -910,8 +938,8 @@ describe('simulated run', () => {
 
   it('run length scales with the route duration within [minRunMs, maxRunMs]', async () => {
     const mk = (duration: number) => [
-      { x: 0, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 0, marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
-      { x: 10, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration, marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
+      { x: 0, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration: 0, marker: '', commands: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
+      { x: 10, dx: 0, y: 0, dy: 0, heading: 0, dHeading: 0, duration, marker: '', commands: [], delayAfterArrive: 0, maxPower: 1, brakeZoneIn: 0 },
     ];
     const durationFor = async (routeSeconds: number): Promise<number> => {
       const robot = await cleanup.mock({ poseHz: 50, runTimeScale: 0.1, minRunMs: 200, maxRunMs: 700 });

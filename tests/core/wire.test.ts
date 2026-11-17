@@ -56,10 +56,10 @@ describe('nodesClose', () => {
     expect(nodesClose(auto, zero)).toBe(false);
     expect(nodesClose(zero, { ...zero, brakeZoneIn: 1e-9 })).toBe(true);
   });
-  it('commandParams 逐项比较', () => {
-    expect(nodesClose({ ...a, commandParams: ['1'] }, { ...a, commandParams: ['1'] })).toBe(true);
-    expect(nodesClose({ ...a, commandParams: ['1'] }, { ...a, commandParams: ['2'] })).toBe(false);
-    expect(nodesClose({ ...a, commandParams: ['1'] }, { ...a, commandParams: [] })).toBe(false);
+  it('commands 参数逐项比较', () => {
+    expect(nodesClose({ ...a, commands: [{ name: 'c', params: ['1'] }] }, { ...a, commands: [{ name: 'c', params: ['1'] }] })).toBe(true);
+    expect(nodesClose({ ...a, commands: [{ name: 'c', params: ['1'] }] }, { ...a, commands: [{ name: 'c', params: ['2'] }] })).toBe(false);
+    expect(nodesClose({ ...a, commands: [{ name: 'c', params: ['1'] }] }, { ...a, commands: [] })).toBe(false);
   });
 });
 
@@ -81,7 +81,7 @@ describe('encodeNodeFrame', () => {
     const n = makeNode({ x: 1, y: 2, delayAfterArrive: 3 });
     const f = encodeNodeFrame(n);
     expect(Object.keys(f)).toEqual([
-      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'command', 'commandParams',
+      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'commands',
       'maxPower',
     ]);
     expect('delayAfterArrive' in f).toBe(false);
@@ -90,7 +90,7 @@ describe('encodeNodeFrame', () => {
   it('可选字段全有时的键序', () => {
     const n = makeNode({ x: 1, y: 2, maxSpeed: 3, endSpeed: 0, brakeZoneIn: 4, brakeForwardPower: 0.5 });
     expect(Object.keys(encodeNodeFrame(n))).toEqual([
-      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'command', 'commandParams',
+      'x', 'dx', 'y', 'dy', 'heading', 'dHeading', 'duration', 'marker', 'commands',
       'maxPower', 'maxSpeed', 'endSpeed', 'brakeZoneIn', 'brakeForwardPower',
     ]);
   });
@@ -109,11 +109,12 @@ describe('encodeNodeFrame', () => {
     expect(f['endSpeed']).toBe(0);
   });
 
-  it('commandParams 为拷贝', () => {
-    const n = makeNode({ x: 0, y: 0, commandParams: ['a'] });
+  it('commands 和 params 为深拷贝', () => {
+    const n = makeNode({ x: 0, y: 0, commands: [{ name: 'c', params: ['a'] }] });
     const f = encodeNodeFrame(n);
-    expect(f['commandParams']).toEqual(['a']);
-    expect(f['commandParams']).not.toBe(n.commandParams);
+    expect(f['commands']).toEqual([{ name: 'c', params: ['a'] }]);
+    expect(f['commands']).not.toBe(n.commands);
+    expect((f['commands'] as typeof n.commands)[0]!.params).not.toBe(n.commands[0]!.params);
   });
 });
 
@@ -124,7 +125,7 @@ describe('encodeRobotRoute / decodeRobotRoute', () => {
       makeNode({ x: 1, y: 0 }),
       makeNode({ x: 2, y: 0, delayAfterArrive: 0.25 }),
     ];
-    const frames = encodeRobotRoute(nodes) as Array<Record<string, unknown>>;
+    const frames = encodeRobotRoute(nodes).frames;
     expect(frames).toHaveLength(5);
     expect(frames[1]).toEqual({ wait: 1.5 });
     expect(frames[4]).toEqual({ wait: 0.25 });
@@ -132,7 +133,7 @@ describe('encodeRobotRoute / decodeRobotRoute', () => {
   });
 
   it('空路径', () => {
-    expect(encodeRobotRoute([])).toEqual([]);
+    expect(encodeRobotRoute([])).toEqual({ version: 2, frames: [] });
     expect(decodeRobotRoute([])).toEqual([]);
   });
 
@@ -166,8 +167,8 @@ describe('encodeRobotRoute / decodeRobotRoute', () => {
       }
       return '<no error>';
     };
-    expect(err({})).toBe('机器人路径必须是 JSON 数组');
-    expect(err('x')).toBe('机器人路径必须是 JSON 数组');
+    expect(err({})).toBe('机器人路径 version 必须为数字 2');
+    expect(err('x')).toBe('机器人路径必须是 JSON 数组或 version 2 路径对象');
     expect(err([1])).toBe('第 1 帧不是对象');
     expect(err([{ x: 0, y: 0 }, null])).toBe('第 2 帧不是对象');
     expect(err([{ x: 0, y: 0 }, []])).toBe('第 2 帧不是对象');
@@ -191,7 +192,7 @@ describe('encodeRobotRoute / decodeRobotRoute', () => {
     const [n] = decodeRobotRoute([{ x: 3, y: 4 }]);
     expect(n).toStrictEqual({
       x: 3, dx: 0, y: 4, dy: 0, heading: 0, dHeading: 0, duration: 1,
-      marker: '', command: '', commandParams: [], delayAfterArrive: 0, maxPower: 1,
+      marker: '', commands: [], delayAfterArrive: 0, maxPower: 1,
     });
   });
 
@@ -237,18 +238,19 @@ describe('encodeRobotRoute / decodeRobotRoute', () => {
     for (let i = 0; i < 100; i++) {
       const nodes = randomRoute(r, 6);
       const waits = nodes.filter((n) => n.delayAfterArrive > 0).length;
-      expect(encodeRobotRoute(nodes)).toHaveLength(nodes.length + waits);
+      expect(encodeRobotRoute(nodes).frames).toHaveLength(nodes.length + waits);
     }
   });
 });
 
 describe('canonicalRoute', () => {
-  it('等于 encode 的 JSON 且对 decode∘encode 稳定（幂等）', () => {
+  it('版本无关且对 decode∘encode 稳定（幂等）', () => {
     const r = rng(99);
     for (let i = 0; i < 100; i++) {
       const nodes = randomRoute(r, 1 + Math.floor(r() * 6));
       const c = canonicalRoute(nodes);
-      expect(c).toBe(JSON.stringify(encodeRobotRoute(nodes)));
+      expect(c).not.toContain('"version"');
+      expect(c).toBe(canonicalRoute(decodeRobotRoute(encodeRobotRoute(nodes))));
       expect(canonicalRoute(decodeRobotRoute(JSON.parse(c)))).toBe(c);
     }
   });

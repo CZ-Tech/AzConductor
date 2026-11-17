@@ -8,7 +8,7 @@
  *   2. 机器人线格式帧（可含 {"wait":s}、缺省 dx/dy）
  *   3. 存档格式 [{robotName, routes:[…]}]
  */
-import type { ControlNode } from './node';
+import { cloneCommands, type ControlNode } from './node';
 import { WireError, decodeNodeFrame, decodeRobotRoute, encodeRobotRoute } from './wire';
 
 export const ROUTES_STORAGE_KEY = 'robot_routes';
@@ -46,8 +46,7 @@ export function encodeStoredNode(n: ControlNode): Record<string, unknown> {
     dHeading: n.dHeading,
     duration: n.duration,
     marker: n.marker,
-    command: n.command,
-    commandParams: [...n.commandParams],
+    commands: cloneCommands(n.commands),
     delayAfterArrive: n.delayAfterArrive,
     maxPower: n.maxPower,
   };
@@ -65,7 +64,7 @@ function stringify(value: unknown, pretty: boolean): string {
 export function encodeRoutesDoc(doc: readonly RobotRoutes[]): unknown[] {
   return doc.map((r) => ({
     robotName: r.robotName,
-    routes: r.routes.map((rt) => ({ name: rt.name, points: rt.points.map(encodeStoredNode) })),
+    routes: r.routes.map((rt) => ({ name: rt.name, version: 2, points: rt.points.map(encodeStoredNode) })),
   }));
 }
 
@@ -84,6 +83,7 @@ export function allRoutes(doc: readonly RobotRoutes[]): RouteData[] {
 function decodeRoute(raw: unknown, where: string): RouteData {
   if (!isObj(raw)) throw new WireError(`${where} 不是对象`);
   if (typeof raw['name'] !== 'string') throw new WireError(`${where} 缺少 name`);
+  if (has(raw, 'version') && raw['version'] !== 2) throw new WireError(`${where} version 必须为数字 2，旧存档请省略 version`);
   const pts = has(raw, 'points') ? raw['points'] : [];
   if (!Array.isArray(pts)) throw new WireError(`${where} 的 points 必须是数组`);
   const points = pts.map((p: unknown, i: number) => {
@@ -143,7 +143,13 @@ function looksLikeArchive(frames: readonly unknown[]): boolean {
 
 /** 解析已解析的 JSON 值：裸节点 → 机器人线格式 → 存档。 */
 export function importValue(value: unknown, defaultName: string = DEFAULT_IMPORT_NAME): ImportResult {
-  if (!Array.isArray(value)) return { ok: false, error: '导入内容必须是 JSON 数组' };
+  if (!Array.isArray(value)) {
+    try {
+      return { ok: true, kind: 'wire', routes: [{ name: defaultName, points: decodeRobotRoute(value) }] };
+    } catch (e) {
+      return { ok: false, error: e instanceof WireError ? e.message : '无法识别的路径格式' };
+    }
+  }
 
   if (isBareNodeArray(value)) {
     try {
@@ -180,9 +186,9 @@ export function importText(text: string, defaultName: string = DEFAULT_IMPORT_NA
 
 // ---- 导出 ----
 
-/** 单条路径（裸 ControlNode[]，含 delayAfterArrive，可被导入识别）。 */
+/** 单条路径与机器人导出使用相同 v2 frames 封装；仅默认缩进不同。 */
 export function exportRouteJson(points: readonly ControlNode[], pretty = true): string {
-  return stringify(points.map(encodeStoredNode), pretty);
+  return stringify(encodeRobotRoute(points), pretty);
 }
 
 /** 机器人线格式（wait 帧）。 */

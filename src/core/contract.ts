@@ -2,7 +2,8 @@
  * 路径契约校验。逐条移植自 Kotlin SplineRouteContract.validate / validateRobotJson，
  * 校验文案与 Kotlin 逐字一致。
  */
-import type { ControlNode } from './node';
+import type { ControlNode, NodeCommand } from './node';
+import { decodeCommands, unwrapRobotFrames } from './routeFormat';
 
 export interface Issue {
   field?: keyof ControlNode;
@@ -28,6 +29,11 @@ export function validateNodes(nodes: readonly ControlNode[]): Issue[] {
     return issues;
   }
   nodes.forEach((p, i) => {
+    try {
+      decodeCommands({ commands: p.commands }, i + 1);
+    } catch (e) {
+      issues.push(mk(i, 'commands', e instanceof Error ? e.message : '命令列表无效'));
+    }
     const numeric: ReadonlyArray<readonly [keyof ControlNode, number]> = [
       ['x', p.x], ['y', p.y], ['dx', p.dx], ['dy', p.dy],
       ['heading', p.heading], ['dHeading', p.dHeading],
@@ -106,9 +112,12 @@ const has = (o: Record<string, unknown>, k: string): boolean =>
   Object.prototype.hasOwnProperty.call(o, k);
 
 /** 对应 SplineRouteContract.validateRobotJson（输入已解析为 JS 值）。 */
-export function validateRobotIssues(frames: unknown): RobotIssue[] {
-  if (!Array.isArray(frames)) {
-    return [robotIssue(undefined, 'json', '路径必须是控制点 JSON 数组')];
+export function validateRobotIssues(value: unknown): RobotIssue[] {
+  let frames: unknown[];
+  try {
+    frames = unwrapRobotFrames(value);
+  } catch (e) {
+    return [robotIssue(undefined, 'json', isObj(value) && e instanceof Error ? e.message : '路径必须是控制点 JSON 数组')];
   }
   if (frames.length === 0) {
     return [robotIssue(undefined, 'points', '不能上传空路径')];
@@ -123,6 +132,15 @@ export function validateRobotIssues(frames: unknown): RobotIssue[] {
       return;
     }
     const obj = entry;
+    let commands: NodeCommand[] = [];
+    try {
+      commands = decodeCommands(obj, index + 1);
+    } catch (e) {
+      issues.push(robotIssue(index, 'commands', e instanceof Error ? e.message : '命令列表无效'));
+    }
+    if (has(obj, 'marker') && typeof obj['marker'] !== 'string') {
+      issues.push(robotIssue(index, 'marker', 'marker 必须为字符串'));
+    }
     const number = (key: string, def: number | null = null, required = false): number | null => {
       if (!has(obj, key)) {
         if (required) issues.push(robotIssue(index, key, `缺少 ${key}`));
@@ -164,8 +182,7 @@ export function validateRobotIssues(frames: unknown): RobotIssue[] {
       heading: heading ?? 0, dHeading: dHeading ?? 0,
       duration: duration ?? 0,
       marker: primitiveContent(obj['marker']) ?? '',
-      command: primitiveContent(obj['command']) ?? '',
-      commandParams: [],
+      commands,
       delayAfterArrive: delay ?? 0,
       maxPower: maxPower ?? 1,
     };

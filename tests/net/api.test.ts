@@ -296,10 +296,10 @@ describe('routes', () => {
     const { robot, client } = await connected();
     const nodes = [makeNode({ x: 0, y: 0 }), makeNode({ x: 20, y: 0, endSpeed: 0 })];
     ok(await client.putRouteNodes('AutoBrake', nodes, 0));
-    const frames = JSON.parse(robot.getRoute('AutoBrake')?.json ?? '[]') as Array<Record<string, unknown>>;
+    const frames = (JSON.parse(robot.getRoute('AutoBrake')?.json ?? '{}') as { frames: Array<Record<string, unknown>> }).frames;
     expect(frames[1]).toMatchObject({ x: 20, endSpeed: 0 });
     expect(frames[1]).not.toHaveProperty('brakeZoneIn');
-    const downloaded = JSON.parse(ok(await client.getRoute('AutoBrake')).json) as Array<Record<string, unknown>>;
+    const downloaded = (JSON.parse(ok(await client.getRoute('AutoBrake')).json) as { frames: Array<Record<string, unknown>> }).frames;
     expect(downloaded[1]).not.toHaveProperty('brakeZoneIn');
   });
 
@@ -310,11 +310,29 @@ describe('routes', () => {
     await expect(client.initOpMode('A', Number.NaN)).rejects.toThrow(RangeError);
   });
 
+  it('v2 commands upload preserves order and rejects invalid names/params locally', async () => {
+    const { robot, client } = await connected();
+    const commands = [{ name: 'auto.shoot', params: ['3200', '500', '250'] }, { name: 'auto.waitMillis', params: ['100'] }];
+    ok(await client.putRouteNodes('Commands', [makeNode({ x: 0, y: 0, commands })], 0));
+    expect(JSON.parse(robot.getRoute('Commands')!.json)).toMatchObject({ version: 2, frames: [{ commands }] });
+    const before = robot.requests.length;
+    for (const extra of [
+      { commands: [{ name: '' }] }, { commands: [{ name: 'shoot', params: [1] }] },
+      { command: 'old', commands: [{ name: 'new' }] },
+    ]) {
+      expect(fail(await client.putRoute('Bad', JSON.stringify({ version: 2, frames: [{ x: 0, y: 0, ...extra }] }), 0)).kind).toBe('contract');
+    }
+    for (const version of [1, 3, '2']) {
+      expect(fail(await client.putRoute('Bad', JSON.stringify({ version, frames: [{ x: 0, y: 0 }] }), 0)).kind).toBe('contract');
+    }
+    expect(robot.requests).toHaveLength(before);
+  });
+
   it('putRouteNodes encodes nodes to the robot wire format', async () => {
     const { robot, client } = await connected();
     const nodes = [makeNode({ x: 0, y: 0, duration: 0 }), makeNode({ x: 10, y: 5, dx: 3, duration: 2, delayAfterArrive: 0.5 })];
     ok(await client.putRouteNodes('N', nodes, 0));
-    const frames = JSON.parse(robot.getRoute('N')?.json ?? '[]') as Array<Record<string, unknown>>;
+    const frames = (JSON.parse(robot.getRoute('N')?.json ?? '{}') as { frames: Array<Record<string, unknown>> }).frames;
     expect(frames).toHaveLength(3); // 2 points + 1 wait frame
     expect(frames[1]).toMatchObject({ x: 10, y: 5, dx: 3, duration: 2 });
     expect(frames[2]).toEqual({ wait: 0.5 });

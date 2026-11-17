@@ -5,7 +5,7 @@
  * 当前操作的机器人固定为 "default"（若文档里没有则取第一个）。
  */
 import { signal, computed } from '@preact/signals';
-import type { ControlNode } from '../core/node';
+import { cloneCommands, type ControlNode } from '../core/node';
 import {
   DEFAULT_ROBOT_NAME,
   ROUTES_STORAGE_KEY,
@@ -77,6 +77,8 @@ export class DocStore {
   private redoStack: RoutesDoc[] = [];
   private saveHandle: unknown = null;
   private dirty = false;
+  /** 未知版本或损坏存档必须保留原文，直到观察到合法存储内容才允许写盘。 */
+  private storageBlocked = false;
   private lastWritten: string | null = null;
   private gesture: { base: RoutesDoc; changed: boolean } | null = null;
   private readonly changeListeners = new Set<DocListener>();
@@ -139,7 +141,7 @@ export class DocStore {
     this.commit((routes) => {
       const i = routes.findIndex((r) => r.name === name);
       const out = [...routes];
-      out.splice(i + 1, 0, { name: copy, points: src.points.map((p) => ({ ...p, commandParams: [...p.commandParams] })) });
+      out.splice(i + 1, 0, { name: copy, points: src.points.map((p) => ({ ...p, commands: cloneCommands(p.commands) })) });
       return out;
     });
     return copy;
@@ -237,7 +239,7 @@ export class DocStore {
       this.clearTimer(this.saveHandle);
       this.saveHandle = null;
     }
-    if (!this.dirty) return;
+    if (!this.dirty || this.storageBlocked) return;
     this.dirty = false;
     const text = serializeRoutesDoc(this.doc.value);
     if (text === this.lastWritten) return;
@@ -256,8 +258,15 @@ export class DocStore {
   reloadFromStorage(): boolean {
     if (this.gesture) return false;
     const raw = this.kv.get(ROUTES_STORAGE_KEY);
-    if (raw === this.lastWritten && this.lastWritten !== null) return false;
+    if (!this.storageBlocked && raw === this.lastWritten && this.lastWritten !== null) return false;
     const parsed = parseRoutesDoc(raw);
+    if (raw !== null && raw.trim() !== '' && parsed === null) {
+      this.storageBlocked = true;
+      this.saveError.value = '本地存档损坏或版本不受支持，自动保存已暂停；原始存档已保留，请先导出备份或恢复兼容存档。';
+      return false;
+    }
+    if (this.storageBlocked) this.saveError.value = null;
+    this.storageBlocked = false;
     const next = parsed && parsed.length > 0 ? parsed : emptyDoc();
     this.lastWritten = raw;
     if (serializeRoutesDoc(next) === serializeRoutesDoc(this.doc.value)) return false;

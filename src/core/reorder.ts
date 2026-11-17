@@ -1,5 +1,5 @@
 /** 控制点列表的纯函数编辑：重排与复制（不依赖 DOM / UI 框架）。 */
-import type { ControlNode } from './node';
+import { cloneCommands, type ControlNode } from './node';
 
 /** 把 from 处的元素移动到 to（to 为移动后的最终下标）。越界或无变化时返回原数组。 */
 export function moveItem<T>(list: readonly T[], from: number, to: number): readonly T[] {
@@ -26,7 +26,7 @@ export function duplicateAt(
 ): { points: ControlNode[]; index: number | null } {
   const src = list[index];
   if (!src) return { points: [...list], index: null };
-  const copy: ControlNode = { ...src, commandParams: [...src.commandParams] };
+  const copy: ControlNode = { ...src, commands: cloneCommands(src.commands) };
   const points = [...list];
   points.splice(index + 1, 0, copy);
   return { points, index: index + 1 };

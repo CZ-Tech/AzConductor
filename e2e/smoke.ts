@@ -3,7 +3,7 @@
  * 运行：npm run build && npm run e2e
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chromium, type Page } from 'playwright-core';
+import { chromium, type Browser, type Page } from 'playwright-core';
 import { existsSync } from 'node:fs';
 import { MockRobotServer, seedSampleRobot } from '../src/tools/mock-robot';
 
@@ -70,10 +70,11 @@ async function main() {
   log(`mock robot ${robot.url} routes=${robot.routeNames.join(',')} opmodes=${robot.opModes.map((o) => o.name).join(',')}`);
 
   const preview: ChildProcess = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+  let browser: Browser | undefined;
   try {
     await waitUrl(`http://localhost:${PORT}/`);
     const exe = findBrowser();
-    const browser = await chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : { channel: 'chrome' }) });
+    browser = await chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : { channel: 'chrome' }) });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block' });
     const page = await ctx.newPage();
     const errors: string[] = [];
@@ -208,15 +209,134 @@ async function main() {
     // 新目录：节点上的 0/1 重载可直接保存无参调用，不能补一个空字符串。
     await node2.click({ button: 'right' });
     await page.locator('dialog').waitFor();
-    await page.locator('#nf-command').fill('intaker.intakerIn');
+    await page.getByRole('button', { name: '添加指令', exact: true }).click();
+    await page.locator('.node-command-name').first().fill('intaker.intakerIn');
     check((await page.locator('dialog').innerText()).includes('可选'), '节点编辑器识别重载可选参数');
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached' });
     await node2.click({ button: 'right' });
     await page.locator('dialog').waitFor();
-    check(await page.locator('#nf-command').inputValue() === 'intaker.intakerIn', '无参重载保存后重新打开仍保留命令');
+    check(await page.locator('.node-command-name').first().inputValue() === 'intaker.intakerIn', '无参重载保存后重新打开仍保留命令');
     await page.getByRole('button', { name: '取消' }).click();
     await page.locator('dialog').waitFor({ state: 'detached' });
+
+    // 目录参数逐行独立；普通 wait 指令不得注入几何预览时间轴。
+    const geometryTimeBeforeCommands = await page.locator('.side-head .muted').innerText();
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    for (const millis of ['10000', '20000']) {
+      await page.getByRole('button', { name: '添加指令', exact: true }).click();
+      const row = page.locator('.node-command-card').last();
+      await row.locator('.node-command-name').fill('auto.waitMillis');
+      await row.locator('.cmd-params input').fill(millis);
+    }
+    const typedRows = page.locator('.node-command-card');
+    for (let i = 0; i < 2; i++) {
+      await page.getByRole('button', { name: '添加指令', exact: true }).click();
+      await typedRows.last().locator('.node-command-name').fill('overload.different');
+      await typedRows.last().locator('.cmd-params select').last().selectOption('true');
+    }
+    await typedRows.nth(3).getByLabel('调用签名', { exact: true }).selectOption('1');
+    check(await typedRows.nth(4).getByLabel('调用签名', { exact: true }).inputValue() === '0' && await typedRows.nth(4).locator('.cmd-params select').last().inputValue() === 'true', '切换签名仅重置当前行，其他行签名和参数不变');
+    await page.getByRole('button', { name: '删除指令 5', exact: true }).click();
+    await page.getByRole('button', { name: '删除指令 4', exact: true }).click();
+    check(await typedRows.nth(1).locator('.cmd-params input').inputValue() === '10000' && await typedRows.nth(2).locator('.cmd-params input').inputValue() === '20000', '重复目录指令参数独立');
+    check(await typedRows.nth(1).locator('.cmd-params input').getAttribute('id') !== await typedRows.nth(2).locator('.cmd-params input').getAttribute('id'), '每行参数组件使用独立 idPrefix');
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    check(await page.locator('.side-head .muted').innerText() === geometryTimeBeforeCommands, 'auto.waitMillis 不加入几何预览时间轴');
+    await page.keyboard.press('Control+z');
+
+    // 有序列表：重复命令、独立手动参数、稳定行身份、按钮重排和空行处理。
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    const commandRows = page.locator('.node-command-card');
+    for (const value of ['alpha', 'beta']) {
+      await page.getByRole('button', { name: '添加指令', exact: true }).click();
+      const row = commandRows.last();
+      await row.locator('.node-command-name').fill('offline.task');
+      await row.getByRole('button', { name: '添加参数', exact: true }).click();
+      await row.getByRole('textbox', { name: '参数 1', exact: true }).fill(value);
+    }
+    const alphaId = await commandRows.nth(1).getAttribute('data-command-id');
+    const betaId = await commandRows.nth(2).getAttribute('data-command-id');
+    await page.getByRole('button', { name: '上移指令 3', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    check(await commandRows.nth(1).getAttribute('data-command-id') === betaId && await commandRows.nth(2).getAttribute('data-command-id') === alphaId, '键盘上移按稳定行身份重排');
+    check(await commandRows.nth(1).getByRole('textbox', { name: '参数 1', exact: true }).inputValue() === 'beta', '重排不串行参数');
+    await page.getByRole('button', { name: '下移指令 2', exact: true }).click();
+    await page.getByRole('button', { name: '上移指令 3', exact: true }).click();
+    check(await page.getByRole('button', { name: '上移指令 1', exact: true }).isDisabled() && await page.getByRole('button', { name: '下移指令 3', exact: true }).isDisabled(), '首尾重排按钮正确禁用');
+    await page.getByRole('button', { name: '添加指令', exact: true }).click();
+    await commandRows.last().getByRole('button', { name: '添加参数', exact: true }).click();
+    await page.locator('dialog button[type=submit]').click();
+    check(await page.locator('dialog .field-error').count() > 0, '无名但带参数的行保存时明确报错');
+    await page.getByRole('button', { name: '删除指令 4', exact: true }).click();
+    await page.getByRole('button', { name: '添加指令', exact: true }).click(); // 完全空白行可不提交
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    const expectedCommands = [
+      { name: 'intaker.intakerIn', params: [] },
+      { name: 'offline.task', params: ['beta'] },
+      { name: 'offline.task', params: ['alpha'] },
+    ];
+    await page.keyboard.press('Control+z');
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    check(await commandRows.count() === 1, '整列表保存只产生一步撤销');
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await page.keyboard.press('Control+y');
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    check(await commandRows.count() === 3, '空白行不提交，重复指令完整恢复');
+    check(await commandRows.nth(1).getByRole('textbox', { name: '参数 1', exact: true }).inputValue() === 'beta' && await commandRows.nth(2).getByRole('textbox', { name: '参数 1', exact: true }).inputValue() === 'alpha', '重复指令参数各自保存');
+    const nodeX = await page.locator('#nf-x').inputValue();
+    await commandRows.nth(1).getByRole('textbox', { name: '参数 1', exact: true }).fill('cancelled');
+    await page.getByRole('button', { name: '删除指令 3', exact: true }).click();
+    await page.locator('#nf-x').fill('1');
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    check(await commandRows.count() === 3 && await commandRows.nth(1).getByRole('textbox', { name: '参数 1', exact: true }).inputValue() === 'beta' && await page.locator('#nf-x').inputValue() === nodeX, '取消不保存删除、参数和几何草稿');
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: '更多操作', exact: true }).click();
+    await page.getByRole('menuitem', { name: '导出 JSON', exact: true }).click();
+    const commandsExport = await page.locator('dialog textarea').inputValue();
+    const commandsDocument = JSON.parse(commandsExport) as { version: number; frames: { commands?: typeof expectedCommands }[] };
+    check(commandsDocument.version === 2 && JSON.stringify(commandsDocument.frames[2]?.commands) === JSON.stringify(expectedCommands) && !commandsExport.includes('uiId'), 'V2 wrapper 导出保留有序重复指令，不泄漏 UI id');
+    await page.locator('dialog button.primary').click();
+    await page.getByRole('button', { name: '更多操作', exact: true }).click();
+    await page.getByRole('menuitem', { name: '导入 JSON', exact: true }).click();
+    await page.locator('dialog textarea').fill(commandsExport);
+    await page.locator('dialog button.primary').click();
+    await page.locator('dialog button.primary').click(); // 确认替换当前路径
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await node2.click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    check(await commandRows.count() === 3 && await commandRows.nth(2).getByRole('textbox', { name: '参数 1', exact: true }).inputValue() === 'alpha', 'V2 导出再导入往返保留顺序和独立参数');
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+
+    // 旧裸数组 / 单 command 导入兼容，验证后撤销还原列表路径。
+    await page.getByRole('button', { name: '更多操作', exact: true }).click();
+    await page.getByRole('menuitem', { name: '导入 JSON', exact: true }).click();
+    await page.locator('dialog textarea').fill(JSON.stringify([
+      { x: 0, y: 0, dx: 0, dy: 0, duration: 0, command: 'legacy.task', commandParams: ['old', 'tail'] },
+      { x: 10, y: 10, dx: 0, dy: 0, duration: 1 },
+    ]));
+    await page.locator('dialog button.primary').click();
+    await page.locator('dialog button.primary').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await page.locator('[data-kind=node][data-i="0"]').click({ button: 'right' });
+    await page.locator('dialog').waitFor();
+    check(await page.locator('.node-command-name').inputValue() === 'legacy.task' && await page.getByRole('textbox', { name: '参数 2', exact: true }).inputValue() === 'tail', '旧数组单 command 导入迁移为列表并保留参数');
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await page.keyboard.press('Control+z');
+    check(await page.locator('.node-list li').count() === 4, '旧导入可一步撤销，还原完整几何和指令路径');
 
     // 回放
     await page.getByRole('button', { name: '播放' }).click();
@@ -236,9 +356,10 @@ async function main() {
     check(await until(async () => (await page.locator('.sync-panel').innerText()).includes('已同步'), 'synced label'), '同步面板显示已同步');
 
     const nodeRouteResponse = await fetch(`${robot.url}/api/v2/routes/${encodeURIComponent('E2E 路径')}`, { headers: { 'X-Az-Session': robot.sessionToken! } });
-    const savedNodeRoute = await nodeRouteResponse.json() as { command?: string; commandParams?: string[] }[];
-    const noArgNode = savedNodeRoute.find((node) => node.command === 'intaker.intakerIn');
-    check(noArgNode !== undefined && (noArgNode.commandParams?.length ?? 0) === 0, '节点无参重载上传后仍是空参数数组');
+    const savedNodeRoute = await nodeRouteResponse.json() as { version: number; frames: { commands?: { name: string; params: string[] }[] }[] };
+    const noArgNode = savedNodeRoute.frames.find((node) => node.commands?.some((c) => c.name === 'intaker.intakerIn'));
+    check(savedNodeRoute.version === 2 && noArgNode?.commands?.[0]?.params.length === 0, '节点无参重载上传 V2 wrapper 后仍是空参数数组');
+    check(JSON.stringify(noArgNode?.commands) === JSON.stringify(expectedCommands), '列表上传保留重复指令、排序及独立参数');
     check(await page.locator('dialog').count() === 0, '合法无参重载离开编辑器不会误报缺参');
 
     // 机器侧修改 → SSE routes 事件 → 本地拉取
@@ -272,8 +393,8 @@ async function main() {
     await cardAction(page, 'Mirror B', '导出');
     const exported = await page.locator('dialog textarea').inputValue();
     let parsedOk = false;
-    try { parsedOk = Array.isArray(JSON.parse(exported)) && JSON.parse(exported).length >= 2; } catch { /* */ }
-    check(parsedOk, '导出 JSON 可解析且包含控制点数组');
+    try { const route = JSON.parse(exported) as { version: number; frames: unknown[] }; parsedOk = route.version === 2 && Array.isArray(route.frames) && route.frames.length >= 2; } catch { /* */ }
+    check(parsedOk, '导出 JSON 可解析且包含 V2 frames 控制点数组');
     await page.locator('dialog button.primary').click();
     await page.getByRole('button', { name: '导入', exact: true }).click();
     await page.locator('dialog textarea').fill(exported);
@@ -307,10 +428,25 @@ async function main() {
     check(await until(async () => !(await page.locator('.conn').innerText()).includes('已连接'), 'lost', 8000), '机器关闭后连接状态变为断开/失败');
     await robot.start(port);
     check(await until(async () => (await page.locator('.conn').innerText()).includes('已连接'), 'reconnect', 20000), '机器恢复后自动重连');
+    // 运行页参考任务：等待指令是普通目录项，预览只描述几何到点。
+    robot.mutateRemoteRoute('Mirror B', JSON.stringify({ version: 2, frames: [
+      { x: 0, y: 0, dx: 0, dy: 0, duration: 0, delayAfterArrive: 3, commands: [
+        { name: 'auto.waitMillis', params: ['10000'] }, { name: 'intakeOn', params: [] },
+      ] },
+      { x: 10, y: 10, dx: 0, dy: 0, duration: 1, commands: [
+        { name: 'auto.waitMillis', params: ['20000'] }, { name: 'auto.shoot', params: ['3000', '100', '200'] },
+      ] },
+    ] }));
     // 运行页
     await page.goto(`http://localhost:${PORT}/#/run`);
     check(await until(async () => (await page.locator('.topbar nav a[aria-current=page]').innerText()) === '运行', 'nav current'), '运行页导航高亮「运行」');
     check(await until(async () => (await page.locator('#run-op option').count()) > 1, 'opmodes loaded'), '运行页列出 OpMode');
+    await page.locator('#run-route').selectOption('Mirror B');
+    check(await page.locator('#run-route').inputValue() === 'Mirror B', '任务摘要参考路径可选择');
+    check(await until(async () => (await page.locator('.task-commands li').count()) === 4, 'all route commands expanded'), '运行页按航点展开全部四条指令');
+    const taskGroups = page.locator('.task-list > li');
+    check(await taskGroups.count() === 2 && (await taskGroups.nth(0).innerText()).includes('预览到点时间 0.0s') && (await taskGroups.nth(1).innerText()).includes('预览到点时间 4.0s'), '首点预览从零开始，waitMillis 不伪造任务时间或累入几何时轴');
+    check((await page.locator('.run-tasks').innerText()).includes('auto.shoot(3000, 100, 200)'), '聚合 Java 指令与普通指令同级展示');
     // 指令试运行只在支持远程指令的 OpMode（固件的 RemoteCommand Test，TeleOp）RUNNING 时可用
     const cmdOp = 'RemoteCommand Test';
     check((await page.locator('#run-op option', { hasText: cmdOp }).count()) === 1, '下拉框列出 TeleOp（RemoteCommand Test）');
@@ -525,10 +661,12 @@ async function main() {
     check(offErrors.length === 0, `离线全程无应用报错 ${offErrors.slice(0, 3).join(' | ')}`);
     offlinePhase = false;
     await ctx2.setOffline(false);
-    await browser.close();
   } finally {
-    preview.kill();
-    await robot.stop();
+    try { await browser?.close(); }
+    finally {
+      preview.kill();
+      await robot.stop();
+    }
   }
   log(failures === 0 ? 'ALL PASSED' : `${failures} FAILED`);
   process.exit(failures === 0 ? 0 : 1);

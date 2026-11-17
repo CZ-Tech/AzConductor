@@ -1,15 +1,15 @@
 /** 节点属性编辑对话框（由字段表驱动）。 */
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { OrientedTrajectory2D } from '../../core/spline';
 import { connData, connState, getConnection } from '../../state/session';
-import type { ControlNode } from '../../core/node';
+import { cloneCommands, type ControlNode } from '../../core/node';
 import { validateNodes } from '../../core/contract';
-import { argsValid, commandVariants, draftArgs, resolveArgs, variantForArgs } from '../../core/commandArgs';
-import { CommandArguments } from './commandArguments';
+import { argsValid, resolveArgs } from '../../core/commandArgs';
+import { NodeCommands, commandDraft, type CommandDraft } from './nodeCommands';
 import { commandCatalog } from '../../state/robotData';
 import { NODE_FIELDS, NODE_FIELD_ORDER, NODE_MAIN_SECTIONS, estimateBrakeZone, estimateStartSpeed, parkingBrakeZone, type FieldSection, type FieldSpec, type NodeFieldKey } from '../nodeFields';
 import { showDialog } from './dialogs';
-import { IconChevron, IconClose, IconPlus } from './icons';
+import { IconChevron } from './icons';
 import { S } from '../strings';
 
 export type NodeEditResult = { kind: 'save'; node: ControlNode } | { kind: 'delete' };
@@ -20,12 +20,12 @@ export function showNodeEditor(node: ControlNode, index: number, canDelete: bool
   ));
 }
 
-type Draft = Record<Exclude<NodeFieldKey, 'commandParams'>, string> & { commandParams: string[] };
+export type Draft = Record<Exclude<NodeFieldKey, 'commands'>, string> & { commands: CommandDraft[] };
 
-function toDraft(n: ControlNode): Draft {
+export function toDraft(n: ControlNode): Draft {
   const s = (v: number | undefined) => (v === undefined ? '' : String(v));
   return {
-    marker: n.marker, command: n.command, commandParams: [...n.commandParams],
+    marker: n.marker, commands: n.commands.map(commandDraft),
     heading: s(n.heading), dHeading: s(n.dHeading), duration: s(n.duration), delayAfterArrive: s(n.delayAfterArrive),
     x: s(n.x), dx: s(n.dx), y: s(n.y), dy: s(n.dy),
     maxPower: s(n.maxPower), maxSpeed: s(n.maxSpeed), endSpeed: s(n.endSpeed),
@@ -38,15 +38,16 @@ export function fromDraft(d: Draft): { node: ControlNode } | { errors: Partial<R
   const errors: Partial<Record<NodeFieldKey, string>> = {};
   const num = (k: NodeFieldKey, v: string): number => {
     const x = Number(v.trim());
-    if (v.trim() === '' || !Number.isFinite(x)) { errors[k] = '格式错误：请输入数字'; return 0; }
+    if (v.trim() === '' || !Number.isFinite(x)) { errors[k] = S.node.invalidNumber; return 0; }
     return x;
   };
   const opt = (k: NodeFieldKey, v: string): number | undefined => (v.trim() === '' ? undefined : num(k, v));
+  if (d.commands.some((c) => !c.name.trim() && c.params.length > 0)) errors.commands = S.node.unnamedCommand;
   const node: ControlNode = {
     x: num('x', d.x), dx: num('dx', d.dx), y: num('y', d.y), dy: num('dy', d.dy),
     heading: num('heading', d.heading), dHeading: num('dHeading', d.dHeading),
     duration: num('duration', d.duration),
-    marker: d.marker, command: d.command.trim(), commandParams: d.command.trim() ? [...d.commandParams] : [],
+    marker: d.marker, commands: cloneCommands(d.commands.filter((c) => c.name.trim()).map((c) => ({ name: c.name.trim(), params: c.params }))),
     delayAfterArrive: num('delayAfterArrive', d.delayAfterArrive),
     maxPower: num('maxPower', d.maxPower),
   };
@@ -83,23 +84,8 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
     const n = p.node;
     return n.maxPower !== 1 || n.maxSpeed !== undefined || n.endSpeed !== undefined || n.brakeZoneIn !== undefined || n.brakeForwardPower !== undefined;
   });
-  const catalog = commandCatalog.value;
-  const desc = useMemo(() => catalog?.commands.find((c) => c.name === d.command), [catalog, d.command]);
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => { setD((o) => ({ ...o, [k]: v })); setErrors((e) => { const n = { ...e }; delete n[k]; return n; }); };
-
-  const variantIndex = desc ? variantForArgs(desc, d.commandParams) : -1;
-  const setCommand = (name: string) => {
-    if (name === d.command) return;
-    const dsc = catalog?.commands.find((c) => c.name === name);
-    const variant = dsc ? commandVariants(dsc)[0] : undefined;
-    // 显式换命令才重置；打开对话框及目录更新都不补齐或截断已存参数。
-    setD((o) => ({ ...o, command: name, commandParams: variant ? draftArgs(variant) : [] }));
-  };
-  const selectVariant = (index: number) => {
-    const variant = desc ? commandVariants(desc)[index] : undefined;
-    if (variant) set('commandParams', draftArgs(variant));
-  };
 
   const save = (e: Event) => {
     e.preventDefault();
@@ -112,9 +98,9 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
       if (Object.keys(m).length) { setErrors(m); if (m.maxPower || m.maxSpeed || m.endSpeed || m.brakeZoneIn || m.brakeForwardPower) setShowAdv(true); return; }
     }
     // 合法参数才规范化（新目录省略可选尾参，旧目录补默认值）；无效草稿原样保留。
-    const currentDesc = commandCatalog.value?.commands.find((c) => c.name === r.node.command);
-    if (currentDesc && argsValid(currentDesc, r.node.commandParams)) {
-      r.node.commandParams = resolveArgs(currentDesc, r.node.commandParams);
+    for (const command of r.node.commands) {
+      const currentDesc = commandCatalog.value?.commands.find((c) => c.name === command.name);
+      if (currentDesc && argsValid(currentDesc, command.params)) command.params = resolveArgs(currentDesc, command.params);
     }
     // 参数未填写或不符合当前签名：仍允许保存，离开编辑器时再提示。
     p.onDone({ kind: 'save', node: r.node });
@@ -157,43 +143,18 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
           <div class="nf" key={k}>{label}
             <input id={id} type="text" value={d.marker} onInput={(e) => set('marker', (e.target as HTMLInputElement).value)} />{errEl}</div>
         );
-      case 'command':
-        return (
-          <div class="nf" key={k}>{label}
-            <input id={id} type="text" list="nf-commands" value={d.command} placeholder={S.node.selectCommand}
-              onInput={(e) => setCommand((e.target as HTMLInputElement).value)} />
-            <datalist id="nf-commands">{catalog?.commands.map((c) => <option key={c.name} value={c.name} />)}</datalist>
-            {catalog && d.command && !desc && <div class="hint">{S.node.noMatch}</div>}
-            {errEl}</div>
-        );
-      case 'params':
-        return (
-          <div class="nf wide" key={k}>
-            <label class="nf-label"><span>{zh}</span></label>
-            {desc ? <>
-              <CommandArguments idPrefix="nf-command" command={desc} variantIndex={variantIndex} args={d.commandParams}
-                onVariant={selectVariant} onArgs={(args) => set('commandParams', args)} />
-              {!argsValid(desc, d.commandParams) && <div class="hint">{S.commands.invalidArgs}</div>}
-            </> : <>
-              {d.commandParams.map((v, i) => (
-                <div class="param-row" key={i}>
-                  <input type="text" aria-label={S.node.paramN(i + 1)} value={v} placeholder={S.node.paramN(i + 1)}
-                    onInput={(e) => { const arr = [...d.commandParams]; arr[i] = (e.target as HTMLInputElement).value; set('commandParams', arr); }} />
-                  <button type="button" class="icon ghost" aria-label={S.node.removeParam} title={S.node.removeParam} onClick={() => set('commandParams', d.commandParams.filter((_, j) => j !== i))}><IconClose /></button>
-                </div>
-              ))}
-              <button type="button" class="ghost" onClick={() => set('commandParams', [...d.commandParams, ''])}><IconPlus />{S.node.addParam}</button>
-            </>}
-            {errEl}
-          </div>
-        );
+      case 'commands':
+        return <div class="nf wide" key={k}>
+          <div class="nf-label"><span>{zh}</span></div>
+          <NodeCommands rows={d.commands} onRows={(rows) => set('commands', rows)} />{errEl}
+        </div>;
       default:
         return (
           <div class="nf" key={k}>{label}
-            <input id={id} type="number" inputMode="decimal" step="any" value={d[k as Exclude<NodeFieldKey, 'commandParams'>]}
+            <input id={id} type="number" inputMode="decimal" step="any" value={d[k as Exclude<NodeFieldKey, 'commands'>]}
               aria-invalid={err ? 'true' : undefined}
               placeholder={k === 'brakeZoneIn' ? brakePlaceholder : undefined}
-              onInput={(e) => set(k as Exclude<NodeFieldKey, 'commandParams'>, (e.target as HTMLInputElement).value)} />
+              onInput={(e) => set(k as Exclude<NodeFieldKey, 'commands'>, (e.target as HTMLInputElement).value)} />
             {hintOf(k) && !err && <div class="hint">{hintOf(k)}</div>}
             {k === 'brakeZoneIn' && !err && !d.brakeZoneIn.trim() && <div class="hint">{estimate !== undefined ? `${brakePlaceholder}；` : ''}{brakeDetails}</div>}{errEl}</div>
         );

@@ -136,6 +136,51 @@ describe('初始化与加载', () => {
   });
 });
 
+describe('不支持的存档保护', () => {
+  const unsupported = '[{"robotName":"default","routes":[{"name":"future","version":99,"points":[]}]}]';
+
+  it('未知version原文不会被create/计时器/flush覆盖，合法重载后解除', () => {
+    const kv = new SpyKV();
+    kv.set(ROUTES_STORAGE_KEY, unsupported);
+    kv.sets.length = 0;
+    const { store, timers } = setup({ kv });
+    expect(store.saveError.value).toContain('自动保存已暂停');
+    store.createRoute('local');
+    timers.runAll();
+    store.flush();
+    expect(kv.get(ROUTES_STORAGE_KEY)).toBe(unsupported);
+    expect(kv.sets).toEqual([]);
+    expect(names(store)).toEqual(['local']);
+    kv.set(ROUTES_STORAGE_KEY, serializeRoutesDoc(docOf(['restored', pts(0)])));
+    expect(store.reloadFromStorage()).toBe(true);
+    expect(store.saveError.value).toBeNull();
+    store.createRoute('new');
+    store.flush();
+    expect(kv.get(ROUTES_STORAGE_KEY)).toContain('new');
+  });
+
+  it('无效storage重载保留内存文档和撤销历史，拒绝写回', () => {
+    const { kv, store } = setup();
+    store.createRoute('existing', pts(1));
+    store.flush();
+    const before = store.doc.value;
+    kv.set(ROUTES_STORAGE_KEY, unsupported);
+    kv.sets.length = 0;
+    expect(store.reloadFromStorage()).toBe(false);
+    expect(store.doc.value).toBe(before);
+    expect(store.canUndo.value).toBe(true);
+    expect(store.saveError.value).toContain('自动保存已暂停');
+    store.createRoute('unsaved');
+    store.flush();
+    expect(kv.get(ROUTES_STORAGE_KEY)).toBe(unsupported);
+    expect(kv.sets).toEqual([]);
+    kv.set(ROUTES_STORAGE_KEY, '   ');
+    store.reloadFromStorage();
+    expect(store.saveError.value).toBeNull();
+    expect(names(store)).toEqual([]);
+  });
+});
+
 describe('createRoute', () => {
   it('默认名 "新路径"，空白名回退默认名，名称 trim', () => {
     const { store } = setup();
@@ -236,15 +281,22 @@ describe('duplicateRoute', () => {
     expect(names(store)).toEqual(['A', 'A 副本 2', 'A 副本', 'B']);
   });
 
-  it('深拷贝点（修改副本的 commandParams 不影响原路径）', () => {
+  it('深拷贝点及命令列表（修改副本参数和名称不影响原路径）', () => {
     const { store } = setup();
-    store.createRoute('A', [makeNode({ x: 1, y: 2, commandParams: ['p'], marker: 'm', maxSpeed: 3 })]);
+    store.createRoute('A', [makeNode({ x: 1, y: 2, commands: [{ name: 'shoot', params: ['p'] }, { name: 'wait', params: [] }], marker: 'm', maxSpeed: 3 })]);
     const copy = store.duplicateRoute('A')!;
     const a = store.getRoute('A')!.points[0]!;
     const c = store.getRoute(copy)!.points[0]!;
     expect(c).toStrictEqual(a);
     expect(c).not.toBe(a);
-    expect(c.commandParams).not.toBe(a.commandParams);
+    expect(c.commands).not.toBe(a.commands);
+    c.commands.forEach((command, i) => {
+      expect(command).not.toBe(a.commands[i]);
+      expect(command.params).not.toBe(a.commands[i]!.params);
+    });
+    c.commands[0]!.params[0] = 'changed';
+    c.commands[1]!.name = 'changed';
+    expect(a.commands).toEqual([{ name: 'shoot', params: ['p'] }, { name: 'wait', params: [] }]);
   });
 
   it('不存在返回 null 且不产生历史', () => {
@@ -758,7 +810,7 @@ describe('reloadFromStorage', () => {
     expect(store.canUndo.value).toBe(true);
   });
 
-  it('存储被清空 / 损坏后重载为空文档', () => {
+  it('清空存储重载为空；损坏存档保留当前文档并暂停覆盖', () => {
     const { store, kv } = setup();
     store.createRoute('A');
     store.flush();
@@ -767,9 +819,14 @@ describe('reloadFromStorage', () => {
     expect(store.doc.value).toEqual([{ robotName: 'default', routes: [] }]);
     kv.set(ROUTES_STORAGE_KEY, serializeRoutesDoc(docOf(['B', []])));
     expect(store.reloadFromStorage()).toBe(true);
+    const before = store.doc.value;
     kv.set(ROUTES_STORAGE_KEY, '{oops');
-    expect(store.reloadFromStorage()).toBe(true);
-    expect(names(store)).toEqual([]);
+    expect(store.reloadFromStorage()).toBe(false);
+    expect(store.doc.value).toBe(before);
+    expect(names(store)).toEqual(['B']);
+    expect(store.saveError.value).not.toBeNull();
+    store.flush();
+    expect(kv.get(ROUTES_STORAGE_KEY)).toBe('{oops');
   });
 
   it('手势进行中延后重载，手势结束后生效', () => {
