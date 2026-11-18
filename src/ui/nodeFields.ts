@@ -1,10 +1,10 @@
 /**
  * 节点编辑表单的字段表。`satisfies Record<keyof ControlNode, …>`：给 ControlNode 加字段而不在此登记，编译不通过。
  */
-import { targetEndSpeed, type ControlNode } from '../core/node';
+import { isNonNegativeFiniteNumber, targetEndSpeed, type ControlNode, type TangentSpeedSettings } from '../core/node';
 import { OrientedTrajectory2D } from '../core/spline';
 
-export type FieldKind = 'text' | 'number' | 'optNumber' | 'commands';
+export type FieldKind = 'text' | 'number' | 'optNumber' | 'commands' | 'flag';
 /** 表单分组；`advanced` 放进折叠区。 */
 export type FieldSection = 'pose' | 'motion' | 'command' | 'advanced';
 export interface FieldSpec {
@@ -26,8 +26,8 @@ export const NODE_FIELDS = {
   dy: { kind: 'number', section: 'pose', step: '1' },
   maxPower: { kind: 'number', section: 'advanced', step: '0.05' },
   maxSpeed: { kind: 'optNumber', section: 'advanced', step: '1' },
-  endSpeed: { kind: 'optNumber', section: 'advanced' }, // 仅保留旧路线数据，不显示输入框
-  tangentSpeedRatio: { kind: 'optNumber', section: 'pose', step: '0.1' },
+  endSpeed: { kind: 'optNumber', section: 'advanced' }, // 机器人线格式，不显示输入框
+  stopAtNode: { kind: 'flag', section: 'motion' }, // 由停车 / 通过按钮操作
   brakeZoneIn: { kind: 'optNumber', section: 'advanced', step: '1' },
   brakeForwardPower: { kind: 'optNumber', section: 'advanced', step: '0.05' },
 } as const satisfies Record<keyof ControlNode, FieldSpec>;
@@ -35,8 +35,9 @@ export const NODE_FIELDS = {
 export type NodeFieldKey = keyof typeof NODE_FIELDS;
 
 /** 表单显示顺序（各字段按 section 分组呈现）。 */
-export const NODE_FIELD_ORDER: readonly Exclude<NodeFieldKey, 'endSpeed'>[] = [
-  'x', 'y', 'dx', 'dy', 'tangentSpeedRatio', 'heading', 'dHeading', 'duration', 'delayAfterArrive', 'marker', 'commands',
+export type VisibleNodeFieldKey = Exclude<NodeFieldKey, 'endSpeed' | 'stopAtNode'>;
+export const NODE_FIELD_ORDER: readonly VisibleNodeFieldKey[] = [
+  'x', 'y', 'dx', 'dy', 'heading', 'dHeading', 'duration', 'delayAfterArrive', 'marker', 'commands',
   'maxPower', 'maxSpeed', 'brakeZoneIn', 'brakeForwardPower',
 ];
 
@@ -70,49 +71,30 @@ export function estimateBrakeZone(
 }
 
 /** 来源表示最后一次决定目标段起速的原因；显式末速度只是约定值，并非物理保证。 */
-export type StartSpeedSource = 'initial' | 'explicit' | 'tangent' | 'estimated' | 'delay' | 'heading-only';
+export type StartSpeedSource = 'initial' | 'tangent' | 'delay' | 'heading-only';
 export interface StartSpeedEstimate {
   speed: number;
   source: StartSpeedSource;
 }
 
-/**
- * 根据从首点到目标段前点（含）的完整节点推算目标段起速。
- * 短段阈值对应机器人默认 DEGENERATE_ARC_THRESHOLD（英寸）。
- */
+/** 目标段的起速由上一段的到点速度决定；短段阈值沿用机器人默认值（in）。 */
 export function estimateStartSpeed(
-  previousNodes: readonly ControlNode[], brakeDeceleration: number,
+  previousNodes: readonly ControlNode[], speedSettings: TangentSpeedSettings,
 ): StartSpeedEstimate | undefined {
-  if (!Array.isArray(previousNodes) || previousNodes.length === 0 ||
-      !Number.isFinite(brakeDeceleration) || brakeDeceleration <= 0) return undefined;
-  const acceleration = 1.05 * brakeDeceleration;
-  if (!Number.isFinite(acceleration)) return undefined;
-  let result: StartSpeedEstimate = { speed: 0, source: 'initial' };
-  for (let i = 0; i < previousNodes.length; i++) {
-    const node = previousNodes[i];
-    if (!node) return undefined;
-    const target = targetEndSpeed(node);
-    if (![node.x, node.y, node.dx, node.dy, node.delayAfterArrive].every(Number.isFinite) ||
-        node.delayAfterArrive < 0 || (i > 0 &&
-        ((target !== undefined && (!Number.isFinite(target) || target < 0)) ||
-         (node.maxSpeed !== undefined && (!Number.isFinite(node.maxSpeed) || node.maxSpeed <= 0))))) return undefined;
-    if (i > 0) {
-      const length = new OrientedTrajectory2D(previousNodes[i - 1], node, 1).length;
-      if (!Number.isFinite(length)) return undefined;
-      if (length < 0.05) {
-        result = { speed: 0, source: 'heading-only' };
-      } else if (target !== undefined) {
-        result = { speed: target, source: node.tangentSpeedRatio === undefined ? 'explicit' : 'tangent' };
-      } else {
-        const speedSquared = result.speed ** 2 + 2 * acceleration * length;
-        if (!Number.isFinite(speedSquared)) return undefined;
-        const limit = node.maxSpeed === undefined ? Infinity : Math.max(result.speed, node.maxSpeed);
-        result = { speed: Math.min(Math.sqrt(speedSquared), limit), source: 'estimated' };
-      }
-    }
-    if (node.delayAfterArrive > 0) result = { speed: 0, source: 'delay' };
-  }
-  return result;
+  const last = previousNodes.at(-1);
+  if (!last || !isNonNegativeFiniteNumber(speedSettings.tangentSpeedRatio) ||
+      !isNonNegativeFiniteNumber(speedSettings.maxEstimatedSpeed) || !Number.isFinite(last.delayAfterArrive) || last.delayAfterArrive < 0) return undefined;
+  const before = previousNodes.at(-2);
+  if (![last.x, last.y, last.dx, last.dy].every(Number.isFinite) ||
+      (before && ![before.x, before.y, before.dx, before.dy].every(Number.isFinite))) return undefined;
+  if (last.delayAfterArrive > 0) return { speed: 0, source: 'delay' };
+  if (!before) return { speed: 0, source: 'initial' };
+  const length = new OrientedTrajectory2D(before, last, 1).length;
+  if (!Number.isFinite(length)) return undefined;
+  if (length < 0.05) return { speed: 0, source: 'heading-only' };
+  if (last.maxSpeed !== undefined && (!Number.isFinite(last.maxSpeed) || last.maxSpeed <= 0)) return undefined;
+  const speed = targetEndSpeed(last, speedSettings);
+  return Number.isFinite(speed) ? { speed, source: 'tangent' } : undefined;
 }
 
 /** 停车预设只保留正的手动制动距离。 */

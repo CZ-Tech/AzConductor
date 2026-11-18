@@ -1,3 +1,5 @@
+import { applyTangentSpeeds } from '../../core/node';
+import { settings } from '../../state/settings';
 import { docStore } from '../../state/docStore';
 import { RouteCore } from '../../core/route';
 import { mirrorNodes, pointSymmetryNodes } from '../../core/field';
@@ -84,7 +86,7 @@ export function RoutesView() {
                     <MenuItem icon={<IconCopy />} onSelect={() => store.duplicateRoute(r.name)}>{S.common.duplicate}</MenuItem>
                     <MenuItem icon={<IconMirror />} onSelect={() => void mirror(r)}>{S.routes.mirror}</MenuItem>
                     <MenuItem icon={<IconRotate180 />} onSelect={() => void pointSymmetry(r)}>{S.routes.pointSymmetry}</MenuItem>
-                    <MenuItem icon={<IconExport />} onSelect={() => void showExportDialog(S.io.exportTitle, exportRouteJson(r.points), `${r.name}.json`)}>{S.routes.export}</MenuItem>
+                    <MenuItem icon={<IconExport />} onSelect={() => void showExportDialog(S.io.exportTitle, exportRouteJson(applyTangentSpeeds(r.points, settings.peek())), `${r.name}.json`)}>{S.routes.export}</MenuItem>
                     <MenuSeparator />
                     <MenuItem icon={<IconArrowUp />} disabled={i === 0} onSelect={() => store.moveRoute(i, i - 1)}>{S.routes.moveUp}</MenuItem>
                     <MenuItem icon={<IconArrowDown />} disabled={i === routes.length - 1} onSelect={() => store.moveRoute(i, i + 1)}>{S.routes.moveDown}</MenuItem>

@@ -143,6 +143,8 @@ export interface SyncEngineOptions {
   local: LocalRoutes;
   baselines: BaselineStore;
   tombstones: TombstoneStore;
+  /** Prepare the local body for comparison and upload; never changes the robot's fetched body. */
+  prepareLocal?: ((nodes: readonly ControlNode[]) => readonly ControlNode[]) | undefined;
 }
 
 const emptyReport = (): SyncReport => ({
@@ -214,11 +216,12 @@ export class SyncEngine {
       // The route exists locally (again): any earlier local deletion is void.
       if (tomb !== null) { tombstones.remove(robotKey, name); tomb = null; }
 
-      const localCanon = canonicalRoute(entry.points);
+      const prepared = this.prepareLocal(entry.points);
+      const localCanon = canonicalRoute(prepared);
 
       if (!meta) {
         // Absence on the robot is not a deletion; create it.
-        const put = await this.guard(() => api.putRoute(name, entry.points, 0));
+        const put = await this.guard(() => api.putRoute(name, prepared, 0));
         if (put.ok) {
           rep.pushed.push(name);
           this.remember(name, localCanon, put.value.revision);
@@ -235,6 +238,20 @@ export class SyncEngine {
           rep.failures.push(`Failed to establish initial baseline for '${name}': ${remote.message}`);
         } else if (remote.canon === localCanon) {
           this.remember(name, localCanon, remote.revision);
+        } else if (this.o.prepareLocal && canonicalRoute(this.prepareLocal(remote.nodes)) === localCanon) {
+          // Only obsolete local-policy fields differ. Establish the real remote baseline and
+          // update with the fetched revision rather than reporting a first-sync content conflict.
+          const put = await this.guard(() => api.putRoute(name, prepared, remote.revision));
+          if (put.ok) {
+            rep.pushed.push(name);
+            this.remember(name, localCanon, put.value.revision);
+          } else if (isHttpError(put.error, 412)) {
+            const latest = await this.fetchRemote(name);
+            if (latest.ok) rep.conflicts.push(this.conflict(name, 'FIRST_SYNC_DIFFERENT', entry.points, latest.nodes, latest.revision));
+            else rep.failures.push(`Failed to inspect changed remote route '${name}': ${latest.message}`);
+          } else {
+            rep.failures.push(`Failed to push '${name}': ${put.message}`);
+          }
         } else {
           rep.conflicts.push(this.conflict(name, 'FIRST_SYNC_DIFFERENT', entry.points, remote.nodes, remote.revision));
         }
@@ -247,7 +264,7 @@ export class SyncEngine {
       if (!localChanged && !remoteChanged) return;
 
       if (localChanged && !remoteChanged) {
-        const put = await this.guard(() => api.putRoute(name, entry.points, meta.revision));
+        const put = await this.guard(() => api.putRoute(name, prepared, meta.revision));
         if (put.ok) {
           rep.pushed.push(name);
           this.remember(name, localCanon, put.value.revision);
@@ -355,10 +372,11 @@ export class SyncEngine {
       baselines.remove(robotKey, c.routeName);
       return { ok: true };
     }
-    const put = await this.guard(() => api.putRoute(c.routeName, c.local as ControlNode[], c.remoteRevision ?? 0));
+    const prepared = this.prepareLocal(c.local);
+    const put = await this.guard(() => api.putRoute(c.routeName, prepared, c.remoteRevision ?? 0));
     if (!put.ok) return { ok: false, message: `Failed to push '${c.routeName}': ${put.message}` };
     tombstones.remove(robotKey, c.routeName);
-    this.remember(c.routeName, canonicalRoute(c.local), put.value.revision);
+    this.remember(c.routeName, canonicalRoute(prepared), put.value.revision);
     return { ok: true };
   }
 
@@ -410,6 +428,10 @@ export class SyncEngine {
     return { id: routeName, routeName, reason, local, remote, remoteRevision };
   }
 
+  private prepareLocal(nodes: readonly ControlNode[]): readonly ControlNode[] {
+    return this.o.prepareLocal?.(nodes) ?? nodes;
+  }
+
   private remember(name: string, canon: string, remoteRevision: number): void {
     this.o.baselines.put(this.o.robotKey, { routeName: name, localFingerprint: fingerprint(canon), remoteRevision });
   }
@@ -456,6 +478,7 @@ export interface SyncControllerOptions {
   baselines: BaselineStore;
   tombstones: TombstoneStore;
   target?: SyncTarget | null;
+  prepareLocal?: SyncEngineOptions['prepareLocal'];
 }
 
 /**
@@ -484,6 +507,7 @@ export class SyncController {
           local: this.opts.local,
           baselines: this.opts.baselines,
           tombstones: this.opts.tombstones,
+          prepareLocal: this.opts.prepareLocal,
         })
       : null;
     this.conflicts.value = [];
@@ -582,6 +606,9 @@ export class SyncController {
     if (this.engine !== engine) return report; // target changed meanwhile: discard
     if (!report.aborted) this.conflicts.value = report.conflicts;
     this.lastResult.value = report;
+    // Pulled routes now participate in the local speed policy; their baseline still reflects
+    // the actual remote body so a follow-up pass can apply any differences with revision guards.
+    if (this.opts.prepareLocal && report.pulled.length) void this.syncNow();
     this.refreshStatus();
     return report;
   }

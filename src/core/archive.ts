@@ -51,8 +51,8 @@ export function encodeStoredNode(n: ControlNode): Record<string, unknown> {
     maxPower: n.maxPower,
   };
   if (n.maxSpeed != null) f['maxSpeed'] = n.maxSpeed;
-  if (n.tangentSpeedRatio != null) f['tangentSpeedRatio'] = n.tangentSpeedRatio;
-  else if (n.endSpeed != null) f['endSpeed'] = n.endSpeed;
+  if (n.endSpeed != null) f['endSpeed'] = n.endSpeed;
+  if (n.stopAtNode) f['stopAtNode'] = true;
   if (n.brakeZoneIn != null) f['brakeZoneIn'] = n.brakeZoneIn;
   if (n.brakeForwardPower != null) f['brakeForwardPower'] = n.brakeForwardPower;
   return f;
@@ -83,14 +83,7 @@ export function allRoutes(doc: readonly RobotRoutes[]): RouteData[] {
 
 function decodeStoredNode(p: Record<string, unknown>, index: number): ControlNode {
   const node = decodeNodeFrame(p, index);
-  if (has(p, 'tangentSpeedRatio')) {
-    const ratio = p['tangentSpeedRatio'];
-    if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0) {
-      throw new WireError(`第 ${index} 个点切线速度比例必须为有限非负数`);
-    }
-    node.tangentSpeedRatio = ratio;
-    delete node.endSpeed;
-  }
+  if (p['stopAtNode'] === true) node.stopAtNode = true;
   return node;
 }
 

@@ -2,20 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { fromDraft, toDraft } from '../../src/ui/components/nodeEditor';
 import { commandDraft } from '../../src/ui/components/nodeCommands';
 import { estimateBrakeZone, estimateStartSpeed, parkingBrakeZone } from '../../src/ui/nodeFields';
-import { makeNode } from '../../src/core/node';
-import { OrientedTrajectory2D } from '../../src/core/spline';
+import { DEFAULT_TANGENT_SPEED_SETTINGS, makeNode } from '../../src/core/node';
 
 const draft = {
   x: '0', y: '0', dx: '0', dy: '0', heading: '0', dHeading: '0', duration: '1',
   delayAfterArrive: '0', marker: '', commands: [], maxPower: '1',
-  maxSpeed: '30', endSpeed: '0', tangentSpeedRatio: '', brakeZoneIn: '', brakeForwardPower: '',
+  maxSpeed: '30', stopAtNode: false, brakeZoneIn: '', brakeForwardPower: '',
 };
 
 describe('有序指令草稿', () => {
   it('完整保留几何、高级字段、重复指令及原参数长度，UI id 不落盘', () => {
     const node = makeNode({ x: 1, y: 2, dx: 3, dy: 4, heading: 50, dHeading: 6,
       duration: 7, delayAfterArrive: 8, marker: 'tag', maxPower: 0.9, maxSpeed: 20,
-      endSpeed: 0, brakeZoneIn: 0, brakeForwardPower: 0.2,
+      stopAtNode: true, brakeZoneIn: 12, brakeForwardPower: 0.2,
       commands: [{ name: 'same', params: ['a', '', 'extra'] }, { name: 'same', params: [] }] });
     const d = toDraft(node);
     expect(new Set(d.commands.map((c) => c.uiId)).size).toBe(2);
@@ -44,60 +43,31 @@ describe('有序指令草稿', () => {
 });
 
 describe('目标段起速估算', () => {
-  const point = (x: number, extra: Partial<Parameters<typeof makeNode>[0]> = {}) =>
-    makeNode({ ...extra, x, y: extra.y ?? 0 });
+  const speed = (tangentSpeedRatio: number) => ({ ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio });
+  const point = (x: number, extra: Partial<Parameters<typeof makeNode>[0]> = {}) => makeNode({ ...extra, x, y: 0 });
 
-  it('从首点零速累计多个通过点，使用 Hermite 弧长并忽略首点末速度', () => {
-    const nodes = [point(0, { x: 0, y: 0, endSpeed: 999, dy: 8 }), point(10), point(20), point(30)];
-    const length = nodes.slice(1).reduce((sum, n, i) => sum + new OrientedTrajectory2D(nodes[i]!, n, 1).length, 0);
-    const estimate = estimateStartSpeed(nodes, 10);
-    expect(estimate?.source).toBe('estimated');
-    expect(estimate?.speed).toBeCloseTo(Math.sqrt(2 * 10.5 * length));
-    expect(estimateStartSpeed([nodes[0]!], 10)).toEqual({ speed: 0, source: 'initial' });
+  it('按同一全局比例从上一节点推算，忽略旧固定速度并遵守限速', () => {
+    const nodes = [point(0), point(10, { dx: 3, dy: 4, endSpeed: 999, maxSpeed: 8 })];
+    expect(estimateStartSpeed(nodes, speed(0.5))).toEqual({ speed: 2.5, source: 'tangent' });
+    expect(estimateStartSpeed(nodes, speed(2))).toEqual({ speed: 8, source: 'tangent' });
+    expect(estimateStartSpeed(nodes, { ...speed(2), maxEstimatedSpeed: 4 })).toEqual({ speed: 4, source: 'tangent' });
+    expect(estimateStartSpeed(nodes, speed(0))).toEqual({ speed: 0, source: 'tangent' });
+    expect(estimateStartSpeed([nodes[0]!], speed(2))).toEqual({ speed: 0, source: 'initial' });
   });
 
-  it('采用显式目标速度，即使超过限速，再用于后续估算', () => {
-    const nodes = [point(0), point(10, { x: 10, y: 0, endSpeed: 30, maxSpeed: 5 })];
-    expect(estimateStartSpeed(nodes, 10)).toEqual({ speed: 30, source: 'explicit' });
-    expect(estimateStartSpeed([...nodes, point(20)], 10)?.speed).toBeCloseTo(Math.sqrt(30 ** 2 + 2 * 10.5 * 10));
+  it('等待、停车和纯转向后从零开始', () => {
+    const head = [point(0)];
+    expect(estimateStartSpeed([...head, point(10, { dx: 3, delayAfterArrive: 1 })], speed(1))).toEqual({ speed: 0, source: 'delay' });
+    expect(estimateStartSpeed([...head, point(10, { dx: 3, stopAtNode: true })], speed(1))).toEqual({ speed: 0, source: 'tangent' });
+    expect(estimateStartSpeed([...head, point(0.01, { heading: 90 })], speed(1))).toEqual({ speed: 0, source: 'heading-only' });
   });
 
-  it('用上一点的联动速度估算起速，受上限和等待约束', () => {
-    const auto = point(10, { dx: 3, dy: -4, tangentSpeedRatio: 2, maxSpeed: 8 });
-    expect(estimateStartSpeed([point(0), auto], 10)).toEqual({ speed: 8, source: 'tangent' });
-    expect(estimateStartSpeed([point(0), { ...auto, tangentSpeedRatio: 0 }], 10)).toEqual({ speed: 0, source: 'tangent' });
-    expect(estimateStartSpeed([point(0), { ...auto, delayAfterArrive: 1 }], 10)).toEqual({ speed: 0, source: 'delay' });
-  });
-
-  it('等待后从零重新加速，也处理目标段前点的等待', () => {
-    const nodes = [point(0), point(10, { x: 10, y: 0, endSpeed: 20, delayAfterArrive: 1 })];
-    expect(estimateStartSpeed(nodes, 10)).toEqual({ speed: 0, source: 'delay' });
-    expect(estimateStartSpeed([...nodes, point(20)], 10)?.speed).toBeCloseTo(Math.sqrt(210));
-  });
-
-  it('限制加速末速，但不把超限起速瞬间降到限速', () => {
-    expect(estimateStartSpeed([point(0), point(10, { x: 10, y: 0, maxSpeed: 5 })], 10)?.speed).toBe(5);
-    expect(estimateStartSpeed([point(0), point(10, { x: 10, y: 0, endSpeed: 30 }),
-      point(20, { x: 20, y: 0, maxSpeed: 5 })], 10)?.speed).toBe(30);
-  });
-
-  it('纯转向短段停车，即使配置显式末速', () => {
-    const nodes = [point(0), point(10, { x: 10, y: 0, endSpeed: 20 }),
-      point(10.01, { x: 10.01, y: 0, heading: 90, endSpeed: 12 })];
-    expect(estimateStartSpeed(nodes, 10)).toEqual({ speed: 0, source: 'heading-only' });
-    expect(estimateStartSpeed([...nodes, point(20.01)], 10)?.speed).toBeCloseTo(Math.sqrt(210));
-  });
-
-  it('拒绝空列表、无效减速度、几何、等待和后续速度', () => {
-    expect(estimateStartSpeed([], 10)).toBeUndefined();
-    for (const value of [0, -1, NaN, Infinity]) expect(estimateStartSpeed([point(0)], value)).toBeUndefined();
-    for (const extra of [{ x: NaN, y: 0 }, { x: 1, y: 0, dx: Infinity },
-      { x: 1, y: 0, delayAfterArrive: -1 }, { x: 1, y: 0, endSpeed: -1 },
-      { x: 1, y: 0, maxSpeed: NaN }, { x: 1, y: 0, maxSpeed: 0 }]) {
-      expect(estimateStartSpeed([point(0), makeNode(extra)], 10)).toBeUndefined();
+  it('拒绝空列表和无法估算的比例、几何、等待或速度上限', () => {
+    expect(estimateStartSpeed([], speed(1))).toBeUndefined();
+    for (const ratio of [-1, NaN, Infinity]) expect(estimateStartSpeed([point(0)], speed(ratio))).toBeUndefined();
+    for (const extra of [{ dx: Infinity }, { delayAfterArrive: -1 }, { maxSpeed: NaN }, { maxSpeed: 0 }]) {
+      expect(estimateStartSpeed([point(0), point(10, extra)], speed(1))).toBeUndefined();
     }
-    expect(estimateStartSpeed([point(0, { x: 0, y: 0, endSpeed: NaN })], 10))
-      .toEqual({ speed: 0, source: 'initial' });
   });
 });
 
@@ -131,12 +101,11 @@ describe('制动区编辑', () => {
     expect(estimateBrakeZone(10, 0, 0, undefined, 0)).toBeUndefined();
   });
 
-  it('启用联动时保存比例而不是旧固定速度', () => {
-    const automatic = fromDraft({ ...draft, tangentSpeedRatio: '0.5' });
-    expect(automatic).toMatchObject({ node: { tangentSpeedRatio: 0.5 } });
-    expect(automatic).not.toHaveProperty('node.endSpeed');
-    expect(fromDraft(draft)).toHaveProperty('node.endSpeed', 0);
-    expect(fromDraft({ ...draft, tangentSpeedRatio: 'bad' })).toHaveProperty('errors.tangentSpeedRatio');
+  it('保存停车动作但不保留旧路线的固定速度', () => {
+    const old = makeNode({ x: 0, y: 0, endSpeed: 0 });
+    expect(fromDraft(toDraft(old))).not.toHaveProperty('node.endSpeed');
+    expect(fromDraft({ ...draft, stopAtNode: true })).toHaveProperty('node.stopAtNode', true);
+    expect(fromDraft(draft)).not.toHaveProperty('node.stopAtNode');
   });
 
   it('自动值不写入节点；手动值及零值保留，清空恢复自动', () => {

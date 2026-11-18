@@ -1,7 +1,8 @@
 /** 连接状态胶囊与设置对话框（顶栏、编辑器、同步条、运行页共用）。 */
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { showDialog } from './dialogs';
 import { connState, isOwnerTab, reconnect, disconnect, takeOver, addressError } from '../../state/session';
+import { isNonNegativeFiniteNumber, type TangentSpeedSettings } from '../../core/node';
 import { settings, updateSettings } from '../../state/settings';
 import { describeApiError } from '../../net/transport';
 import { isMixedContentCandidate, normalizeRobotUrl } from '../../net/url';
@@ -14,6 +15,30 @@ function stateLabel(): string {
   return S.connection[st.kind];
 }
 
+function SpeedSettingField({ setting, id, label, hint, saveLabel }: {
+  setting: keyof TangentSpeedSettings; id: string; label: string; hint: string; saveLabel: string;
+}) {
+  const saved = settings.value[setting];
+  const [draft, setDraft] = useState(String(saved));
+  useEffect(() => setDraft(String(saved)), [saved]);
+  const value = draft.trim() ? Number(draft) : NaN;
+  const valid = isNonNegativeFiniteNumber(value);
+  const canSave = valid && value !== saved;
+  const save = () => { if (canSave) updateSettings({ [setting]: value }); };
+  return (
+    <div>
+      <label for={id}>{label}</label>
+      <input id={id} type="number" inputMode="decimal" min="0" step="any" value={draft}
+        aria-invalid={!valid ? 'true' : undefined} aria-describedby={`${id}-hint`}
+        onInput={(e) => setDraft(e.currentTarget.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } }} />
+      <div id={`${id}-hint`} class="hint">{hint}</div>
+      {!valid && <div class="field-error" role="alert">{S.settings.speedSettingInvalid}</div>}
+      <button type="button" disabled={!canSave} onClick={save}>{saveLabel}</button>
+    </div>
+  );
+}
+
 function ConnectionForm({ onClose }: { onClose: () => void }) {
   const [addr, setAddr] = useState(settings.value.robotAddress);
   const st = connState.value;
@@ -24,7 +49,7 @@ function ConnectionForm({ onClose }: { onClose: () => void }) {
     : st.kind === 'rejected' ? `机器人已被 ${st.owner ?? '另一台电脑'} 占用，将自动重试` : null;
   const mixedErr = st.kind === 'failed' && st.error?.kind === 'unreachable' && st.error.mixedContentSuspected;
   return (
-    <form onSubmit={(e) => { e.preventDefault(); apply(); void reconnect(); }}>
+    <form noValidate onSubmit={(e) => { e.preventDefault(); apply(); void reconnect(); }}>
       <div class="dlg-body settings-form">
         <div>
           <label for="set-addr">{S.settings.robotAddress}</label>
@@ -40,6 +65,10 @@ function ConnectionForm({ onClose }: { onClose: () => void }) {
             <option value="27">{S.settings.map27}</option>
           </select>
         </div>
+        <SpeedSettingField setting="tangentSpeedRatio" id="set-tangent-speed-ratio" label={S.settings.tangentSpeedRatio}
+          hint={S.settings.tangentSpeedHint} saveLabel={S.settings.saveTangentSpeed} />
+        <SpeedSettingField setting="maxEstimatedSpeed" id="set-max-estimated-speed" label={S.settings.maxEstimatedSpeed}
+          hint={S.settings.maxEstimatedSpeedHint} saveLabel={S.settings.saveMaxEstimatedSpeed} />
         <div class="chips"><span class={`chip${st.kind === 'connected' ? ' on' : ''}`}>{stateLabel()}</span></div>
         {errDetail && <div class="banner bad" role="alert">{errDetail}</div>}
         {(mixed || mixedErr) && <div class="banner warn">{S.connection.mixedContent}</div>}

@@ -247,13 +247,13 @@ describe('速度手柄', () => {
 
 describe('新点', () => {
   it('firstNode：(0,0)，dx=50，dy=0，其余默认', () => {
-    expect(firstNode()).toEqual(makeNode({ x: 0, y: 0, dx: 50, dy: 0, tangentSpeedRatio: 1 }));
+    expect(firstNode()).toEqual(makeNode({ x: 0, y: 0, dx: 50, dy: 0 }));
     expect(firstNode().duration).toBe(1);
     expect(firstNode().maxPower).toBe(1);
   });
 
   it('nodeAtLogical：dx=50，dy=0，位置夹到场内', () => {
-    expect(nodeAtLogical(10, 20)).toEqual(makeNode({ x: 10, y: 20, dx: 50, dy: 0, tangentSpeedRatio: 1 }));
+    expect(nodeAtLogical(10, 20)).toEqual(makeNode({ x: 10, y: 20, dx: 50, dy: 0 }));
     expect(nodeAtLogical(100, -100)).toMatchObject({ x: 72, y: -72, dx: 50, dy: 0 });
   });
 
@@ -282,14 +282,14 @@ describe('新点', () => {
     const last = makeNode({
       x: 0, y: 0, dx: 30, dy: 7, heading: 45, dHeading: 3, duration: 3,
       marker: 'A', commands: [{ name: 'shoot', params: ['1'] }], delayAfterArrive: 2,
-      endSpeed: 0, brakeZoneIn: 10, brakeForwardPower: 0.2, maxPower: 0.5, maxSpeed: 24,
+      endSpeed: 0, stopAtNode: true, brakeZoneIn: 10, brakeForwardPower: 0.2, maxPower: 0.5, maxSpeed: 24,
     });
     const n = appendedNode(last);
     expect(n).toMatchObject({ dx: 30, dy: 7, heading: 45, dHeading: 3, duration: 3, maxPower: 0.5, maxSpeed: 24 });
     expect(n.marker).toBe('');
     expect(n.commands).toEqual([]);
     expect(n.delayAfterArrive).toBe(0);
-    expect(n.tangentSpeedRatio).toBe(1);
+    expect(n).not.toHaveProperty('stopAtNode');
     expect('brakeZoneIn' in n).toBe(false);
     expect('endSpeed' in n).toBe(false);
     expect('brakeForwardPower' in n).toBe(false);

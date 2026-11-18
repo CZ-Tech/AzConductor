@@ -1,4 +1,7 @@
 /** 同步接线：把 DocStore、机器人连接事件与 SyncController 串起来。 */
+import { effect } from '@preact/signals';
+import { applyTangentSpeeds } from '../core/node';
+import { settings } from './settings';
 import { KvBaselineStore, KvTombstoneStore } from '../net/baselines';
 import { SyncController, docStoreLocalRoutes, robotSyncApi } from '../net/sync';
 import { kv } from '../storage/kv';
@@ -12,6 +15,7 @@ export function syncController(): SyncController {
     local: docStoreLocalRoutes(docStore()),
     baselines: new KvBaselineStore(kv),
     tombstones: new KvTombstoneStore(kv),
+    prepareLocal: (nodes) => applyTangentSpeeds(nodes, settings.peek()),
   }));
 }
 
@@ -40,9 +44,16 @@ export function startSync(): void {
   });
 
   let timer: ReturnType<typeof setTimeout> | null = null;
-  store.onLocalChange(() => {
+  const schedule = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => { timer = null; c.onLocalChange(); }, LOCAL_CHANGE_DEBOUNCE_MS);
+  };
+  store.onLocalChange(schedule);
+  let previous = settings.peek();
+  effect(() => {
+    const next = settings.value;
+    if (next.tangentSpeedRatio !== previous.tangentSpeedRatio || next.maxEstimatedSpeed !== previous.maxEstimatedSpeed) schedule();
+    previous = next;
   });
   store.onRouteDeleted((name) => c.onLocalDelete(name));
 }

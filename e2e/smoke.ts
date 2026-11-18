@@ -167,7 +167,7 @@ async function main() {
 
     // 可选字段必须能从已有值清空：先保存非空值，再清空、保存并重新打开。
     const node2 = page.locator('[data-kind=node][data-i="2"]');
-    const optionalValues = { maxSpeed: '30', tangentSpeedRatio: '0.5', brakeZoneIn: '12', brakeForwardPower: '0.5' };
+    const optionalValues = { maxSpeed: '30', brakeZoneIn: '12', brakeForwardPower: '0.5' };
     const openNode2 = async () => {
       await node2.click({ button: 'right' });
       await page.locator('dialog').waitFor();
@@ -176,7 +176,7 @@ async function main() {
     };
     await openNode2();
     check(await page.locator('#nf-endSpeed').count() === 0, '不再显示独立的到点速度输入框');
-    check(await page.locator('#nf-tangentSpeedRatio').inputValue() === '1', '新点默认启用切线速度联动');
+    check(await page.locator('#nf-tangentSpeedRatio').count() === 0, '节点不提供逐点速度比例输入框');
     await page.getByRole('button', { name: '取消' }).click();
     const handle = await page.locator('[data-kind=handle][data-i="2"]').boundingBox();
     if (!handle) throw new Error('no tangent handle');
@@ -188,12 +188,53 @@ async function main() {
     await openNode2();
     const draggedDx = Number(await page.locator('#nf-dx').inputValue());
     const draggedDy = Number(await page.locator('#nf-dy').inputValue());
-    check(draggedDx !== 50 && (await page.locator('#nf-tangent-target').innerText()).includes(Math.hypot(draggedDx, draggedDy).toFixed(2)), '拖动橙柄后自动到点速度跟随切线');
+    check(draggedDx !== 50 && (await page.locator('#nf-tangent-target').innerText()).includes(Math.min(50, Math.hypot(draggedDx, draggedDy)).toFixed(2)), '拖动橙柄后切线不受全局速度上限限制');
     await page.locator('#nf-dx').fill('3');
     await page.locator('#nf-dy').fill('4');
     for (const [key, value] of Object.entries(optionalValues)) await page.locator(`#nf-${key}`).fill(value);
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached' });
+    const uploaded = async (speed: number, nextSpeed: number) => {
+      const response = await fetch(`${robot.url}/api/v2/routes/${encodeURIComponent('E2E 路径')}`, { headers: { 'X-Az-Session': robot.sessionToken! } });
+      if (!response.ok) return false;
+      const { frames } = await response.json() as { frames: { x?: number; endSpeed?: number; brakeZoneIn?: number }[] };
+      const points = frames.filter((frame) => frame.x !== undefined);
+      return points[2]?.endSpeed === speed && points[2].brakeZoneIn === 12 && points[3]?.endSpeed === nextSpeed;
+    };
+    check(await until(() => uploaded(5, 50), 'default speeds uploaded'), '默认全局比例应用到多个节点');
+    await page.getByRole('button', { name: /^设置：/ }).click();
+    const ratioInput = page.locator('#set-tangent-speed-ratio');
+    await ratioInput.fill('-1');
+    const saveRatio = page.getByRole('button', { name: '保存比例' });
+    check(await saveRatio.isDisabled(), '全局比例拒绝负值');
+    await ratioInput.fill('0.5');
+    await saveRatio.click();
+    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    check(await until(() => uploaded(2.5, 25), 'updated global speeds uploaded'), '只改全局比例即重新上传多个节点速度，保留手动制动');
+    check(await page.evaluate(() => JSON.parse(localStorage.getItem('az.settings') ?? '{}').tangentSpeedRatio) === 0.5, '全局比例已持久保存');
+
+    const setSpeedCeiling = async (value: string) => {
+      await page.getByRole('button', { name: /^设置：/ }).click();
+      const field = page.locator('#set-max-estimated-speed');
+      if (value === '2') check(await field.inputValue() === '50', '缺省全局推算速度上限为 50 in/s');
+      await field.fill(value);
+      await page.getByRole('button', { name: '保存上限', exact: true }).click();
+      await page.getByRole('button', { name: '关闭', exact: true }).click();
+    };
+    await setSpeedCeiling('2');
+    check(await until(() => uploaded(2, 2), 'new capped speeds uploaded'), '只改上限即同步截断多个节点，不影响手动制动');
+    check(await page.evaluate(() => JSON.parse(localStorage.getItem('az.settings') ?? '{}').maxEstimatedSpeed) === 2, '全局上限已持久保存');
+    await openNode2();
+    check((await page.locator('#nf-tangent-target').innerText()).includes('2.00 in/s') && await page.locator('dialog .field-error').count() === 0, '超限节点显示截断后的速度，不报错');
+    await page.locator('#nf-dx').fill('30');
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await openNode2();
+    check(await page.locator('#nf-dx').inputValue() === '30' && (await page.locator('#nf-tangent-target').innerText()).includes('2.00 in/s'), '超限不阻止节点保存，也不截断切线');
+    await page.locator('#nf-dx').fill('3');
+    await page.locator('dialog button[type=submit]').click();
+    await page.locator('dialog').waitFor({ state: 'detached' });
+    await setSpeedCeiling('50');
     await openNode2();
     for (const [key, value] of Object.entries(optionalValues)) {
       check(await page.locator(`#nf-${key}`).inputValue() === value, `${key} 非空值保存后重新打开仍保留`);
@@ -208,6 +249,8 @@ async function main() {
     await page.getByRole('button', { name: '停车点', exact: true }).click();
     check((await page.locator('#nf-tangent-target').innerText()).includes('0.00 in/s') && await page.locator('#nf-dx').inputValue() === '3', '停车预设不改变几何切线');
     check(await page.locator('#nf-brakeZoneIn').getAttribute('placeholder') !== brakeBeforeStop, '修改到点速度后自动制动距离联动');
+    await page.getByRole('button', { name: '通过点', exact: true }).click();
+    check((await page.locator('#nf-tangent-target').innerText()).includes('2.50 in/s'), '取消停车后恢复全局比例');
     for (const key of Object.keys(optionalValues)) await page.locator(`#nf-${key}`).fill('');
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached' });

@@ -5,7 +5,7 @@
  * - 可选字段 maxSpeed/endSpeed/brakeZoneIn/brakeForwardPower 缺省时省略，永不输出 null。
  * - 比较路径一律比较解析后的结构 / canonicalRoute，不要比较原始文本。
  */
-import { cloneCommands, targetEndSpeed, type ControlNode } from './node';
+import { cloneCommands, type ControlNode } from './node';
 import { primitiveContent, primitiveDouble } from './contract';
 import { decodeCommands, unwrapRobotFrames, WireError } from './routeFormat';
 export { WireError } from './routeFormat';
@@ -30,8 +30,7 @@ export function encodeNodeFrame(n: ControlNode): Record<string, unknown> {
     maxPower: n.maxPower,
   };
   if (n.maxSpeed != null) f['maxSpeed'] = n.maxSpeed;
-  const speed = targetEndSpeed(n);
-  if (speed != null) f['endSpeed'] = speed;
+  if (n.endSpeed != null) f['endSpeed'] = n.endSpeed;
   if (n.brakeZoneIn != null) f['brakeZoneIn'] = n.brakeZoneIn;
   if (n.brakeForwardPower != null) f['brakeForwardPower'] = n.brakeForwardPower;
   return f;

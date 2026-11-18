@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ControlNode } from '../../src/core/node';
+import { applyTangentSpeeds, DEFAULT_TANGENT_SPEED_SETTINGS, type ControlNode } from '../../src/core/node';
 import { canonicalRoute, decodeRobotRoute, encodeRobotRoute, fingerprint } from '../../src/core/wire';
 import { MemoryKV } from '../../src/storage/kv';
 import { DocStore } from '../../src/state/docStore';
@@ -16,6 +16,7 @@ import {
   MemoryLocalRoutes,
   docStoreLocalRoutes,
   type SyncApi,
+  type SyncEngineOptions,
 } from '../../src/net/sync';
 import { err, ok, type ApiError, type Result } from '../../src/net/transport';
 import { escapeKeyPart } from '../../src/net/url';
@@ -118,13 +119,13 @@ class FakeRobot implements SyncApi {
   }
 }
 
-function fixture(localRoutes: Record<string, ControlNode[]> = {}) {
+function fixture(localRoutes: Record<string, ControlNode[]> = {}, prepareLocal?: SyncEngineOptions['prepareLocal']) {
   const server = new FakeRobot();
   const local = new MemoryLocalRoutes(localRoutes);
   const baselines = new InMemoryBaselineStore();
   const tombstones = new InMemoryTombstoneStore();
-  const engine = new SyncEngine({ robotKey: ROBOT_KEY, api: server, local, baselines, tombstones });
-  const controller = () => new SyncController({ local, baselines, tombstones, target: { robotKey: ROBOT_KEY, api: server } });
+  const engine = new SyncEngine({ robotKey: ROBOT_KEY, api: server, local, baselines, tombstones, prepareLocal });
+  const controller = () => new SyncController({ local, baselines, tombstones, prepareLocal, target: { robotKey: ROBOT_KEY, api: server } });
   return { server, local, baselines, tombstones, engine, controller };
 }
 
@@ -139,6 +140,46 @@ function deleteLocally(f: ReturnType<typeof fixture>, name: string): void {
 // ---------------------------------------------------------------------------------------------
 
 describe('SyncEngine (port of RouteSyncEngineTest)', () => {
+  it('uploads all affected routes when only their shared speed ratio changes', async () => {
+    let ratio = 1;
+    const a = [{ ...pt(1), dx: 3, dy: 4, endSpeed: 0, brakeZoneIn: 12 }];
+    const b = [{ ...pt(2), dx: 6, dy: 8 }];
+    const f = fixture({ A: a, B: b }, (nodes) => applyTangentSpeeds(nodes, { ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio: ratio }));
+    f.server.seed('A', a, 5);
+    f.server.seed('B', b, 6);
+    const initial = await f.engine.syncOnce();
+    expect(initial.conflicts).toEqual([]);
+    expect(initial.pushed).toEqual(['A', 'B']);
+    ratio = 0.5;
+    expect((await f.engine.syncOnce()).pushed).toEqual(['A', 'B']);
+    expect(f.server.body('A')).toBe(canon(applyTangentSpeeds(a, { ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio: 0.5 })));
+    expect(f.server.body('B')).toBe(canon(applyTangentSpeeds(b, { ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio: 0.5 })));
+    expect(f.local.get('A')).toEqual(a);
+    expect((await f.engine.syncOnce()).pushed).toEqual([]);
+  });
+
+  it('uploads only routes whose target speeds change after lowering the global ceiling', async () => {
+    let maxEstimatedSpeed = 40;
+    const a = [{ ...pt(1), dx: 5, dy: 0 }];
+    const b = [{ ...pt(2), dx: 20, dy: 0, brakeZoneIn: 8 }];
+    const f = fixture({ A: a, B: b }, (nodes) => applyTangentSpeeds(nodes, { tangentSpeedRatio: 1, maxEstimatedSpeed }));
+    await f.engine.syncOnce();
+    maxEstimatedSpeed = 10;
+    expect((await f.engine.syncOnce()).pushed).toEqual(['B']);
+    expect(decodeRobotRoute(JSON.parse(f.server.body('B')!))[0]).toMatchObject({ dx: 20, endSpeed: 10, brakeZoneIn: 8 });
+  });
+
+  it('protects a concurrent robot geometry edit while the global ratio changes', async () => {
+    let ratio = 1;
+    const a = [{ ...pt(1), dx: 5 }];
+    const f = fixture({ A: a }, (nodes) => applyTangentSpeeds(nodes, { ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio: ratio }));
+    await f.engine.syncOnce();
+    ratio = 2;
+    f.server.mutate('A', [{ ...pt(2), dx: 11, endSpeed: 9 }]);
+    const result = await f.engine.syncOnce();
+    expect(result.pushed).toEqual([]);
+    expect(result.conflicts[0]).toMatchObject({ reason: 'BOTH_CHANGED', remote: [{ dx: 11, endSpeed: 9 }] });
+  });
   it('local-only route is created on robot and baseline is recorded', async () => {
     const f = fixture({ Auto: J1 });
     const report = await f.engine.syncOnce();

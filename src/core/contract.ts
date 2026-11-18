@@ -2,7 +2,7 @@
  * 路径契约校验。逐条移植自 Kotlin SplineRouteContract.validate / validateRobotJson，
  * 校验文案与 Kotlin 逐字一致。
  */
-import { targetEndSpeed, type ControlNode, type NodeCommand } from './node';
+import type { ControlNode, NodeCommand } from './node';
 import { decodeCommands, unwrapRobotFrames } from './routeFormat';
 
 export interface Issue {
@@ -56,17 +56,13 @@ export function validateNodes(nodes: readonly ControlNode[]): Issue[] {
     if (p.endSpeed != null && (!fin(p.endSpeed) || p.endSpeed < 0)) {
       issues.push(mk(i, 'endSpeed', '到点目标速度不得为负数，或留空'));
     }
-    const target = targetEndSpeed(p);
-    if (p.tangentSpeedRatio !== undefined && (target === undefined || !fin(target) || target < 0)) {
-      issues.push(mk(i, 'tangentSpeedRatio', '切线速度比例必须为非负数，且算出的速度必须为有限值'));
-    }
     if (p.brakeZoneIn != null && (!fin(p.brakeZoneIn) || p.brakeZoneIn < 0)) {
       issues.push(mk(i, 'brakeZoneIn', '制动区距离不得为负数'));
     }
     if (p.brakeForwardPower != null && (!fin(p.brakeForwardPower) || !inUnit(p.brakeForwardPower))) {
       issues.push(mk(i, 'brakeForwardPower', '制动区前进功率必须位于 0 到 1，或留空'));
     }
-    if (target != null && p.brakeZoneIn === 0) {
+    if (p.endSpeed != null && p.brakeZoneIn === 0) {
       issues.push(mk(i, 'brakeZoneIn', '设置 endSpeed 后制动区距离必须大于 0，或留空自动计算'));
     }
   });

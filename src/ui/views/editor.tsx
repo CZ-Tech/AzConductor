@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { docStore } from '../../state/docStore';
-import type { ControlNode } from '../../core/node';
+import { applyTangentSpeeds, type ControlNode } from '../../core/node';
 import { RouteCore } from '../../core/route';
 import { validateNodes } from '../../core/contract';
 import { argsValid } from '../../core/commandArgs';
@@ -62,7 +62,12 @@ export function EditorView({ name }: { name: string }) {
 
   const core = useMemo(() => new RouteCore(points), [points]);
   const total = core.totalTime;
-  const issues = useMemo(() => validateNodes(points), [points]);
+  const { tangentSpeedRatio, maxEstimatedSpeed } = settings.value;
+  const robotPoints = useMemo(
+    () => applyTangentSpeeds(points, { tangentSpeedRatio, maxEstimatedSpeed }),
+    [points, tangentSpeedRatio, maxEstimatedSpeed],
+  );
+  const issues = useMemo(() => validateNodes(robotPoints), [robotPoints]);
   const ghostPose = ghost ? core.pointAt(t) : null;
   /** 回放已到达的控制点；未开始回放（t=0 且未播放）时不高亮。 */
   const activeIndex = playing || t > 0 ? core.nodeIndexAt(t) : -1;
@@ -391,8 +396,8 @@ export function EditorView({ name }: { name: string }) {
         <button class="icon ghost" disabled={!store.canRedo.value} onClick={() => store.redo()} title={`${S.common.redo} (Ctrl+Y)`} aria-label={S.common.redo}><IconRedo /></button>
         <Menu label={S.common.more} icon={<IconMore />}>
           <MenuItem icon={<IconImport />} onSelect={() => void doImport()}>{S.editor.importJson}</MenuItem>
-          <MenuItem icon={<IconExport />} onSelect={() => void showExportDialog(S.io.exportTitle, exportRouteJson(points), `${name}.json`)}>{S.editor.exportJson}</MenuItem>
-          <MenuItem icon={<IconRobot />} onSelect={() => void showExportDialog(S.editor.exportRobot, exportRobotWireJson(points, true), `${name}.robot.json`)}>{S.editor.exportRobot}</MenuItem>
+          <MenuItem icon={<IconExport />} onSelect={() => void showExportDialog(S.io.exportTitle, exportRouteJson(robotPoints), `${name}.json`)}>{S.editor.exportJson}</MenuItem>
+          <MenuItem icon={<IconRobot />} onSelect={() => void showExportDialog(S.editor.exportRobot, exportRobotWireJson(robotPoints, true), `${name}.robot.json`)}>{S.editor.exportRobot}</MenuItem>
           <MenuSeparator />
           <MenuLabel>{S.settings.fieldMap}</MenuLabel>
           <MenuItem kind="radio" checked={mapKey === '26'} onSelect={() => setMap('26')}>{S.settings.map26}</MenuItem>

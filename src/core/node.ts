@@ -25,10 +25,10 @@ export interface ControlNode {
   maxPower: number;
   /** 速度上限 (in/s)，undefined = 不限 */
   maxSpeed?: number | undefined;
-  /** 旧存档或机器人线格式中的固定到点速度 (in/s)，0 = 完全停止。 */
+  /** 机器人线格式中的到点速度 (in/s)；网页按全局比例重新生成。 */
   endSpeed?: number | undefined;
-  /** 网页端切线速度比例；设置时以它为准，0 = 完全停止。 */
-  tangentSpeedRatio?: number | undefined;
+  /** 网页端停车动作，不改变几何切线。 */
+  stopAtNode?: boolean | undefined;
   /** 到点前制动距离 (in)；缺省时自动计算，0 和正数为显式值 */
   brakeZoneIn?: number | undefined;
   /** 制动时前向功率上限 */
@@ -52,21 +52,43 @@ export function makeNode(partial: Partial<ControlNode> & Pick<ControlNode, 'x' |
   if (partial.brakeZoneIn !== undefined) n.brakeZoneIn = partial.brakeZoneIn;
   if (partial.maxSpeed !== undefined) n.maxSpeed = partial.maxSpeed;
   if (partial.endSpeed !== undefined) n.endSpeed = partial.endSpeed;
-  if (partial.tangentSpeedRatio !== undefined) n.tangentSpeedRatio = partial.tangentSpeedRatio;
+  if (partial.stopAtNode) n.stopAtNode = true;
   if (partial.brakeForwardPower !== undefined) n.brakeForwardPower = partial.brakeForwardPower;
   return n;
 }
 
-export const DEFAULT_TANGENT_SPEED_RATIO = 1;
+export interface TangentSpeedSettings {
+  tangentSpeedRatio: number;
+  /** 全局推算速度上限 (in/s)，不会改写路段限速。 */
+  maxEstimatedSpeed: number;
+}
 
-/** 切线模长乘比例得到到点速度 (in/s)，受本段速度上限约束；旧路线保持原值。 */
-export function targetEndSpeed(n: Pick<ControlNode, 'dx' | 'dy' | 'maxSpeed' | 'endSpeed' | 'tangentSpeedRatio'>): number | undefined {
-  const ratio = n.tangentSpeedRatio;
-  if (ratio === undefined) return n.endSpeed;
-  if (!Number.isFinite(ratio) || ratio < 0) return NaN;
-  if (ratio === 0) return 0;
-  const speed = Math.hypot(n.dx * ratio, n.dy * ratio);
-  return Math.min(speed, n.maxSpeed ?? Infinity);
+export const DEFAULT_TANGENT_SPEED_SETTINGS: Readonly<TangentSpeedSettings> = {
+  tangentSpeedRatio: 1,
+  maxEstimatedSpeed: 50,
+};
+
+export function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/** 切线模长乘全局比例得到到点速度 (in/s)，静默截断到全局上限和本段限速之内。 */
+export function targetEndSpeed(
+  n: Pick<ControlNode, 'dx' | 'dy' | 'maxSpeed' | 'stopAtNode'>,
+  { tangentSpeedRatio: ratio, maxEstimatedSpeed }: TangentSpeedSettings,
+): number {
+  if (n.stopAtNode || ratio === 0) return 0;
+  return Math.min(Math.hypot(n.dx * ratio, n.dy * ratio), maxEstimatedSpeed, n.maxSpeed ?? Infinity);
+}
+
+/** 准备网页路线的实际速度，不改动存档，也不用于解释机器人的原始路线。 */
+export function applyTangentSpeeds(nodes: readonly ControlNode[], speedSettings: TangentSpeedSettings): ControlNode[] {
+  return nodes.map((n) => {
+    const prepared = { ...n, endSpeed: targetEndSpeed(n, speedSettings) };
+    // 旧线路的 0 仅在没有到点速度时合法；现在和留空一样使用自动制动。
+    if (prepared.brakeZoneIn === 0) delete prepared.brakeZoneIn;
+    return prepared;
+  });
 }
 
 const EPS = 1e-7;
@@ -88,7 +110,7 @@ export function nodesClose(a: ControlNode, b: ControlNode): boolean {
     Math.abs(a.delayAfterArrive - b.delayAfterArrive) < EPS &&
     Math.abs(a.maxPower - b.maxPower) < EPS &&
     closeOpt(a.maxSpeed, b.maxSpeed) && closeOpt(a.endSpeed, b.endSpeed) &&
-    closeOpt(a.tangentSpeedRatio, b.tangentSpeedRatio) && closeOpt(a.brakeZoneIn, b.brakeZoneIn) &&
+    Boolean(a.stopAtNode) === Boolean(b.stopAtNode) && closeOpt(a.brakeZoneIn, b.brakeZoneIn) &&
     closeOpt(a.brakeForwardPower, b.brakeForwardPower)
   );
 }
@@ -109,9 +131,10 @@ export function rotate180(n: ControlNode): ControlNode {
 /** 新路径点继承几何与巡航功率，不继承动作/延迟/末端制动 */
 export function nextWaypoint(n: ControlNode, x: number, y: number): ControlNode {
   const r: ControlNode = {
-    ...n, x, y, marker: '', commands: [], delayAfterArrive: 0, tangentSpeedRatio: DEFAULT_TANGENT_SPEED_RATIO,
+    ...n, x, y, marker: '', commands: [], delayAfterArrive: 0,
   };
   delete r.endSpeed;
+  delete r.stopAtNode;
   delete r.brakeZoneIn;
   delete r.brakeForwardPower;
   return r;
