@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ControlNode } from '../../core/node';
 import { decodeRobotRoute } from '../../core/wire';
 import { RouteCore, pathError, polyline, type Vec2 } from '../../core/route';
@@ -20,7 +20,7 @@ import { S } from '../strings';
 const SAMPLE_MS = 100;
 const MAX_SAMPLES = 3000;
 
-/** 参考路径：执行主题（execution.subject）优先，否则用手动选择。 */
+/** 按名称加载地图当前使用的参考路径。 */
 function useReferenceRoute(name: string, revision: number) {
   const [nodes, setNodes] = useState<ControlNode[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,8 +74,20 @@ export function RunView() {
     return () => { cancelled = true; };
   }, [connected, routeRevision]);
 
+  const running = phase === 'RUNNING' || exec?.state === 'RUNNING';
   const subject = exec?.subject ?? null;
-  const routeName = subject || manualRoute;
+  const requestId = exec?.requestId;
+  const [retainedRoute, setRetainedRoute] = useState<string | null>(null);
+  const previousRun = useRef({ running, requestId });
+  useLayoutEffect(() => {
+    const previous = previousRun.current;
+    previousRun.current = { running, requestId };
+    if (subject) setRetainedRoute(subject);
+    // 执行结束可能先于 OpMode STOPPED 到达；只在新一轮开始时清除上一轮路径。
+    else if (running && (!previous.running || requestId !== previous.requestId)) setRetainedRoute(null);
+  }, [running, requestId, subject]);
+
+  const routeName = subject || retainedRoute || manualRoute;
   const { nodes, error } = useReferenceRoute(routeName, routeRevision);
   const core = useMemo(() => (nodes ? new RouteCore(nodes) : null), [nodes]);
   const line = useMemo<Vec2[]>(() => (nodes && nodes.length > 0 ? polyline(nodes, Math.max(20, Math.ceil(720 / Math.max(1, nodes.length - 1)))) : []), [nodes]);
@@ -87,7 +99,6 @@ export function RunView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const lineRef = useRef(line);
   lineRef.current = line;
-  const running = phase === 'RUNNING' || exec?.state === 'RUNNING';
   const startedAt = useRef(0);
   const [peak, setPeak] = useState<number | null>(null);
   useEffect(() => {
@@ -234,7 +245,12 @@ export function RunView() {
           {connected && !subject && (
             <div class="run-route">
               <label for="run-route">{S.run.pickRoute}</label>
-              <select id="run-route" value={manualRoute} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setManualRoute(v); updateSettings({ lastRunRoute: v }); }}>
+              <select id="run-route" value={routeName} onChange={(e) => {
+                const v = (e.target as HTMLSelectElement).value;
+                setRetainedRoute(null);
+                setManualRoute(v);
+                updateSettings({ lastRunRoute: v });
+              }}>
                 <option value="">—</option>
                 {remoteNames.map((n) => <option key={n} value={n}>{n}</option>)}
               </select>

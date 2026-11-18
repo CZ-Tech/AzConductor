@@ -704,7 +704,17 @@ async function main() {
     await telemetry.getByRole('button', { name: '清空曲线' }).click();
     check((await telemetry.locator('.run-chart-head .mono').allTextContents()).every(v => v === '--'), '支持手动清空遥测曲线');
     check(await until(() => runBtn('intakeOn').isDisabled(), 'cmd off after stop'), 'OpMode 结束后指令不可运行');
-    const opName = robot.opModes[0]!.name;
+    const { name: opName, route: executedRoute } = robot.opModes[0]!;
+    const manualRoute = 'Blue Far';
+    const routePick = page.locator('#run-route');
+    const mapCurve = () => page.locator('.run-map .field-svg path[stroke="var(--f-path)"]').evaluateAll((paths) => paths[0]?.getAttribute('d') ?? null);
+    const previousCurve = await mapCurve();
+    await routePick.selectOption(manualRoute);
+    check(await until(async () => {
+      const curve = await mapCurve();
+      return !!curve && curve !== previousCurve;
+    }, 'manual reference drawn'), '运行前地图绘制手选参考路径');
+    const manualCurve = await mapCurve();
     await page.locator('#run-op').selectOption(opName);
     await page.getByRole('button', { name: 'INIT', exact: true }).click();
     check(await until(async () => await page.getByRole('button', { name: 'START' }).isEnabled(), 'route start enabled'), `INIT 后 START 可用（${opName}）`);
@@ -717,10 +727,37 @@ async function main() {
     const p2 = await poseTelemetry.innerText();
     check(p1 !== p2 && /\d+\.\d+/.test(p2), `实时位姿更新 (${p1.replace(/\s+/g, ' ')} → ${p2.replace(/\s+/g, ' ')})`);
     check(await until(async () => (await page.locator('.run-map polyline').count()) === 1, 'trail', 3000), '运行时绘制实际轨迹');
-    check(await until(async () => (await page.locator('.run-side').innerText()).includes('参考路径：'), 'subject'), '执行时显示参考路径（execution.subject）');
+    const activeReference = page.locator('.run-route', { hasText: `参考路径：${executedRoute}` });
+    check(await until(async () => await activeReference.isVisible() && !!(await mapCurve()) && (await mapCurve()) !== manualCurve, 'executed reference drawn'), '运行时地图从手选路径切到实际执行路径');
+    const executedCurve = await mapCurve();
     await page.screenshot({ path: 'e2e/run.png' });
-    await page.getByRole('button', { name: 'STOP', exact: true }).click();
+    const stopRun = () => page.getByRole('button', { name: 'STOP', exact: true }).click();
+    const showsRoute = async (name: string | null, curve: string | null) =>
+      await routePick.isVisible() && await routePick.inputValue() === name && (await mapCurve()) === curve;
+    await stopRun();
     check(await until(async () => (await page.locator('.run-status').innerText()).includes('已停止'), 'stopped'), 'STOP 后回到已停止');
+    check(await until(() => showsRoute(executedRoute, executedCurve), 'retained route'), '停止后地图和下拉框保留实际执行路径');
+    check(await page.evaluate(() => JSON.parse(localStorage.getItem('az.settings') ?? '{}').lastRunRoute) === manualRoute, '保留执行路径不覆盖保存的手选偏好');
+    const checkManualReference = async (message: string, label: string, ready: () => Promise<boolean> = async () => true) => {
+      const ok = await until(async () => await ready() && await showsRoute(manualRoute, manualCurve), label);
+      check(ok, ok ? message : `${message}（选项=${await routePick.inputValue()}，曲线=${(await mapCurve())?.slice(0, 80)}，预期曲线=${manualCurve?.slice(0, 80)}）`);
+    };
+    await routePick.selectOption(manualRoute);
+    await checkManualReference('停止后手动切换时地图立即改画手选路径', 'manual override');
+
+    const startRun = async (name: string) => {
+      await page.locator('#run-op').selectOption(name);
+      await page.getByRole('button', { name: 'INIT', exact: true }).click();
+      await page.getByRole('button', { name: 'START', exact: true }).click();
+    };
+    await startRun(opName);
+    await activeReference.waitFor();
+    await stopRun();
+    check(await until(() => showsRoute(executedRoute, executedCurve), 'second retained route'), '再次运行后仍保留执行路径');
+    await startRun(cmdOp);
+    await checkManualReference('下一轮不报告路径时回到手选参考路径', 'new run without route', async () => await page.locator('.run-status').getAttribute('data-phase') === 'RUNNING');
+    await stopRun();
+    check(await until(async () => await page.locator('.run-status').getAttribute('data-phase') === 'STOPPED', 'stop pathless run'), '无路径运行结束后回到已停止');
 
     // STOP 是安全操作：内容滚到底时仍须可见且不被遮挡
     for (const [width, height] of [[800, 390], [1280, 500], [390, 800]] as const) {
