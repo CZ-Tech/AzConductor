@@ -51,6 +51,7 @@ export function EditorView({ name }: { name: string }) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [ghost, setGhost] = useState(true);
+  const [focusSelected, setFocusSelected] = useState(false);
   const [sideOpen, setSideOpen] = useState(true);
   const [sideLeft, setSideLeft] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -74,10 +75,10 @@ export function EditorView({ name }: { name: string }) {
 
   // 选中索引越界修正
   useEffect(() => {
-    if (sel !== null && sel >= points.length) setSel(points.length ? points.length - 1 : null);
+    if (sel !== null && sel >= points.length) setSel(null);
   }, [points.length, sel]);
 
-  // 在场地上选中时，让侧栏滚到对应控制点
+  // 侧栏新增或复制等操作后，让选中的控制点保持可见
   useEffect(() => {
     if (sel !== null) listRef.current?.querySelector('li.sel')?.scrollIntoView({ block: 'nearest' });
   }, [sel]);
@@ -120,9 +121,7 @@ export function EditorView({ name }: { name: string }) {
   };
 
   const addAt = (x: number, y: number) => {
-    const next = [...live.current.points, nodeAtLogical(round(x), round(y))];
-    setPoints(next);
-    setSel(next.length - 1);
+    setPoints([...live.current.points, nodeAtLogical(round(x), round(y))]);
   };
   const addAfter = (i: number) => {
     const cur = live.current.points;
@@ -137,13 +136,13 @@ export function EditorView({ name }: { name: string }) {
     const cur = live.current.points;
     if (i < 0 || i >= cur.length) return;
     setPoints(cur.filter((_, k) => k !== i));
-    setSel(null);
+    setSel((selected) => selected === null || selected === i ? null : selected > i ? selected - 1 : selected);
   };
-  const duplicateNode = (i: number) => {
+  const duplicateNode = (i: number, selectCopy: boolean) => {
     const r = duplicateAt(live.current.points, i);
     if (r.index === null) return;
     setPoints(r.points);
-    setSel(r.index);
+    if (selectCopy) setSel(r.index);
   };
 
   // ---------- 列表拖拽重排 ----------
@@ -219,7 +218,6 @@ export function EditorView({ name }: { name: string }) {
     const base = { sx: e.clientX, sy: e.clientY, moved: false, pid: e.pointerId };
     if (kind && target) {
       const index = Number(target.dataset['i']);
-      if (kind === 'node') setSel(index);
       let press: number | null = null;
       if (kind === 'node') {
         press = window.setTimeout(() => {
@@ -286,7 +284,6 @@ export function EditorView({ name }: { name: string }) {
     if (target) {
       const i = Number(target.dataset['i']);
       dragRef.current = null;
-      setSel(i);
       void editAt(i);
     }
   };
@@ -326,7 +323,7 @@ export function EditorView({ name }: { name: string }) {
       const i = sel;
       if (i === null) return;
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeAt(i); return; }
-      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateNode(i); return; }
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateNode(i, false); return; }
       const step = e.shiftKey ? 0.1 : 1;
       const n = live.current.points[i];
       if (!n) return;
@@ -379,6 +376,7 @@ export function EditorView({ name }: { name: string }) {
   }
 
   const selNode = sel !== null ? points[sel] : undefined;
+  const focusing = focusSelected && selNode !== undefined;
   const headNode = selNode && !playing ? selNode : undefined;
   const mapKey = settings.value.fieldMap;
   const setMap = (m: '26' | '27') => updateSettings({ fieldMap: m });
@@ -403,6 +401,7 @@ export function EditorView({ name }: { name: string }) {
           <MenuSeparator />
           <MenuLabel>{S.editor.view}</MenuLabel>
           <MenuItem kind="checkbox" checked={ghost} onSelect={() => setGhost(!ghost)}>{S.editor.ghost}</MenuItem>
+          <MenuItem kind="checkbox" checked={focusSelected} onSelect={() => setFocusSelected((enabled) => !enabled)}>{S.editor.focusSelected}</MenuItem>
           <MenuItem icon={<IconSwap />} class="desktop-only" onSelect={() => setSideLeft(!sideLeft)}>{S.editor.swapSides}</MenuItem>
         </Menu>
         <button class="icon ghost" onClick={() => setSideOpen(!sideOpen)} title={sideOpen ? S.editor.collapse : S.editor.expand} aria-label={sideOpen ? S.editor.collapse : S.editor.expand} aria-expanded={sideOpen}><IconSidebar /></button>
@@ -422,18 +421,20 @@ export function EditorView({ name }: { name: string }) {
             >
               <g onContextMenu={onContextMenu as never} onDblClick={onDblClick as never}>
                 <rect x={-72} y={-72} width={144} height={144} fill="transparent" />
-                <PathCurve nodes={points} color="var(--f-casing)" widthPx={11} />
-                <PathCurve nodes={points} color="var(--f-path)" widthPx={4.5} />
+                <g class="ed-path" opacity={focusing ? 0.28 : 1}>
+                  <PathCurve nodes={points} color="var(--f-casing)" widthPx={11} />
+                  <PathCurve nodes={points} color="var(--f-path)" widthPx={4.5} />
+                </g>
                 {headNode && <RobotGlyph x={headNode.x} y={headNode.y} heading={headNode.heading} opacity={0.9} />}
                 {ghostPose && <RobotGlyph x={ghostPose.x} y={ghostPose.y} heading={ghostPose.heading} fill="var(--f-ghost-fill)" stroke="var(--f-ghost)" opacity={0.95} />}
                 {headNode && <HeadHandle node={headNode} index={sel as number} />}
                 {selNode && sel !== null && <VelocityHandle node={selNode} index={sel} />}
-                {points.map((n, i) => <NodeDot key={i} node={n} index={i} total={points.length} selected={i === sel} />)}
+                {points.map((n, i) => (!focusing || i === sel) && <NodeDot key={i} node={n} index={i} total={points.length} selected={i === sel} />)}
               </g>
             </FieldSvg>
           </div>
           <div class="ed-hint">
-            <span>{selNode ? S.editor.hintSelected : S.editor.hintIdle}</span>
+            <span>{focusing ? S.editor.hintFocused : selNode ? S.editor.hintSelected : S.editor.hintIdle}</span>
             <span ref={coordRef} class="mono ed-coord" />
           </div>
         </div>
@@ -478,7 +479,7 @@ export function EditorView({ name }: { name: string }) {
                     <div class="node-actions">
                       <button class="ghost" onClick={() => void editAt(i)} title={S.editor.edit}><IconPencil />{S.editor.edit}</button>
                       <span class="spacer" />
-                      <button class="icon ghost" onClick={() => duplicateNode(i)} title={S.editor.duplicate} aria-label={S.editor.duplicate}><IconCopy /></button>
+                      <button class="icon ghost" onClick={() => duplicateNode(i, true)} title={S.editor.duplicate} aria-label={S.editor.duplicate}><IconCopy /></button>
                       <button class="icon ghost" onClick={() => addAfter(i)} title={S.editor.addAfter} aria-label={S.editor.addAfter}><IconPlus /></button>
                       <button class="icon ghost danger" onClick={() => removeAt(i)} title={S.editor.remove} aria-label={S.editor.remove}><IconTrash /></button>
                     </div>

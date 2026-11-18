@@ -284,7 +284,7 @@ button.conn {
 .handle.head { r: calc(var(--u) * 12px); stroke-width: calc(var(--u) * 3.5px); }
 .handle.vel { r: calc(var(--u) * 11px); stroke-width: calc(var(--u) * 3px); }
 .vel-line { stroke-width: calc(var(--u) * 3px); }
-.node-dot { cursor: pointer; }
+.node-dot { cursor: grab; }
 .node-dot .hit { r: calc(var(--u) * 22px); }
 .node-dot .core { r: calc(var(--u) * 14px); fill: var(--f-casing); stroke: var(--f-path); stroke-width: calc(var(--u) * 3.5px); transition: r .1s; }
 .node-dot .num { font-size: calc(var(--u) * 15px); fill: var(--f-path); font-weight: 700; font-family: var(--font); }

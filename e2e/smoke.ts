@@ -107,6 +107,37 @@ async function main() {
       await page.mouse.click(p.x, p.y);
     }
     check(await page.locator('.node-list li').count() === 4, '点击场地添加控制点（共 4 个）');
+    const selectedRows = page.locator('.node-list .node-sum[aria-pressed=true]');
+    const rowAt = (i: number) => page.locator('.node-list li').nth(i).locator('.node-sum');
+    const dots = page.locator('.ed-field [data-kind=node]');
+    const routeLayer = page.locator('.ed-field .ed-path');
+    check(await selectedRows.count() === 0, '点击场地新增节点不会自动选中');
+    await dots.nth(1).click();
+    check(await selectedRows.count() === 0 && await dots.count() === 4, '单击画布节点不选中，也不新增节点');
+
+    const more = page.getByRole('button', { name: '更多操作' });
+    const toggleFocus = async (expected: boolean) => {
+      await more.click();
+      const option = page.getByRole('menuitemcheckbox', { name: '聚焦选中点' });
+      await option.click();
+      check(await option.getAttribute('aria-checked') === String(expected), `${expected ? '开启' : '关闭'}聚焦模式`);
+      await more.click();
+    };
+    await toggleFocus(true);
+    check(await dots.count() === 4 && await routeLayer.getAttribute('opacity') === '1', '没选中节点时保留完整画布');
+    await rowAt(1).click();
+    check(await selectedRows.count() === 1 && await dots.count() === 1 && await dots.first().getAttribute('data-i') === '1' &&
+      Number(await routeLayer.getAttribute('opacity')) < 1 && await page.locator('.node-list li').count() === 4, '聚焦只保留侧栏选中点，淡化路径，侧栏列表完整');
+    await rowAt(2).click();
+    check(await dots.count() === 1 && await dots.first().getAttribute('data-i') === '2', '在侧栏切换选中点会更新聚焦');
+    await rowAt(2).click();
+    check(await dots.count() === 4 && await routeLayer.getAttribute('opacity') === '1', '取消选中后恢复完整画布');
+    await rowAt(1).click();
+    await toggleFocus(false);
+    check(await dots.count() === 4 && await routeLayer.getAttribute('opacity') === '1', '关闭聚焦后恢复完整画布');
+    await dots.nth(2).click();
+    check(await rowAt(1).getAttribute('aria-pressed') === 'true' && await rowAt(2).getAttribute('aria-pressed') === 'false', '单击其他画布节点不改变侧栏选中');
+    await rowAt(1).click();
 
     // 拖动第 2 个节点
     const before = await page.locator('.node-list li').nth(1).locator('.node-sum span').innerText();
@@ -118,6 +149,7 @@ async function main() {
     await page.mouse.up();
     const after = await page.locator('.node-list li').nth(1).locator('.node-sum span').innerText();
     check(before !== after, `拖动节点改变坐标 (${before} → ${after})`);
+    check(await selectedRows.count() === 0, '拖动未选中的画布节点不会选中它');
     await page.keyboard.press('Control+z');
     const undone = await page.locator('.node-list li').nth(1).locator('.node-sum span').innerText();
     check(undone === before, '撤销恢复拖动前坐标');
@@ -155,6 +187,7 @@ async function main() {
     // 右键编辑：设置到点等待并保存
     await page.locator('[data-kind=node][data-i="2"]').click({ button: 'right' });
     await page.locator('dialog').waitFor();
+    check(await rowAt(2).getAttribute('aria-pressed') === 'false', '右键仍可打开编辑，但不选中节点');
     await page.locator('#nf-delayAfterArrive').fill('1.5');
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached', timeout: 3000 }).catch(async () => {
@@ -194,6 +227,7 @@ async function main() {
     check(await page.locator('#nf-tangentSpeedRatio').count() === 0, '节点不提供逐点速度比例输入框');
     check(await isSelectedPreset(passingPreset) && await parkingPreset.isEnabled(), '中间点默认明确选中通过点，可切换');
     await page.getByRole('button', { name: '取消' }).click();
+    await rowAt(2).click();
     const handle = await page.locator('[data-kind=handle][data-i="2"]').boundingBox();
     if (!handle) throw new Error('no tangent handle');
     const hx = handle.x + handle.width / 2, hy = handle.y + handle.height / 2;
