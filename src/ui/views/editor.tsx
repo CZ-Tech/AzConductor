@@ -195,9 +195,7 @@ export function EditorView({ name }: { name: string }) {
   };
 
   const editAt = async (i: number) => {
-    const n = live.current.points[i];
-    if (!n) return;
-    const r = await showNodeEditor(n, i, true, live.current.points.slice(0, i));
+    const r = await showNodeEditor(live.current.points, i, true);
     if (!r) return;
     if (r.kind === 'delete') removeAt(i);
     // The form returns a complete node. Merging it as a partial patch revives

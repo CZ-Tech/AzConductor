@@ -165,6 +165,21 @@ async function main() {
     const total = await page.locator('.side-head .muted').innerText();
     check(/总时长/.test(total), `编辑节点后总时长刷新：${total}`);
 
+    // 首尾点高亮停车预设，不允许切换；中间点仍可选择。
+    const parkingPreset = page.getByRole('button', { name: '停车点', exact: true });
+    const passingPreset = page.getByRole('button', { name: '通过点', exact: true });
+    const isSelectedPreset = async (button: typeof parkingPreset) =>
+      await button.getAttribute('aria-pressed') === 'true' && await button.locator('svg').isVisible();
+    for (const index of [0, 3]) {
+      await page.locator(`[data-kind=node][data-i="${index}"]`).click({ button: 'right' });
+      await page.locator('dialog').waitFor();
+      check(await isSelectedPreset(parkingPreset) && await parkingPreset.isDisabled() && await passingPreset.isDisabled(), `${index === 0 ? '首点' : '尾点'}固定停车，显示选中勾和锁定状态`);
+      check((await page.locator('dialog .preset-lock').innerText()).includes('路线首尾固定停车') &&
+        (await page.locator('#nf-tangent-target').innerText()).includes('0.00 in/s'), '固定停车有明确提示且到点速度为零');
+      await page.getByRole('button', { name: '取消', exact: true }).click();
+      await page.locator('dialog').waitFor({ state: 'detached' });
+    }
+
     // 可选字段必须能从已有值清空：先保存非空值，再清空、保存并重新打开。
     const node2 = page.locator('[data-kind=node][data-i="2"]');
     const optionalValues = { maxSpeed: '30', brakeZoneIn: '12', brakeForwardPower: '0.5' };
@@ -177,6 +192,7 @@ async function main() {
     await openNode2();
     check(await page.locator('#nf-endSpeed').count() === 0, '不再显示独立的到点速度输入框');
     check(await page.locator('#nf-tangentSpeedRatio').count() === 0, '节点不提供逐点速度比例输入框');
+    check(await isSelectedPreset(passingPreset) && await parkingPreset.isEnabled(), '中间点默认明确选中通过点，可切换');
     await page.getByRole('button', { name: '取消' }).click();
     const handle = await page.locator('[data-kind=handle][data-i="2"]').boundingBox();
     if (!handle) throw new Error('no tangent handle');
@@ -194,14 +210,15 @@ async function main() {
     for (const [key, value] of Object.entries(optionalValues)) await page.locator(`#nf-${key}`).fill(value);
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached' });
-    const uploaded = async (speed: number, nextSpeed: number) => {
+    const uploaded = async (speed: number, otherInteriorSpeed: number) => {
       const response = await fetch(`${robot.url}/api/v2/routes/${encodeURIComponent('E2E 路径')}`, { headers: { 'X-Az-Session': robot.sessionToken! } });
       if (!response.ok) return false;
       const { frames } = await response.json() as { frames: { x?: number; endSpeed?: number; brakeZoneIn?: number }[] };
       const points = frames.filter((frame) => frame.x !== undefined);
-      return points[2]?.endSpeed === speed && points[2].brakeZoneIn === 12 && points[3]?.endSpeed === nextSpeed;
+      return points[0]?.endSpeed === 0 && points[3]?.endSpeed === 0 && points[1]?.endSpeed === otherInteriorSpeed &&
+        points[2]?.endSpeed === speed && points[2].brakeZoneIn === 12;
     };
-    check(await until(() => uploaded(5, 50), 'default speeds uploaded'), '默认全局比例应用到多个节点');
+    check(await until(() => uploaded(5, 50), 'default speeds uploaded'), '机器人收到首尾零速，中间点按全局比例计算');
     await page.getByRole('button', { name: /^设置：/ }).click();
     const ratioInput = page.locator('#set-tangent-speed-ratio');
     await ratioInput.fill('-1');
@@ -247,6 +264,7 @@ async function main() {
     check(await page.locator('#nf-brakeZoneIn').inputValue() === '', '设置目标速度时制动区仍可留空');
     const brakeBeforeStop = await page.locator('#nf-brakeZoneIn').getAttribute('placeholder');
     await page.getByRole('button', { name: '停车点', exact: true }).click();
+    check(await isSelectedPreset(parkingPreset) && await passingPreset.getAttribute('aria-pressed') === 'false', '切换后明确选中停车点');
     check((await page.locator('#nf-tangent-target').innerText()).includes('0.00 in/s') && await page.locator('#nf-dx').inputValue() === '3', '停车预设不改变几何切线');
     check(await page.locator('#nf-brakeZoneIn').getAttribute('placeholder') !== brakeBeforeStop, '修改到点速度后自动制动距离联动');
     await page.getByRole('button', { name: '通过点', exact: true }).click();

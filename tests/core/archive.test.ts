@@ -171,31 +171,47 @@ describe('全局切线速度联动', () => {
   const speed = (tangentSpeedRatio: number) => ({ ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio });
   const a = makeNode({ x: 24, y: 0, dx: -3, dy: 4, endSpeed: 1, delayAfterArrive: 1, brakeZoneIn: 12 });
   const b = makeNode({ x: 48, y: 0, dx: 6, dy: 8, maxSpeed: 12, brakeZoneIn: 0 });
+  const head = makeNode({ x: 0, y: 0, dx: 9, endSpeed: 9, brakeZoneIn: 3 });
+  const tail = makeNode({ x: 60, y: 0, dx: 9, endSpeed: 9 });
+  const routeWith = (...middle: ControlNode[]) => [head, ...middle, tail];
+
+  it('空路线不变，单点和首尾强制归零；重排后按新位置停车，不污染节点预设', () => {
+    const endSpeeds = (points: ControlNode[]) => applyTangentSpeeds(points, speed(1)).map((n) => n.endSpeed);
+    expect(endSpeeds([])).toEqual([]);
+    expect(endSpeeds([head])).toEqual([0]);
+    expect(endSpeeds([head, tail])).toEqual([0, 0]);
+    expect(endSpeeds([head, tail, a])).toEqual([0, 9, 0]);
+    expect(endSpeeds([tail, head, a])).toEqual([0, 9, 0]);
+    expect(applyTangentSpeeds([head, tail], speed(1))[0]).toMatchObject({ dx: 9, brakeZoneIn: 3, endSpeed: 0 });
+    expect(head).not.toHaveProperty('stopAtNode');
+    expect(tail).not.toHaveProperty('stopAtNode');
+  });
 
   it('忽略旧逐点比例和固定速度；所有节点使用同一比例，限速不改切线', () => {
     const legacy = ok(importValue([{ ...a, tangentSpeedRatio: 0 }, { ...b, tangentSpeedRatio: 8 }])).routes[0]!.points;
     expect(legacy[0]).not.toHaveProperty('tangentSpeedRatio');
-    const first = applyTangentSpeeds(legacy, speed(0.5));
-    expect(first.map((n) => n.endSpeed)).toEqual([2.5, 5]);
-    const second = applyTangentSpeeds(legacy, speed(2));
-    expect(second.map((n) => n.endSpeed)).toEqual([10, 12]);
-    expect(second[1]).toMatchObject({ dx: 6, dy: 8 });
+    const route = routeWith(...legacy);
+    const first = applyTangentSpeeds(route, speed(0.5));
+    expect(first.map((n) => n.endSpeed)).toEqual([0, 2.5, 5, 0]);
+    const second = applyTangentSpeeds(route, speed(2));
+    expect(second.map((n) => n.endSpeed)).toEqual([0, 10, 12, 0]);
+    expect(second[2]).toMatchObject({ dx: 6, dy: 8 });
     expect(legacy[0]!.endSpeed).toBe(1);
-    expect(applyTangentSpeeds(legacy, speed(0)).map((n) => n.endSpeed)).toEqual([0, 0]);
+    expect(applyTangentSpeeds(route, speed(0)).map((n) => n.endSpeed)).toEqual([0, 0, 0, 0]);
     expect(isNonNegativeFiniteNumber(0.5)).toBe(true);
     for (const bad of [-1, NaN, Infinity, '', null]) expect(isNonNegativeFiniteNumber(bad)).toBe(false);
   });
 
   it('静默截断超限甚至溢出的速度，保存和线格式校验不受影响', () => {
     const options = { tangentSpeedRatio: Number.MAX_VALUE, maxEstimatedSpeed: 20 };
-    const prepared = applyTangentSpeeds([a, b, { ...a, stopAtNode: true }], options);
-    expect(prepared.map((n) => n.endSpeed)).toEqual([20, 12, 0]);
-    expect(prepared[0]).toMatchObject({ dx: -3, dy: 4, brakeZoneIn: 12 });
-    expect(prepared[0]).not.toHaveProperty('maxSpeed');
-    expect(prepared[1]).toMatchObject({ dx: 6, dy: 8, maxSpeed: 12 });
+    const prepared = applyTangentSpeeds(routeWith(a, b, { ...a, stopAtNode: true }), options);
+    expect(prepared.map((n) => n.endSpeed)).toEqual([0, 20, 12, 0, 0]);
+    expect(prepared[1]).toMatchObject({ dx: -3, dy: 4, brakeZoneIn: 12 });
+    expect(prepared[1]).not.toHaveProperty('maxSpeed');
+    expect(prepared[2]).toMatchObject({ dx: 6, dy: 8, maxSpeed: 12 });
     expect(validateNodes(prepared)).toEqual([]);
     const wire = JSON.parse(exportRobotWireJson(prepared));
-    expect(wire.frames[0]).toMatchObject({ endSpeed: 20 });
+    expect(wire.frames[1]).toMatchObject({ endSpeed: 20 });
     expect(validateRobotFrames(wire)).toEqual([]);
   });
 
@@ -204,13 +220,15 @@ describe('全局切线速度联动', () => {
     const doc = wrapRoutes([{ name: '联动', points: [a, b, stop] }]);
     expect(parseRoutesDoc(serializeRoutesDoc(doc))).toStrictEqual(doc);
     expect(encodeStoredNode(stop)).toHaveProperty('stopAtNode', true);
-    const prepared = applyTangentSpeeds([a, b, stop], speed(2));
+    const prepared = applyTangentSpeeds(routeWith(a, b, stop), speed(2));
     expect(validateNodes(prepared)).toEqual([]);
     const wire = encodeRobotRoute(prepared);
-    expect(wire.frames[0]).toMatchObject({ endSpeed: 10, brakeZoneIn: 12 });
-    expect(wire.frames[2]).not.toHaveProperty('brakeZoneIn');
-    expect(wire.frames[3]).toHaveProperty('endSpeed', 0);
-    expect(wire.frames[3]).not.toHaveProperty('stopAtNode');
+    expect(wire.frames[1]).toMatchObject({ endSpeed: 10, brakeZoneIn: 12 });
+    expect(wire.frames[3]).not.toHaveProperty('brakeZoneIn');
+    expect(wire.frames[4]).toHaveProperty('endSpeed', 0);
+    expect(wire.frames[4]).not.toHaveProperty('stopAtNode');
+    expect(wire.frames[0]).toHaveProperty('endSpeed', 0);
+    expect(wire.frames.at(-1)).toHaveProperty('endSpeed', 0);
     expect(validateRobotFrames(wire)).toEqual([]);
     expect(canonicalRoute(prepared)).toBe(canonicalRoute(decodeRobotRoute(wire)));
   });

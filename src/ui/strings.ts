@@ -137,6 +137,7 @@ export const S = {
     brakeAuto: '自动 / 运行时计算',
     tangentTarget: (speed: string, ratio: number) => `自动到点速度：${speed} in/s（全局比例 ${ratio}）`,
     parkingTarget: '停车点：到点速度为 0.00 in/s',
+    endpointParking: '路线首尾固定停车，不可切换',
     targetInvalid: '无法计算到点速度，请检查切线和全局比例。',
     brakeEstimate: (value: string) => `预估 ${value} in`,
     passingHint: '按全局比例自动计算到点速度，保留手动制动距离',

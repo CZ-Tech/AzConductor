@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { OrientedTrajectory2D } from '../../core/spline';
 import { connData, connState, getConnection } from '../../state/session';
-import { cloneCommands, targetEndSpeed, type ControlNode } from '../../core/node';
+import { cloneCommands, isRouteEndpoint, targetEndSpeed, type ControlNode } from '../../core/node';
 import { validateNodes } from '../../core/contract';
 import { argsValid, resolveArgs } from '../../core/commandArgs';
 import { NodeCommands, commandDraft, type CommandDraft } from './nodeCommands';
@@ -10,14 +10,18 @@ import { settings } from '../../state/settings';
 import { commandCatalog } from '../../state/robotData';
 import { NODE_FIELDS, NODE_FIELD_ORDER, NODE_MAIN_SECTIONS, estimateBrakeZone, estimateStartSpeed, parkingBrakeZone, type FieldSection, type VisibleNodeFieldKey, type NodeFieldKey } from '../nodeFields';
 import { showDialog } from './dialogs';
-import { IconChevron } from './icons';
+import { IconCheck, IconChevron } from './icons';
 import { S } from '../strings';
 
 export type NodeEditResult = { kind: 'save'; node: ControlNode } | { kind: 'delete' };
 
-export function showNodeEditor(node: ControlNode, index: number, canDelete: boolean, preceding: readonly ControlNode[] = []): Promise<NodeEditResult | null> {
+export function showNodeEditor(points: readonly ControlNode[], index: number, canDelete: boolean): Promise<NodeEditResult | null> {
+  const node = points[index];
+  if (!node) return Promise.resolve(null);
+  const locked = isRouteEndpoint(index, points.length);
+  const preceding = points.slice(0, index);
   return showDialog<NodeEditResult>(`${S.node.title} · ${S.editor.node(index + 1)}`, (close) => (
-    <NodeForm node={node} preceding={preceding} canDelete={canDelete} onDone={close} />
+    <NodeForm node={node} preceding={preceding} locked={locked} canDelete={canDelete} onDone={close} />
   ));
 }
 
@@ -62,8 +66,9 @@ export function fromDraft(d: Draft): { node: ControlNode } | { errors: Partial<R
 
 const optionalNumber = (value: string) => value.trim() ? Number(value) : undefined;
 
-function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; canDelete: boolean; onDone: (r: NodeEditResult | null) => void }) {
+function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; locked: boolean; canDelete: boolean; onDone: (r: NodeEditResult | null) => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(p.node));
+  const parking = p.locked || d.stopAtNode;
   const speedSettings = settings.value;
   const [decel, setDecel] = useState<{ value: number; live: boolean }>({ value: 30, live: false });
   const connected = connState.value.kind === 'connected';
@@ -104,7 +109,7 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
       showErrors(r.errors);
       return;
     }
-    const issues = validateNodes([{ ...r.node, endSpeed: targetEndSpeed(r.node, speedSettings) }]).filter((i) => i.field !== undefined);
+    const issues = validateNodes([{ ...r.node, endSpeed: p.locked ? 0 : targetEndSpeed(r.node, speedSettings) }]).filter((i) => i.field !== undefined);
     if (issues.length) {
       const m: Partial<Record<NodeFieldKey, string>> = {};
       for (const i of issues) if (i.field) m[i.field] ??= i.message;
@@ -121,6 +126,7 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
   };
 
   const preset = (stop: boolean) => {
+    if (p.locked) return;
     setD((o) => ({ ...o, stopAtNode: stop, brakeZoneIn: parkingBrakeZone(o.brakeZoneIn) }));
     setErrors(({ brakeZoneIn: _brake, ...remaining }) => remaining);
   };
@@ -136,9 +142,9 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
   const incoming = estimateStartSpeed(p.preceding, speedSettings);
   const maxSpeed = optionalNumber(d.maxSpeed);
   const targetSpeed = targetEndSpeed({
-    dx: optionalNumber(d.dx) ?? NaN, dy: optionalNumber(d.dy) ?? NaN, maxSpeed, stopAtNode: d.stopAtNode,
+    dx: optionalNumber(d.dx) ?? NaN, dy: optionalNumber(d.dy) ?? NaN, maxSpeed, stopAtNode: parking,
   }, speedSettings);
-  const targetHint = d.stopAtNode ? S.node.parkingTarget
+  const targetHint = parking ? S.node.parkingTarget
     : Number.isFinite(targetSpeed) && targetSpeed >= 0 ? S.node.tangentTarget(targetSpeed.toFixed(2), speedSettings.tangentSpeedRatio) : S.node.targetInvalid;
   const estimate = segmentLength !== undefined && segmentLength >= 0.05 && incoming
     ? estimateBrakeZone(segmentLength, incoming.speed, decel.value, maxSpeed, targetSpeed) : undefined;
@@ -185,8 +191,13 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
       <div class="dlg-body node-form">
         <div class="presets">
           <span class="muted">{S.node.presets}</span>
-          <button type="button" onClick={() => preset(true)} aria-pressed={d.stopAtNode} title={S.node.parkingHint}>{S.node.parking}</button>
-          <button type="button" onClick={() => preset(false)} aria-pressed={!d.stopAtNode} title={S.node.passingHint}>{S.node.passing}</button>
+          <button type="button" onClick={() => preset(true)} aria-pressed={parking} disabled={p.locked} title={S.node.parkingHint}>
+            {parking && <IconCheck />}{S.node.parking}
+          </button>
+          <button type="button" onClick={() => preset(false)} aria-pressed={!parking} disabled={p.locked} title={S.node.passingHint}>
+            {!parking && <IconCheck />}{S.node.passing}
+          </button>
+          {p.locked && <span class="hint preset-lock">{S.node.endpointParking}</span>}
         </div>
         {NODE_MAIN_SECTIONS.map((s) => (
           <fieldset class="nf-section" key={s}>

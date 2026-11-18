@@ -398,9 +398,13 @@ button.play { width: 36px; height: 36px; min-height: 36px; padding: 0; border-ra
 }
 
 /* 控制点属性表单 */
-.node-form .presets { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12.5px; }
+.node-form .presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12.5px; }
 .node-form .presets span { margin-right: 4px; }
 .node-form .presets button { border-radius: 999px; min-height: 30px; padding: 2px 12px; font-size: 13px; }
+.node-form .presets button[aria-pressed=true] {
+  background: var(--brand-weak); border-color: var(--brand); color: var(--brand); font-weight: 650; opacity: 1;
+}
+.node-form .presets .preset-lock { margin-left: 4px; }
 .nf-section { border: 0; padding: 0; margin: 0 0 14px; min-width: 0; }
 .nf-section legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 650; color: var(--ink); }
 .nf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }

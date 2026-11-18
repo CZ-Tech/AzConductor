@@ -140,10 +140,12 @@ function deleteLocally(f: ReturnType<typeof fixture>, name: string): void {
 // ---------------------------------------------------------------------------------------------
 
 describe('SyncEngine (port of RouteSyncEngineTest)', () => {
+  const routeWith = (middle: ControlNode) => [pt(0), middle, pt(4)];
+
   it('uploads all affected routes when only their shared speed ratio changes', async () => {
     let ratio = 1;
-    const a = [{ ...pt(1), dx: 3, dy: 4, endSpeed: 0, brakeZoneIn: 12 }];
-    const b = [{ ...pt(2), dx: 6, dy: 8 }];
+    const a = routeWith({ ...pt(1), dx: 3, dy: 4, endSpeed: 0, brakeZoneIn: 12 });
+    const b = routeWith({ ...pt(2), dx: 6, dy: 8 });
     const f = fixture({ A: a, B: b }, (nodes) => applyTangentSpeeds(nodes, { ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio: ratio }));
     f.server.seed('A', a, 5);
     f.server.seed('B', b, 6);
@@ -160,25 +162,25 @@ describe('SyncEngine (port of RouteSyncEngineTest)', () => {
 
   it('uploads only routes whose target speeds change after lowering the global ceiling', async () => {
     let maxEstimatedSpeed = 40;
-    const a = [{ ...pt(1), dx: 5, dy: 0 }];
-    const b = [{ ...pt(2), dx: 20, dy: 0, brakeZoneIn: 8 }];
+    const a = routeWith({ ...pt(1), dx: 5, dy: 0 });
+    const b = routeWith({ ...pt(2), dx: 20, dy: 0, brakeZoneIn: 8 });
     const f = fixture({ A: a, B: b }, (nodes) => applyTangentSpeeds(nodes, { tangentSpeedRatio: 1, maxEstimatedSpeed }));
     await f.engine.syncOnce();
     maxEstimatedSpeed = 10;
     expect((await f.engine.syncOnce()).pushed).toEqual(['B']);
-    expect(decodeRobotRoute(JSON.parse(f.server.body('B')!))[0]).toMatchObject({ dx: 20, endSpeed: 10, brakeZoneIn: 8 });
+    expect(decodeRobotRoute(JSON.parse(f.server.body('B')!))).toMatchObject([{ endSpeed: 0 }, { dx: 20, endSpeed: 10, brakeZoneIn: 8 }, { endSpeed: 0 }]);
   });
 
   it('protects a concurrent robot geometry edit while the global ratio changes', async () => {
     let ratio = 1;
-    const a = [{ ...pt(1), dx: 5 }];
+    const a = routeWith({ ...pt(1), dx: 5 });
     const f = fixture({ A: a }, (nodes) => applyTangentSpeeds(nodes, { ...DEFAULT_TANGENT_SPEED_SETTINGS, tangentSpeedRatio: ratio }));
     await f.engine.syncOnce();
     ratio = 2;
-    f.server.mutate('A', [{ ...pt(2), dx: 11, endSpeed: 9 }]);
+    f.server.mutate('A', routeWith({ ...pt(2), dx: 11, endSpeed: 9 }));
     const result = await f.engine.syncOnce();
     expect(result.pushed).toEqual([]);
-    expect(result.conflicts[0]).toMatchObject({ reason: 'BOTH_CHANGED', remote: [{ dx: 11, endSpeed: 9 }] });
+    expect(result.conflicts[0]).toMatchObject({ reason: 'BOTH_CHANGED', remote: [{}, { dx: 11, endSpeed: 9 }, {}] });
   });
   it('local-only route is created on robot and baseline is recorded', async () => {
     const f = fixture({ Auto: J1 });

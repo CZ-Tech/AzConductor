@@ -81,10 +81,15 @@ export function targetEndSpeed(
   return Math.min(Math.hypot(n.dx * ratio, n.dy * ratio), maxEstimatedSpeed, n.maxSpeed ?? Infinity);
 }
 
-/** 准备网页路线的实际速度，不改动存档，也不用于解释机器人的原始路线。 */
+export function isRouteEndpoint(index: number, count: number): boolean {
+  return count > 0 && (index === 0 || index === count - 1);
+}
+
+/** 生成实际到点速度；首尾按当前位置停车，不写入逐点停车标记。 */
 export function applyTangentSpeeds(nodes: readonly ControlNode[], speedSettings: TangentSpeedSettings): ControlNode[] {
-  return nodes.map((n) => {
-    const prepared = { ...n, endSpeed: targetEndSpeed(n, speedSettings) };
+  return nodes.map((n, index) => {
+    const endSpeed = isRouteEndpoint(index, nodes.length) ? 0 : targetEndSpeed(n, speedSettings);
+    const prepared = { ...n, endSpeed };
     // 旧线路的 0 仅在没有到点速度时合法；现在和留空一样使用自动制动。
     if (prepared.brakeZoneIn === 0) delete prepared.brakeZoneIn;
     return prepared;
