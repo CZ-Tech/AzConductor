@@ -20,7 +20,8 @@ import {
   type RouteData,
   type RoutesDoc,
 } from '../../src/core/archive';
-import { decodeRobotRoute, encodeRobotRoute } from '../../src/core/wire';
+import { canonicalRoute, decodeRobotRoute, encodeRobotRoute } from '../../src/core/wire';
+import { validateNodes, validateRobotFrames } from '../../src/core/contract';
 import { randomRoute, rng } from './_util';
 
 const err = (r: ImportResult): string => {
@@ -163,6 +164,34 @@ describe('importText 错误信息', () => {
     expect(err(importValue([{ foo: 1 }]))).toBe('第 1 帧缺少 x');
     // 只有部分元素像存档
     expect(err(importValue([{ robotName: 'a', routes: [] }, { foo: 1 }]))).toBe('第 1 帧缺少 x');
+  });
+});
+
+describe('切线速度联动', () => {
+  const linked = makeNode({ x: 24, y: 0, dx: -3, dy: 4, tangentSpeedRatio: 2, delayAfterArrive: 1 });
+
+  it('存档保留可调比例，线格式始终按当前切线、比例和限速算出 endSpeed', () => {
+    const doc = wrapRoutes([{ name: '联动', points: [linked] }]);
+    expect(parseRoutesDoc(serializeRoutesDoc(doc))).toStrictEqual(doc);
+    expect(encodeStoredNode(linked)).not.toHaveProperty('endSpeed');
+    const wire = encodeRobotRoute([linked]);
+    expect(wire.frames[0]).toHaveProperty('endSpeed', 10);
+    expect(wire.frames[0]).not.toHaveProperty('tangentSpeedRatio');
+    expect(canonicalRoute([linked])).toBe(canonicalRoute(decodeRobotRoute(wire)));
+    expect(encodeRobotRoute([{ ...linked, dy: 0 }]).frames[0]).toHaveProperty('endSpeed', 6);
+    expect(encodeRobotRoute([{ ...linked, maxSpeed: 5 }]).frames[0]).toHaveProperty('endSpeed', 5);
+    expect(encodeRobotRoute([{ ...linked, tangentSpeedRatio: 0 }]).frames[0]).toHaveProperty('endSpeed', 0);
+  });
+
+  it('自动制动交由机器人计算，正的手动制动距离原样下发', () => {
+    expect(encodeRobotRoute([linked]).frames[0]).not.toHaveProperty('brakeZoneIn');
+    const manual = encodeRobotRoute([{ ...linked, brakeZoneIn: 12 }]);
+    expect(manual.frames[0]).toMatchObject({ endSpeed: 10, brakeZoneIn: 12 });
+    expect(validateRobotFrames(manual)).toEqual([]);
+    expect(validateNodes([{ ...linked, brakeZoneIn: 0 }])).toContainEqual(expect.objectContaining({ field: 'brakeZoneIn' }));
+    for (const tangentSpeedRatio of [-1, Infinity, Number.MAX_VALUE]) {
+      expect(validateNodes([{ ...linked, tangentSpeedRatio }])).toContainEqual(expect.objectContaining({ field: 'tangentSpeedRatio' }));
+    }
   });
 });
 

@@ -6,7 +6,7 @@
  * fieldXAngleDeg = atan2(1,0) = 90°，机器人屏幕旋转角 = fieldXAngleDeg − heading = 90 − heading（度，顺时针为正的屏幕角）。
  * SVG viewBox = "-72 -72 144 144"，逻辑与屏幕原点均为中心，单位 1 inch = 1 SVG 单位。
  */
-import { makeNode, mirrorY, nextWaypoint, rotate180, type ControlNode } from './node';
+import { DEFAULT_TANGENT_SPEED_RATIO, makeNode, mirrorY, nextWaypoint, rotate180, type ControlNode } from './node';
 import type { Vec2 } from './route';
 
 export const FIELD_SIZE = 144;
@@ -133,13 +133,13 @@ export function velocityFromHandleScreen(
 
 /** 空路径的首点：(0,0)，dx=NEW_POINT_DX，dy=0（侧栏"添加"）。 */
 export function firstNode(): ControlNode {
-  return makeNode({ x: 0, y: 0, dx: NEW_POINT_DX, dy: 0 });
+  return makeNode({ x: 0, y: 0, dx: NEW_POINT_DX, dy: 0, tangentSpeedRatio: DEFAULT_TANGENT_SPEED_RATIO });
 }
 
 /** 点击场地添加：逻辑点位被限制在场地内，dx=NEW_POINT_DX，dy=0（RouteCanvas 点击）。 */
 export function nodeAtLogical(x: number, y: number): ControlNode {
   const c = clampToField(x, y);
-  return makeNode({ x: c.x, y: c.y, dx: NEW_POINT_DX, dy: 0 });
+  return makeNode({ x: c.x, y: c.y, dx: NEW_POINT_DX, dy: 0, tangentSpeedRatio: DEFAULT_TANGENT_SPEED_RATIO });
 }
 
 /** 侧栏追加点：沿 x 前进 10；到边界无法前进时沿 y 前进 10；继承上一点几何/功率（nextWaypoint）。 */

@@ -51,7 +51,8 @@ export function encodeStoredNode(n: ControlNode): Record<string, unknown> {
     maxPower: n.maxPower,
   };
   if (n.maxSpeed != null) f['maxSpeed'] = n.maxSpeed;
-  if (n.endSpeed != null) f['endSpeed'] = n.endSpeed;
+  if (n.tangentSpeedRatio != null) f['tangentSpeedRatio'] = n.tangentSpeedRatio;
+  else if (n.endSpeed != null) f['endSpeed'] = n.endSpeed;
   if (n.brakeZoneIn != null) f['brakeZoneIn'] = n.brakeZoneIn;
   if (n.brakeForwardPower != null) f['brakeForwardPower'] = n.brakeForwardPower;
   return f;
@@ -80,6 +81,19 @@ export function allRoutes(doc: readonly RobotRoutes[]): RouteData[] {
 
 // ---- 解码 ----
 
+function decodeStoredNode(p: Record<string, unknown>, index: number): ControlNode {
+  const node = decodeNodeFrame(p, index);
+  if (has(p, 'tangentSpeedRatio')) {
+    const ratio = p['tangentSpeedRatio'];
+    if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0) {
+      throw new WireError(`第 ${index} 个点切线速度比例必须为有限非负数`);
+    }
+    node.tangentSpeedRatio = ratio;
+    delete node.endSpeed;
+  }
+  return node;
+}
+
 function decodeRoute(raw: unknown, where: string): RouteData {
   if (!isObj(raw)) throw new WireError(`${where} 不是对象`);
   if (typeof raw['name'] !== 'string') throw new WireError(`${where} 缺少 name`);
@@ -88,7 +102,7 @@ function decodeRoute(raw: unknown, where: string): RouteData {
   if (!Array.isArray(pts)) throw new WireError(`${where} 的 points 必须是数组`);
   const points = pts.map((p: unknown, i: number) => {
     if (!isObj(p)) throw new WireError(`${where} 第 ${i + 1} 个点不是对象`);
-    return decodeNodeFrame(p, i + 1);
+    return decodeStoredNode(p, i + 1);
   });
   return { name: raw['name'], points };
 }
@@ -153,7 +167,7 @@ export function importValue(value: unknown, defaultName: string = DEFAULT_IMPORT
 
   if (isBareNodeArray(value)) {
     try {
-      const points = value.map((f: unknown, i: number) => decodeNodeFrame(f as Record<string, unknown>, i + 1));
+      const points = value.map((f: unknown, i: number) => decodeStoredNode(f as Record<string, unknown>, i + 1));
       return { ok: true, kind: 'nodes', routes: [{ name: defaultName, points }] };
     } catch {
       // 继续尝试其他格式

@@ -247,13 +247,13 @@ describe('速度手柄', () => {
 
 describe('新点', () => {
   it('firstNode：(0,0)，dx=50，dy=0，其余默认', () => {
-    expect(firstNode()).toEqual(makeNode({ x: 0, y: 0, dx: 50, dy: 0 }));
+    expect(firstNode()).toEqual(makeNode({ x: 0, y: 0, dx: 50, dy: 0, tangentSpeedRatio: 1 }));
     expect(firstNode().duration).toBe(1);
     expect(firstNode().maxPower).toBe(1);
   });
 
   it('nodeAtLogical：dx=50，dy=0，位置夹到场内', () => {
-    expect(nodeAtLogical(10, 20)).toEqual(makeNode({ x: 10, y: 20, dx: 50, dy: 0 }));
+    expect(nodeAtLogical(10, 20)).toEqual(makeNode({ x: 10, y: 20, dx: 50, dy: 0, tangentSpeedRatio: 1 }));
     expect(nodeAtLogical(100, -100)).toMatchObject({ x: 72, y: -72, dx: 50, dy: 0 });
   });
 
@@ -289,6 +289,7 @@ describe('新点', () => {
     expect(n.marker).toBe('');
     expect(n.commands).toEqual([]);
     expect(n.delayAfterArrive).toBe(0);
+    expect(n.tangentSpeedRatio).toBe(1);
     expect('brakeZoneIn' in n).toBe(false);
     expect('endSpeed' in n).toBe(false);
     expect('brakeForwardPower' in n).toBe(false);

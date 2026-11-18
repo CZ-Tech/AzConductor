@@ -1,7 +1,7 @@
 /**
  * 节点编辑表单的字段表。`satisfies Record<keyof ControlNode, …>`：给 ControlNode 加字段而不在此登记，编译不通过。
  */
-import type { ControlNode } from '../core/node';
+import { targetEndSpeed, type ControlNode } from '../core/node';
 import { OrientedTrajectory2D } from '../core/spline';
 
 export type FieldKind = 'text' | 'number' | 'optNumber' | 'commands';
@@ -26,7 +26,8 @@ export const NODE_FIELDS = {
   dy: { kind: 'number', section: 'pose', step: '1' },
   maxPower: { kind: 'number', section: 'advanced', step: '0.05' },
   maxSpeed: { kind: 'optNumber', section: 'advanced', step: '1' },
-  endSpeed: { kind: 'optNumber', section: 'advanced', step: '1' },
+  endSpeed: { kind: 'optNumber', section: 'advanced' }, // 仅保留旧路线数据，不显示输入框
+  tangentSpeedRatio: { kind: 'optNumber', section: 'pose', step: '0.1' },
   brakeZoneIn: { kind: 'optNumber', section: 'advanced', step: '1' },
   brakeForwardPower: { kind: 'optNumber', section: 'advanced', step: '0.05' },
 } as const satisfies Record<keyof ControlNode, FieldSpec>;
@@ -34,9 +35,9 @@ export const NODE_FIELDS = {
 export type NodeFieldKey = keyof typeof NODE_FIELDS;
 
 /** 表单显示顺序（各字段按 section 分组呈现）。 */
-export const NODE_FIELD_ORDER: readonly NodeFieldKey[] = [
-  'x', 'y', 'dx', 'dy', 'heading', 'dHeading', 'duration', 'delayAfterArrive', 'marker', 'commands',
-  'maxPower', 'maxSpeed', 'endSpeed', 'brakeZoneIn', 'brakeForwardPower',
+export const NODE_FIELD_ORDER: readonly Exclude<NodeFieldKey, 'endSpeed'>[] = [
+  'x', 'y', 'dx', 'dy', 'tangentSpeedRatio', 'heading', 'dHeading', 'duration', 'delayAfterArrive', 'marker', 'commands',
+  'maxPower', 'maxSpeed', 'brakeZoneIn', 'brakeForwardPower',
 ];
 
 /** 主表单分组的显示顺序。 */
@@ -69,7 +70,7 @@ export function estimateBrakeZone(
 }
 
 /** 来源表示最后一次决定目标段起速的原因；显式末速度只是约定值，并非物理保证。 */
-export type StartSpeedSource = 'initial' | 'explicit' | 'estimated' | 'delay' | 'heading-only';
+export type StartSpeedSource = 'initial' | 'explicit' | 'tangent' | 'estimated' | 'delay' | 'heading-only';
 export interface StartSpeedEstimate {
   speed: number;
   source: StartSpeedSource;
@@ -89,17 +90,19 @@ export function estimateStartSpeed(
   let result: StartSpeedEstimate = { speed: 0, source: 'initial' };
   for (let i = 0; i < previousNodes.length; i++) {
     const node = previousNodes[i];
-    if (!node || ![node.x, node.y, node.dx, node.dy, node.delayAfterArrive].every(Number.isFinite) ||
+    if (!node) return undefined;
+    const target = targetEndSpeed(node);
+    if (![node.x, node.y, node.dx, node.dy, node.delayAfterArrive].every(Number.isFinite) ||
         node.delayAfterArrive < 0 || (i > 0 &&
-        ((node.endSpeed !== undefined && (!Number.isFinite(node.endSpeed) || node.endSpeed < 0)) ||
+        ((target !== undefined && (!Number.isFinite(target) || target < 0)) ||
          (node.maxSpeed !== undefined && (!Number.isFinite(node.maxSpeed) || node.maxSpeed <= 0))))) return undefined;
     if (i > 0) {
       const length = new OrientedTrajectory2D(previousNodes[i - 1], node, 1).length;
       if (!Number.isFinite(length)) return undefined;
       if (length < 0.05) {
         result = { speed: 0, source: 'heading-only' };
-      } else if (node.endSpeed !== undefined) {
-        result = { speed: node.endSpeed, source: 'explicit' };
+      } else if (target !== undefined) {
+        result = { speed: target, source: node.tangentSpeedRatio === undefined ? 'explicit' : 'tangent' };
       } else {
         const speedSquared = result.speed ** 2 + 2 * acceleration * length;
         if (!Number.isFinite(speedSquared)) return undefined;

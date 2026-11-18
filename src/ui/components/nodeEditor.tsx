@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { OrientedTrajectory2D } from '../../core/spline';
 import { connData, connState, getConnection } from '../../state/session';
-import { cloneCommands, type ControlNode } from '../../core/node';
+import { DEFAULT_TANGENT_SPEED_RATIO, cloneCommands, targetEndSpeed, type ControlNode } from '../../core/node';
 import { validateNodes } from '../../core/contract';
 import { argsValid, resolveArgs } from '../../core/commandArgs';
 import { NodeCommands, commandDraft, type CommandDraft } from './nodeCommands';
@@ -28,7 +28,7 @@ export function toDraft(n: ControlNode): Draft {
     marker: n.marker, commands: n.commands.map(commandDraft),
     heading: s(n.heading), dHeading: s(n.dHeading), duration: s(n.duration), delayAfterArrive: s(n.delayAfterArrive),
     x: s(n.x), dx: s(n.dx), y: s(n.y), dy: s(n.dy),
-    maxPower: s(n.maxPower), maxSpeed: s(n.maxSpeed), endSpeed: s(n.endSpeed),
+    maxPower: s(n.maxPower), maxSpeed: s(n.maxSpeed), endSpeed: s(n.endSpeed), tangentSpeedRatio: s(n.tangentSpeedRatio),
     brakeZoneIn: s(n.brakeZoneIn), brakeForwardPower: s(n.brakeForwardPower),
   };
 }
@@ -53,11 +53,18 @@ export function fromDraft(d: Draft): { node: ControlNode } | { errors: Partial<R
   };
   const bz = opt('brakeZoneIn', d.brakeZoneIn); if (bz !== undefined) node.brakeZoneIn = bz;
   const ms = opt('maxSpeed', d.maxSpeed); if (ms !== undefined) node.maxSpeed = ms;
-  const es = opt('endSpeed', d.endSpeed); if (es !== undefined) node.endSpeed = es;
+  const ratio = opt('tangentSpeedRatio', d.tangentSpeedRatio);
+  if (ratio !== undefined) node.tangentSpeedRatio = ratio;
+  else {
+    const legacy = opt('endSpeed', d.endSpeed);
+    if (legacy !== undefined) node.endSpeed = legacy;
+  }
   const bf = opt('brakeForwardPower', d.brakeForwardPower); if (bf !== undefined) node.brakeForwardPower = bf;
   if (Object.keys(errors).length) return { errors };
   return { node };
 }
+
+const optionalNumber = (value: string) => value.trim() ? Number(value) : undefined;
 
 function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; canDelete: boolean; onDone: (r: NodeEditResult | null) => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(p.node));
@@ -82,20 +89,30 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
   const [errors, setErrors] = useState<Partial<Record<NodeFieldKey, string>>>({});
   const [showAdv, setShowAdv] = useState(() => {
     const n = p.node;
-    return n.maxPower !== 1 || n.maxSpeed !== undefined || n.endSpeed !== undefined || n.brakeZoneIn !== undefined || n.brakeForwardPower !== undefined;
+    return n.maxPower !== 1 || n.maxSpeed !== undefined || n.brakeZoneIn !== undefined || n.brakeForwardPower !== undefined;
   });
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => { setD((o) => ({ ...o, [k]: v })); setErrors((e) => { const n = { ...e }; delete n[k]; return n; }); };
 
+  const showErrors = ({ endSpeed, ...visible }: Partial<Record<NodeFieldKey, string>>) => {
+    if (endSpeed) visible.tangentSpeedRatio ??= endSpeed;
+    setErrors(visible);
+    if (NODE_FIELD_ORDER.some((k) => NODE_FIELDS[k].section === 'advanced' && visible[k])) setShowAdv(true);
+  };
+
   const save = (e: Event) => {
     e.preventDefault();
     const r = fromDraft(d);
-    if ('errors' in r) { setErrors(r.errors); return; }
+    if ('errors' in r) {
+      showErrors(r.errors);
+      return;
+    }
     const issues = validateNodes([r.node]).filter((i) => i.field !== undefined);
     if (issues.length) {
       const m: Partial<Record<NodeFieldKey, string>> = {};
-      for (const i of issues) if (i.field && i.field in NODE_FIELDS) m[i.field as NodeFieldKey] ??= i.message;
-      if (Object.keys(m).length) { setErrors(m); if (m.maxPower || m.maxSpeed || m.endSpeed || m.brakeZoneIn || m.brakeForwardPower) setShowAdv(true); return; }
+      for (const i of issues) if (i.field) m[i.field] ??= i.message;
+      showErrors(m);
+      return;
     }
     // 合法参数才规范化（新目录省略可选尾参，旧目录补默认值）；无效草稿原样保留。
     for (const command of r.node.commands) {
@@ -106,10 +123,14 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
     p.onDone({ kind: 'save', node: r.node });
   };
 
-  const parking = () => setD((o) => ({
-    ...o, endSpeed: '0', brakeZoneIn: parkingBrakeZone(o.brakeZoneIn),
-  }));
-  const passing = () => setD((o) => ({ ...o, endSpeed: '', brakeZoneIn: '', brakeForwardPower: '' }));
+  const preset = (stop: boolean) => {
+    setD((o) => {
+      const current = Number(o.tangentSpeedRatio);
+      const ratio = stop ? 0 : Number.isFinite(current) && current > 0 ? current : DEFAULT_TANGENT_SPEED_RATIO;
+      return { ...o, tangentSpeedRatio: String(ratio), brakeZoneIn: parkingBrakeZone(o.brakeZoneIn) };
+    });
+    setErrors(({ tangentSpeedRatio: _ratio, brakeZoneIn: _brake, ...remaining }) => remaining);
+  };
 
   const hintOf = (k: NodeFieldKey): string => S.node.fields[k][2];
   const geometry = [d.x, d.y, d.dx, d.dy];
@@ -120,13 +141,20 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
         x: numericGeometry[0]!, y: numericGeometry[1]!, dx: numericGeometry[2]!, dy: numericGeometry[3]!,
       }, 1).length : undefined;
   const incoming = estimateStartSpeed(p.preceding, decel.value);
-  const maxSpeed = d.maxSpeed.trim() ? Number(d.maxSpeed) : undefined;
-  const targetSpeed = d.endSpeed.trim() ? Number(d.endSpeed) : undefined;
+  const maxSpeed = optionalNumber(d.maxSpeed);
+  const ratio = optionalNumber(d.tangentSpeedRatio);
+  const targetSpeed = targetEndSpeed({
+    dx: optionalNumber(d.dx) ?? NaN, dy: optionalNumber(d.dy) ?? NaN,
+    maxSpeed, endSpeed: optionalNumber(d.endSpeed), tangentSpeedRatio: ratio,
+  });
+  const targetHint = targetSpeed === undefined ? S.node.legacyUnspecifiedTarget
+    : Number.isFinite(targetSpeed) && targetSpeed >= 0
+      ? (ratio === undefined ? S.node.legacyTarget : S.node.tangentTarget)(targetSpeed.toFixed(2)) : null;
   const estimate = segmentLength !== undefined && segmentLength >= 0.05 && targetSpeed !== undefined && incoming
     ? estimateBrakeZone(segmentLength, incoming.speed, decel.value, maxSpeed, targetSpeed) : undefined;
-  const brakePlaceholder = !d.endSpeed.trim() ? S.node.brakeNeedsEndSpeed
+  const brakePlaceholder = targetSpeed === undefined ? S.node.brakeNeedsEndSpeed
     : estimate === undefined ? S.node.brakeAuto : S.node.brakeEstimate(estimate.toFixed(2));
-  const speedSource = { initial: '首点静止', explicit: '上一点目标值', estimated: '前序路段推算', delay: '等待后静止', 'heading-only': '纯转向后静止' } as const;
+  const speedSource = { initial: '首点静止', explicit: '上一点固定目标值', tangent: '上一点切线目标值', estimated: '前序路段推算', delay: '等待后静止', 'heading-only': '纯转向后静止' } as const;
   const speedDescription = incoming ? `${incoming.speed.toFixed(2)} in/s（${speedSource[incoming.source]}）` : '无法推算';
   const brakeDetails = `模型预估：减速度 ${decel.value.toFixed(2)} in/s²（${decel.live ? '机器人当前值' : '离线默认值'}），加速度为其 105%；起点速度 ${speedDescription}。实际制动按实时速度计算，预估不保证安全。`;
 
@@ -156,7 +184,8 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
               placeholder={k === 'brakeZoneIn' ? brakePlaceholder : undefined}
               onInput={(e) => set(k as Exclude<NodeFieldKey, 'commands'>, (e.target as HTMLInputElement).value)} />
             {hintOf(k) && !err && <div class="hint">{hintOf(k)}</div>}
-            {k === 'brakeZoneIn' && !err && !d.brakeZoneIn.trim() && <div class="hint">{estimate !== undefined ? `${brakePlaceholder}；` : ''}{brakeDetails}</div>}{errEl}</div>
+            {k === 'tangentSpeedRatio' && !err && targetHint && <output id="nf-tangent-target" class="hint" for="nf-dx nf-dy nf-tangentSpeedRatio">{targetHint}</output>}
+            {k === 'brakeZoneIn' && !err && !d.brakeZoneIn.trim() && estimate !== undefined && <div class="hint">{brakePlaceholder}；{brakeDetails}</div>}{errEl}</div>
         );
     }
   };
@@ -168,8 +197,8 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; can
       <div class="dlg-body node-form">
         <div class="presets">
           <span class="muted">{S.node.presets}</span>
-          <button type="button" onClick={parking} title={S.node.parkingHint}>{S.node.parking}</button>
-          <button type="button" onClick={passing} title={S.node.passingHint}>{S.node.passing}</button>
+          <button type="button" onClick={() => preset(true)} title={S.node.parkingHint}>{S.node.parking}</button>
+          <button type="button" onClick={() => preset(false)} title={S.node.passingHint}>{S.node.passing}</button>
         </div>
         {NODE_MAIN_SECTIONS.map((s) => (
           <fieldset class="nf-section" key={s}>

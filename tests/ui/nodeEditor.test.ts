@@ -8,7 +8,7 @@ import { OrientedTrajectory2D } from '../../src/core/spline';
 const draft = {
   x: '0', y: '0', dx: '0', dy: '0', heading: '0', dHeading: '0', duration: '1',
   delayAfterArrive: '0', marker: '', commands: [], maxPower: '1',
-  maxSpeed: '30', endSpeed: '0', brakeZoneIn: '', brakeForwardPower: '',
+  maxSpeed: '30', endSpeed: '0', tangentSpeedRatio: '', brakeZoneIn: '', brakeForwardPower: '',
 };
 
 describe('有序指令草稿', () => {
@@ -60,6 +60,13 @@ describe('目标段起速估算', () => {
     const nodes = [point(0), point(10, { x: 10, y: 0, endSpeed: 30, maxSpeed: 5 })];
     expect(estimateStartSpeed(nodes, 10)).toEqual({ speed: 30, source: 'explicit' });
     expect(estimateStartSpeed([...nodes, point(20)], 10)?.speed).toBeCloseTo(Math.sqrt(30 ** 2 + 2 * 10.5 * 10));
+  });
+
+  it('用上一点的联动速度估算起速，受上限和等待约束', () => {
+    const auto = point(10, { dx: 3, dy: -4, tangentSpeedRatio: 2, maxSpeed: 8 });
+    expect(estimateStartSpeed([point(0), auto], 10)).toEqual({ speed: 8, source: 'tangent' });
+    expect(estimateStartSpeed([point(0), { ...auto, tangentSpeedRatio: 0 }], 10)).toEqual({ speed: 0, source: 'tangent' });
+    expect(estimateStartSpeed([point(0), { ...auto, delayAfterArrive: 1 }], 10)).toEqual({ speed: 0, source: 'delay' });
   });
 
   it('等待后从零重新加速，也处理目标段前点的等待', () => {
@@ -122,6 +129,14 @@ describe('制动区编辑', () => {
       expect(estimateBrakeZone(10, 0, 10, undefined, invalid)).toBeUndefined();
     }
     expect(estimateBrakeZone(10, 0, 0, undefined, 0)).toBeUndefined();
+  });
+
+  it('启用联动时保存比例而不是旧固定速度', () => {
+    const automatic = fromDraft({ ...draft, tangentSpeedRatio: '0.5' });
+    expect(automatic).toMatchObject({ node: { tangentSpeedRatio: 0.5 } });
+    expect(automatic).not.toHaveProperty('node.endSpeed');
+    expect(fromDraft(draft)).toHaveProperty('node.endSpeed', 0);
+    expect(fromDraft({ ...draft, tangentSpeedRatio: 'bad' })).toHaveProperty('errors.tangentSpeedRatio');
   });
 
   it('自动值不写入节点；手动值及零值保留，清空恢复自动', () => {

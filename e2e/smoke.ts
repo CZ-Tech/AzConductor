@@ -167,7 +167,7 @@ async function main() {
 
     // 可选字段必须能从已有值清空：先保存非空值，再清空、保存并重新打开。
     const node2 = page.locator('[data-kind=node][data-i="2"]');
-    const optionalValues = { maxSpeed: '30', endSpeed: '5', brakeZoneIn: '12', brakeForwardPower: '0.5' };
+    const optionalValues = { maxSpeed: '30', tangentSpeedRatio: '0.5', brakeZoneIn: '12', brakeForwardPower: '0.5' };
     const openNode2 = async () => {
       await node2.click({ button: 'right' });
       await page.locator('dialog').waitFor();
@@ -175,6 +175,22 @@ async function main() {
       if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
     };
     await openNode2();
+    check(await page.locator('#nf-endSpeed').count() === 0, '不再显示独立的到点速度输入框');
+    check(await page.locator('#nf-tangentSpeedRatio').inputValue() === '1', '新点默认启用切线速度联动');
+    await page.getByRole('button', { name: '取消' }).click();
+    const handle = await page.locator('[data-kind=handle][data-i="2"]').boundingBox();
+    if (!handle) throw new Error('no tangent handle');
+    const hx = handle.x + handle.width / 2, hy = handle.y + handle.height / 2;
+    await page.mouse.move(hx, hy);
+    await page.mouse.down();
+    await page.mouse.move(hx, hy + 24, { steps: 4 });
+    await page.mouse.up();
+    await openNode2();
+    const draggedDx = Number(await page.locator('#nf-dx').inputValue());
+    const draggedDy = Number(await page.locator('#nf-dy').inputValue());
+    check(draggedDx !== 50 && (await page.locator('#nf-tangent-target').innerText()).includes(Math.hypot(draggedDx, draggedDy).toFixed(2)), '拖动橙柄后自动到点速度跟随切线');
+    await page.locator('#nf-dx').fill('3');
+    await page.locator('#nf-dy').fill('4');
     for (const [key, value] of Object.entries(optionalValues)) await page.locator(`#nf-${key}`).fill(value);
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached' });
@@ -186,8 +202,12 @@ async function main() {
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached' });
     await openNode2();
-    check(await page.locator('#nf-endSpeed').inputValue() === '5', '保留目标速度');
+    check((await page.locator('#nf-tangent-target').innerText()).includes('2.50 in/s'), '保存后按切线模长和比例显示 2.50 in/s');
     check(await page.locator('#nf-brakeZoneIn').inputValue() === '', '设置目标速度时制动区仍可留空');
+    const brakeBeforeStop = await page.locator('#nf-brakeZoneIn').getAttribute('placeholder');
+    await page.getByRole('button', { name: '停车点', exact: true }).click();
+    check((await page.locator('#nf-tangent-target').innerText()).includes('0.00 in/s') && await page.locator('#nf-dx').inputValue() === '3', '停车预设不改变几何切线');
+    check(await page.locator('#nf-brakeZoneIn').getAttribute('placeholder') !== brakeBeforeStop, '修改到点速度后自动制动距离联动');
     for (const key of Object.keys(optionalValues)) await page.locator(`#nf-${key}`).fill('');
     await page.locator('dialog button[type=submit]').click();
     await page.locator('dialog').waitFor({ state: 'detached' });
@@ -196,12 +216,12 @@ async function main() {
       check(await page.locator(`#nf-${key}`).inputValue() === '', `${key} 清空保存后重新打开仍为空`);
     }
     check(await page.locator('#nf-delayAfterArrive').inputValue() === '1.5', '清空可选字段不影响其他节点数据');
-    await page.locator('#nf-endSpeed').fill('0');
+    await page.getByRole('button', { name: '停车点', exact: true }).click();
     check(await page.locator('#nf-maxSpeed').inputValue() === '', '模型预估无需填写速度上限');
     check(/^预估 [\d.]+ in$/.test(await page.locator('#nf-brakeZoneIn').getAttribute('placeholder') ?? ''), '未设置速度上限时显示模型预估');
     check(await until(async () => (await page.locator('dialog').innerText()).includes('机器人当前值'), 'live braking parameter', 3000), '连接后读取机器人当前减速度');
     const incomingText = await page.locator('dialog').innerText();
-    check(/起点速度 (?!0\.00)\d+\.\d+ in\/s（前序路段推算）/.test(incomingText), '未设上一点目标速度时沿前序路径推算起点速度');
+    check(/起点速度 (?!0\.00)\d+\.\d+ in\/s（上一点切线目标值）/.test(incomingText), '上一点的联动速度用于推算起点速度');
     check(await page.locator('#nf-brakeZoneIn').inputValue() === '', '模型预估不写入手动制动区');
     await page.getByRole('button', { name: '取消' }).click();
     await page.locator('dialog').waitFor({ state: 'detached' });

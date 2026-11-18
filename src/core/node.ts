@@ -25,8 +25,10 @@ export interface ControlNode {
   maxPower: number;
   /** 速度上限 (in/s)，undefined = 不限 */
   maxSpeed?: number | undefined;
-  /** 到达速度 (in/s)，0 = 完全停止 */
+  /** 旧存档或机器人线格式中的固定到点速度 (in/s)，0 = 完全停止。 */
   endSpeed?: number | undefined;
+  /** 网页端切线速度比例；设置时以它为准，0 = 完全停止。 */
+  tangentSpeedRatio?: number | undefined;
   /** 到点前制动距离 (in)；缺省时自动计算，0 和正数为显式值 */
   brakeZoneIn?: number | undefined;
   /** 制动时前向功率上限 */
@@ -50,8 +52,21 @@ export function makeNode(partial: Partial<ControlNode> & Pick<ControlNode, 'x' |
   if (partial.brakeZoneIn !== undefined) n.brakeZoneIn = partial.brakeZoneIn;
   if (partial.maxSpeed !== undefined) n.maxSpeed = partial.maxSpeed;
   if (partial.endSpeed !== undefined) n.endSpeed = partial.endSpeed;
+  if (partial.tangentSpeedRatio !== undefined) n.tangentSpeedRatio = partial.tangentSpeedRatio;
   if (partial.brakeForwardPower !== undefined) n.brakeForwardPower = partial.brakeForwardPower;
   return n;
+}
+
+export const DEFAULT_TANGENT_SPEED_RATIO = 1;
+
+/** 切线模长乘比例得到到点速度 (in/s)，受本段速度上限约束；旧路线保持原值。 */
+export function targetEndSpeed(n: Pick<ControlNode, 'dx' | 'dy' | 'maxSpeed' | 'endSpeed' | 'tangentSpeedRatio'>): number | undefined {
+  const ratio = n.tangentSpeedRatio;
+  if (ratio === undefined) return n.endSpeed;
+  if (!Number.isFinite(ratio) || ratio < 0) return NaN;
+  if (ratio === 0) return 0;
+  const speed = Math.hypot(n.dx * ratio, n.dy * ratio);
+  return Math.min(speed, n.maxSpeed ?? Infinity);
 }
 
 const EPS = 1e-7;
@@ -73,7 +88,7 @@ export function nodesClose(a: ControlNode, b: ControlNode): boolean {
     Math.abs(a.delayAfterArrive - b.delayAfterArrive) < EPS &&
     Math.abs(a.maxPower - b.maxPower) < EPS &&
     closeOpt(a.maxSpeed, b.maxSpeed) && closeOpt(a.endSpeed, b.endSpeed) &&
-    closeOpt(a.brakeZoneIn, b.brakeZoneIn) &&
+    closeOpt(a.tangentSpeedRatio, b.tangentSpeedRatio) && closeOpt(a.brakeZoneIn, b.brakeZoneIn) &&
     closeOpt(a.brakeForwardPower, b.brakeForwardPower)
   );
 }
@@ -94,7 +109,7 @@ export function rotate180(n: ControlNode): ControlNode {
 /** 新路径点继承几何与巡航功率，不继承动作/延迟/末端制动 */
 export function nextWaypoint(n: ControlNode, x: number, y: number): ControlNode {
   const r: ControlNode = {
-    ...n, x, y, marker: '', commands: [], delayAfterArrive: 0,
+    ...n, x, y, marker: '', commands: [], delayAfterArrive: 0, tangentSpeedRatio: DEFAULT_TANGENT_SPEED_RATIO,
   };
   delete r.endSpeed;
   delete r.brakeZoneIn;
