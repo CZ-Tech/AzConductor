@@ -45,6 +45,15 @@ export interface OpModeList { opModes: OpModeDescriptor[] }
 export interface OpModeSnapshot { revision: number; controllerAvailable: boolean; phase: OpModePhase; activeName: string | null }
 export interface OpModeActionResponse { accepted: boolean; action: string; name: string }
 export interface RuntimeSnapshot { runtime: RuntimeEvent; pose: PoseEvent }
+/** `text` is the Driver Station display; number null represents NaN/infinity. */
+export type TelemetryItem = { caption: string; text: string; unit?: string } & (
+  | { type: 'number'; value: number | null }
+  | { type: 'boolean'; value: boolean }
+  | { type: 'text'; value: null }
+);
+export interface TelemetryLine { caption: string | null; items: TelemetryItem[] }
+export interface TelemetryFrame { seq: number; tNanos: number; lines: TelemetryLine[] }
+export interface TelemetrySnapshot { frame: TelemetryFrame; logSeq: number }
 export type TuningValue = number | boolean | string;
 export interface TuningField {
   name: string;
@@ -256,6 +265,35 @@ export function decodeCommandCatalog(raw: unknown): CommandCatalog {
 export function decodeCommandRun(raw: unknown): CommandRunResponse {
   const o = obj(raw, 'command run');
   return { accepted: bool(o, 'accepted', false), name: str(o, 'name', '') };
+}
+export function decodeTelemetryFrame(raw: unknown): TelemetryFrame {
+  const o = obj(raw, 'telemetry frame');
+  return {
+    seq: num(o, 'seq'), tNanos: num(o, 'tNanos'),
+    lines: arr(o, 'lines').map((rawLine) => {
+      const line = obj(rawLine, 'telemetry line');
+      return {
+        caption: strOrNull(line, 'caption'),
+        items: arr(line, 'items').map((rawItem): TelemetryItem => {
+          const item = obj(rawItem, 'telemetry item');
+          const common = { caption: str(item, 'caption'), text: str(item, 'text'),
+            ...(item['unit'] !== undefined ? { unit: str(item, 'unit') } : {}) };
+          const type = str(item, 'type');
+          const value = item['value'];
+          if (type === 'number' && (value === null || typeof value === 'number' && Number.isFinite(value))) {
+            return { ...common, type, value };
+          }
+          if (type === 'boolean' && typeof value === 'boolean') return { ...common, type, value };
+          if (type === 'text' && value === null) return { ...common, type, value };
+          throw new DecodeError('invalid telemetry item type/value');
+        }),
+      };
+    }),
+  };
+}
+export function decodeTelemetrySnapshot(raw: unknown): TelemetrySnapshot {
+  const o = obj(raw, 'telemetry snapshot');
+  return { frame: decodeTelemetryFrame(o['frame']), logSeq: num(o, 'logSeq') };
 }
 export function decodePose(raw: unknown): PoseEvent {
   const o = obj(raw, 'pose');

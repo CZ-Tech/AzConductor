@@ -17,6 +17,8 @@ import {
   decodeRuntimeSnapshot,
   decodeSessionOpen,
   decodeTuning,
+  decodeTelemetrySnapshot,
+  type TelemetrySnapshot,
   type CommandCatalog,
   type CommandRunResponse,
   type ExecutionSnapshot,
@@ -155,6 +157,11 @@ export class RobotApiClient {
 
   async health(): Promise<Result<HealthInfo>> {
     return this.decode(await this.send('GET', '/api/v2/health', { authenticated: false }), decodeHealth);
+  }
+
+  /** Optional on older firmware: a 404 is returned normally, never required to connect. */
+  async getTelemetry(): Promise<Result<TelemetrySnapshot>> {
+    return this.decode(await this.send('GET', '/api/v2/telemetry'), decodeTelemetrySnapshot);
   }
 
   // ---- routes -------------------------------------------------------------------------------

@@ -502,6 +502,14 @@ button.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--danger-s
 .run-chart-head strong, .run-tasks strong { font-weight: 650; font-size: 13px; }
 .run-chart-head .muted { font-size: 12px; }
 .run-chart canvas { display: block; width: 100%; height: 118px; }
+.telemetry-panel { border-top: 1px solid var(--line); padding-top: 12px; }
+.telemetry-hint { font-size: 12px; margin: 4px 0 8px; line-height: 1.5; }
+.telemetry-picker { margin-bottom: 10px; font-size: 13px; }
+.telemetry-picker summary { cursor: pointer; }
+.telemetry-options { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow: auto; padding: 8px 0; }
+.telemetry-options label { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.telemetry-options input { flex: none; }
+.telemetry-panel .run-chart { margin-top: 10px; }
 .run-route { flex: none; font-size: 13px; }
 .run-route select { min-height: 34px; }
 .run-tasks { font-size: 13px; }

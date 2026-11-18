@@ -437,8 +437,19 @@ async function main() {
         { name: 'auto.waitMillis', params: ['20000'] }, { name: 'auto.shoot', params: ['3000', '100', '200'] },
       ] },
     ] }));
-    // 运行页
+    // 运行页：字段来自固件，不能默认勾选任何遥测。
+    robot.publishTelemetry([{ caption: null, items: [
+      { caption: 'pCross', text: '0.25', type: 'number', value: 0.25 },
+      { caption: 'pTangent', text: '-0.5', type: 'number', value: -0.5 },
+      { caption: 'status', text: 'ready', type: 'text', value: null },
+    ] }]);
     await page.goto(`http://localhost:${PORT}/#/run`);
+    const telemetry = page.locator('.telemetry-panel');
+    check(await until(async () => await telemetry.locator('input[type=checkbox]').count() === 2, 'numeric telemetry fields'), '遥测面板动态列出数值字段，不将文本当数值');
+    check(await telemetry.locator('input:checked').count() === 0 && await telemetry.locator('canvas').count() === 0, '遥测默认不选择任何字段');
+    await telemetry.getByLabel('pCross', { exact: true }).check();
+    await telemetry.getByLabel('pTangent', { exact: true }).check();
+    check(await telemetry.locator('canvas').count() === 2, '可同时选择任意多个遥测字段绘图');
     check(await until(async () => (await page.locator('.topbar nav a[aria-current=page]').innerText()) === '运行', 'nav current'), '运行页导航高亮「运行」');
     check(await until(async () => (await page.locator('#run-op option').count()) > 1, 'opmodes loaded'), '运行页列出 OpMode');
     await page.locator('#run-route').selectOption('Mirror B');
@@ -485,6 +496,13 @@ async function main() {
     check(await runBtn('intakeOn').isDisabled() && (await panel.innerText()).includes('START'), 'INIT 阶段指令仍不可运行（固件只在 RUNNING 接受）');
     await page.getByRole('button', { name: 'START', exact: true }).click();
     check(await until(() => runBtn('intakeOn').isEnabled(), 'cmd enabled'), 'START 后无参数指令可运行');
+
+    robot.publishTelemetry([{ caption: null, items: [
+      { caption: 'pCross', text: '-0.75', type: 'number', value: -0.75 },
+      { caption: 'pTangent', text: '0.125', type: 'number', value: 0.125 },
+    ] }]);
+    check(await until(async () => (await telemetry.locator('.run-chart-head .mono').allTextContents()).join(',') === '-0.75,0.125', 'live telemetry values'), '运行时接收真实遥测帧并显示正负值');
+    check(await telemetry.locator('canvas').first().evaluate((c: HTMLCanvasElement) => c.width > 0 && c.height > 0), '实时遥测 Canvas 已绘制');
 
     // 带参数的指令：本地校验后才能运行
     check(await runBtn('shoot').isDisabled(), '必填参数未填时不可运行');
@@ -567,6 +585,9 @@ async function main() {
     // 结束指令 OpMode，换路径类 OpMode：它在 RUNNING 时不接受手动指令
     await page.getByRole('button', { name: 'STOP', exact: true }).click();
     check(await until(async () => (await page.locator('.run-status').innerText()).includes('已停止'), 'cmd op stopped'), '结束 RemoteCommand Test');
+    check((await telemetry.locator('.run-chart-head .mono').allTextContents()).join(',') === '-0.75,0.125', '停止后保留遥测曲线和值');
+    await telemetry.getByRole('button', { name: '清空曲线' }).click();
+    check((await telemetry.locator('.run-chart-head .mono').allTextContents()).every(v => v === '--'), '支持手动清空遥测曲线');
     check(await until(() => runBtn('intakeOn').isDisabled(), 'cmd off after stop'), 'OpMode 结束后指令不可运行');
     const opName = robot.opModes[0]!.name;
     await page.locator('#run-op').selectOption(opName);
@@ -575,10 +596,10 @@ async function main() {
     await page.getByRole('button', { name: 'START', exact: true }).click();
     check(await until(async () => (await page.locator('.run-status').innerText()).includes('运行中'), 'running'), 'START 后显示运行中');
     check(await until(() => runBtn('intakeOn').isDisabled(), 'cmd blocked') && (await panel.innerText()).includes('路径执行中'), '路径执行中禁用手动指令');
-    const telemetry = page.locator('.telemetry');
-    const p1 = await telemetry.innerText();
+    const poseTelemetry = page.locator('.telemetry');
+    const p1 = await poseTelemetry.innerText();
     await new Promise((r) => setTimeout(r, 800));
-    const p2 = await telemetry.innerText();
+    const p2 = await poseTelemetry.innerText();
     check(p1 !== p2 && /\d+\.\d+/.test(p2), `实时位姿更新 (${p1.replace(/\s+/g, ' ')} → ${p2.replace(/\s+/g, ' ')})`);
     check(await until(async () => (await page.locator('.run-map polyline').count()) === 1, 'trail', 3000), '运行时绘制实际轨迹');
     check(await until(async () => (await page.locator('.run-side').innerText()).includes('参考路径：'), 'subject'), '执行时显示参考路径（execution.subject）');

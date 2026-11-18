@@ -19,6 +19,8 @@ import {
   decodePose,
   decodeRevision,
   decodeRuntime,
+  decodeTelemetryFrame,
+  type TelemetryFrame,
   type ExecutionSnapshot,
   type HelloEvent,
   type OpModeSnapshot,
@@ -65,6 +67,8 @@ export interface ConnectionData {
   hello: HelloEvent | null;
   pose: PoseEvent | null;
   runtime: RuntimeEvent | null;
+  /** Latest published arbitrary telemetry frame; null on old firmware or before first update. */
+  telemetry: TelemetryFrame | null;
   execution: ExecutionSnapshot | null;
   opMode: OpModeSnapshot | null;
   routeRevision: number;
@@ -81,6 +85,7 @@ export type ConnectionEvent =
   | { type: 'hello'; data: HelloEvent }
   | { type: 'pose'; data: PoseEvent }
   | { type: 'runtime'; data: RuntimeEvent }
+  | { type: 'telemetry'; data: TelemetryFrame }
   | { type: 'execution'; data: ExecutionSnapshot }
   | { type: 'opmode'; data: OpModeSnapshot }
   | { type: 'routes'; data: { revision: number } }
@@ -107,7 +112,7 @@ export interface RobotConnectionOptions {
 }
 
 const EMPTY_DATA: ConnectionData = {
-  hello: null, pose: null, runtime: null, execution: null, opMode: null,
+  hello: null, pose: null, runtime: null, telemetry: null, execution: null, opMode: null,
   routeRevision: 0, commandRevision: 0, tuningRevision: 0, lastHeartbeat: null, lastEventAt: null,
 };
 
@@ -325,6 +330,12 @@ export class RobotConnection {
           const data = decodePose(raw);
           this.dataValue = { ...this.dataValue, pose: data };
           this.emit({ type: 'pose', data });
+          break;
+        }
+        case 'telemetry': {
+          const data = decodeTelemetryFrame(raw);
+          this.dataValue = { ...this.dataValue, telemetry: data };
+          this.emit({ type: 'telemetry', data });
           break;
         }
         case 'runtime': {

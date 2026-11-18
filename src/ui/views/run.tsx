@@ -11,6 +11,7 @@ import { toast } from '../components/dialogs';
 import { openConnectionDialog } from '../components/connection';
 import { CommandPanel } from '../components/commandPanel';
 import { TuningPanel } from '../components/tuningPanel';
+import { TelemetryPanel } from '../components/telemetryPanel';
 import { IconPlay, IconStop, IconTerminal } from '../components/icons';
 import { describeApiError, isHttpError } from '../../net/transport';
 import { drawErrorChart, type ErrorSample } from '../chart';
@@ -229,6 +230,7 @@ export function RunView() {
             </div>
             <canvas ref={canvas} aria-label={S.run.errorChart} />
           </div>
+          <TelemetryPanel running={connected && running} connected={connected} />
           {connected && !subject && (
             <div class="run-route">
               <label for="run-route">{S.run.pickRoute}</label>

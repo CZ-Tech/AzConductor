@@ -25,7 +25,7 @@ import { decodeRobotRoute, encodeRobotRoute, type RobotRouteV2 } from '../core/w
 import { unwrapRobotFrames } from '../core/routeFormat';
 
 type MockRouteInput = string | readonly ControlNode[] | readonly unknown[] | RobotRouteV2;
-import type { CommandParameterSignature, TuningField, TuningValue } from '../net/models';
+import type { CommandParameterSignature, TelemetryFrame, TelemetryLine, TuningField, TuningValue } from '../net/models';
 
 // ---------------------------------------------------------------------------------------------
 // Public types
@@ -92,6 +92,8 @@ export interface MockRuntimeSnapshot {
 export interface MockRobotOptions {
   /** Bind address. Default `127.0.0.1`. */
   host?: string;
+  /** False reproduces older firmware without telemetry endpoint/events. Default true. */
+  telemetryEnabled?: boolean;
   /** Pose frames per second pushed on the event stream (and simulation tick rate). Default 60. */
   poseHz?: number;
   /** Session lease length. Default 10000 (the real robot uses 10000 and rejects < 1000). */
@@ -281,6 +283,7 @@ interface StreamClient {
   token: string;
   timer: ReturnType<typeof setInterval> | null;
   lastPoseSeq: number;
+  lastTelemetrySeq: number;
   lastExecutionRevision: number;
   lastRouteRevision: number;
   lastCommandRevision: number;
@@ -345,10 +348,19 @@ export class MockRobotServer {
   private lastRequestId = 0;
   private run: ActiveRun | null = null;
   private streamsMuted = false;
+  private telemetryFrame: TelemetryFrame = { seq: 0, tNanos: 0, lines: [] };
+
+  /** Like TelemetryStore.publishFrame: latest value only, with an independent sequence. */
+  publishTelemetry(lines: TelemetryLine[], tNanos = Number(process.hrtime.bigint())): void {
+    this.telemetryFrame = JSON.parse(JSON.stringify({
+      seq: this.telemetryFrame.seq + 1, tNanos, lines,
+    })) as TelemetryFrame;
+  }
 
   // ---- infrastructure -----------------------------------------------------------------------
   private readonly opts: {
     host: string; poseHz: number; sessionTimeoutMs: number; heartbeatMs: number;
+    telemetryEnabled: boolean;
     runTimeScale: number; minRunMs: number; maxRunMs: number;
     initialExecutionState: MockExecutionState;
     log: ((line: string) => void) | undefined;
@@ -363,6 +375,7 @@ export class MockRobotServer {
   constructor(options: MockRobotOptions = {}) {
     this.opts = {
       host: options.host ?? '127.0.0.1',
+      telemetryEnabled: options.telemetryEnabled ?? true,
       poseHz: options.poseHz ?? 60,
       sessionTimeoutMs: options.sessionTimeoutMs ?? 10_000,
       heartbeatMs: options.heartbeatMs ?? 1000,
@@ -763,6 +776,10 @@ export class MockRobotServer {
       return this.handleRoute(ctx, path.slice(`${PREFIX}/routes/`.length));
     }
 
+    if (path === `${PREFIX}/telemetry` && this.opts.telemetryEnabled) {
+      if (method !== 'GET') return methodNotAllowed();
+      return json(200, JSON.stringify({ frame: this.telemetryFrame, logSeq: 0 }));
+    }
     if (path === `${PREFIX}/execution`) {
       if (method !== 'GET') return methodNotAllowed();
       return json(200, executionJson(this.execSnap));
@@ -1065,7 +1082,7 @@ export class MockRobotServer {
 
     const client: StreamClient = {
       res, token, timer: null,
-      lastPoseSeq: -1, lastExecutionRevision: -1, lastRouteRevision: -1,
+      lastPoseSeq: -1, lastTelemetrySeq: -1, lastExecutionRevision: -1, lastRouteRevision: -1,
       lastCommandRevision: -1, lastTuningRevision: -1, lastOpModeRevision: -1,
       runtimeSent: false, lastOpModeActive: false, lastOpModeName: null,
       lastHeartbeat: Number.NEGATIVE_INFINITY, closed: false,
@@ -1100,6 +1117,11 @@ export class MockRobotServer {
       c.runtimeSent = true;
       c.lastOpModeActive = rt.opModeActive;
       c.lastOpModeName = rt.opModeName;
+    }
+    const telemetry = this.telemetryFrame;
+    if (this.opts.telemetryEnabled && telemetry.seq > 0 && telemetry.seq !== c.lastTelemetrySeq) {
+      writeEvent(c, 'telemetry', telemetry.seq, JSON.stringify(telemetry));
+      c.lastTelemetrySeq = telemetry.seq;
     }
     const ex = this.execSnap;
     if (ex.revision !== c.lastExecutionRevision) {
