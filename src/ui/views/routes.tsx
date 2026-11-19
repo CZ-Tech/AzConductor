@@ -1,4 +1,4 @@
-import { applyTangentSpeeds } from '../../core/node';
+import { applyTangentSpeeds, clearBrakeZones } from '../../core/node';
 import { settings } from '../../state/settings';
 import { docStore } from '../../state/docStore';
 import { RouteCore } from '../../core/route';
@@ -10,7 +10,7 @@ import { RoutePreview } from '../components/field';
 import { SyncPanel } from '../components/syncPanel';
 import { Menu, MenuItem, MenuSeparator } from '../components/menu';
 import {
-  IconArrowDown, IconArrowUp, IconCopy, IconExport, IconImport, IconMirror, IconMore, IconPencil, IconPlus, IconRotate180, IconTrash,
+  IconArrowDown, IconArrowUp, IconClose, IconCopy, IconExport, IconImport, IconMirror, IconMore, IconPencil, IconPlus, IconRotate180, IconTrash,
 } from '../components/icons';
 import { navigate } from '../router';
 import { S } from '../strings';
@@ -47,6 +47,26 @@ export function RoutesView() {
     const n = await askText({ title: S.routes.pointSymmetryTitle, label: S.routes.nameLabel, initial: `${r.name}${S.routes.pointSymmetrySuffix}` });
     if (n) store.createRoute(n, pointSymmetryNodes(r.points));
   };
+  /** 临时功能：清除所有路径里填写的制动区，恢复机器人自动计算。 */
+  const clearBrake = async () => {
+    const current = store.routes.value;
+    const results = current.map((r) => clearBrakeZones(r.points));
+    const affected = results.filter((r) => r.cleared > 0);
+    const total = affected.reduce((n, r) => n + r.cleared, 0);
+    if (total === 0) {
+      toast(S.routes.clearBrakeNone, 'info');
+      return;
+    }
+    const ok = await askConfirm({
+      title: S.routes.clearBrakeTitle,
+      message: S.routes.clearBrakeMessage(affected.length, total),
+      okText: S.routes.clearBrakeOk,
+      danger: true,
+    });
+    if (!ok) return;
+    store.replaceRoutes(current.map((r, i) => (results[i]!.cleared > 0 ? { ...r, points: results[i]!.nodes } : r)));
+    toast(S.routes.clearBrakeDone(total), 'ok');
+  };
 
   return (
     <div class="routes-view">
@@ -57,6 +77,7 @@ export function RoutesView() {
         </div>
         <div class="page-actions">
           <button class="ghost" onClick={() => void importIntoStore(store)}><IconImport />{S.routes.import}</button>
+          <button class="ghost" disabled={routes.length === 0} onClick={() => void clearBrake()}><IconClose />{S.routes.clearBrake}</button>
           <button class="ghost" disabled={routes.length === 0} onClick={() => void showExportDialog(S.io.exportTitle, exportArchiveJson(routes), 'azconductor-routes.json')}><IconExport />{S.routes.exportAll}</button>
           <button class="primary" onClick={() => void create()}><IconPlus />{S.routes.newRoute}</button>
         </div>

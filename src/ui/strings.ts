@@ -75,6 +75,13 @@ export const S = {
     syncing: '同步中…',
     synced: '已同步',
     syncError: '同步失败',
+    clearBrake: '清空手动制动区',
+    clearBrakeTitle: '清空手动制动区',
+    clearBrakeMessage: (routes: number, nodes: number) =>
+      `将清除 ${routes} 条路径中 ${nodes} 个控制点填写的制动区，恢复为机器人按当前配置自动计算。`,
+    clearBrakeOk: '清空',
+    clearBrakeDone: (n: number) => `已清空 ${n} 个控制点的制动区`,
+    clearBrakeNone: '没有填写过的制动区',
     conflict: (n: number) => `${n} 个冲突待处理`,
     resolve: '处理冲突',
     storageError: '无法写入本地存储',

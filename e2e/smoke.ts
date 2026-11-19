@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { existsSync } from 'node:fs';
 import { MockRobotServer, seedSampleRobot } from '../src/tools/mock-robot';
+import { makeNode } from '../src/core/node';
 
 const PORT = 4173;
 const log = (m: string) => process.stdout.write(`[e2e] ${m}\n`);
@@ -516,6 +517,22 @@ async function main() {
     await page.locator('dialog button.primary').click();
     check(await until(async () => (await page.locator('.route-card', { hasText: '导入路径' }).count()) === 1, 'imported card'), '粘贴导入生成新路径');
     check(await until(() => robot.routeNames.includes('导入路径'), 'import pushed', 8000), '导入的路径同步到机器');
+
+    // 临时功能：清空所有填写过的制动区，恢复机器人自动计算
+    robot.seedRoute('Brake Reset', [
+      makeNode({ x: 0, y: 0, duration: 0 }),
+      makeNode({ x: 36, y: 0, dx: 10, duration: 2, brakeZoneIn: 9 }),
+    ]);
+    check(await until(async () => (await page.locator('.route-card', { hasText: 'Brake Reset' }).count()) === 1, 'brake reset pulled', 8000), '机器上的测试路径同步到本地');
+    const framesOf = async (name: string) => {
+      const r = await fetch(`${robot.url}/api/v2/routes/${encodeURIComponent(name)}`, { headers: { 'X-Az-Session': robot.sessionToken! } });
+      return (await r.json() as { frames: { brakeZoneIn?: number }[] }).frames;
+    };
+    check((await framesOf('Brake Reset'))[1]?.brakeZoneIn === 9, '清空前保留填写的制动区');
+    await page.getByRole('button', { name: '清空手动制动区' }).click();
+    check((await page.locator('dialog').innerText()).includes('恢复为机器人按当前配置自动计算'), '确认框说明清空后的行为');
+    await page.locator('dialog button.primary').click();
+    check(await until(async () => (await framesOf('Brake Reset'))[1]?.brakeZoneIn === undefined, 'brake cleared', 8000), '清空后不再下发 brakeZoneIn');
 
     // 冲突：断开 → 本地改 + 机器改 → 重连
     await page.locator('.conn').click();

@@ -96,6 +96,19 @@ export function applyTangentSpeeds(nodes: readonly ControlNode[], speedSettings:
   });
 }
 
+/** 清空显式制动区（含 0），恢复机器人按机器配置自动计算；无显式值的点保持原对象。 */
+export function clearBrakeZones(nodes: readonly ControlNode[]): { nodes: ControlNode[]; cleared: number } {
+  let cleared = 0;
+  const out = nodes.map((n) => {
+    if (n.brakeZoneIn === undefined) return n;
+    const copy = { ...n };
+    delete copy.brakeZoneIn;
+    cleared++;
+    return copy;
+  });
+  return { nodes: out, cleared };
+}
+
 const EPS = 1e-7;
 const closeOpt = (a: number | undefined, b: number | undefined) =>
   a === undefined || b === undefined ? a === b : Math.abs(a - b) < EPS;
