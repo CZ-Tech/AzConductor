@@ -8,7 +8,6 @@ import { argsValid, resolveArgs } from '../../core/commandArgs';
 import { NodeCommands, commandDraft, type CommandDraft } from './nodeCommands';
 import { settings } from '../../state/settings';
 import { commandCatalog } from '../../state/robotData';
-import { DEFAULT_BRAKE_DECELERATION, BRAKE_DECELERATION_FIELD } from '../../core/brake';
 import { NODE_FIELDS, NODE_FIELD_ORDER, NODE_MAIN_SECTIONS, estimateBrakeZone, estimateStartSpeed, parkingBrakeZone, type FieldSection, type VisibleNodeFieldKey, type NodeFieldKey } from '../nodeFields';
 import { showDialog } from './dialogs';
 import { IconCheck, IconChevron } from './icons';
@@ -71,18 +70,18 @@ function NodeForm(p: { node: ControlNode; preceding: readonly ControlNode[]; loc
   const [d, setD] = useState<Draft>(() => toDraft(p.node));
   const parking = p.locked || d.stopAtNode;
   const speedSettings = settings.value;
-  const [decel, setDecel] = useState<{ value: number; live: boolean }>({ value: DEFAULT_BRAKE_DECELERATION, live: false });
+  const [decel, setDecel] = useState<{ value: number; live: boolean }>({ value: 30, live: false });
   const connected = connState.value.kind === 'connected';
   const tuningRevision = connData.value?.tuningRevision ?? 0;
   useEffect(() => {
-    setDecel({ value: DEFAULT_BRAKE_DECELERATION, live: false });
+    setDecel({ value: 30, live: false });
     if (!connected) return;
     const connection = getConnection();
     if (!connection) return;
     let cancelled = false;
     void connection.api.tuning().then((r) => {
       if (cancelled || !r.ok) return;
-      const value = r.value.fields.find((f) => f.name === BRAKE_DECELERATION_FIELD)?.value;
+      const value = r.value.fields.find((f) => f.name === 'Auto.SAFE_BRAKE_DECEL')?.value;
       if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
         setDecel({ value, live: true });
       }

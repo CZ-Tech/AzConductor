@@ -1,6 +1,4 @@
 import { applyTangentSpeeds } from '../../core/node';
-import { recomputeBrakeZones } from '../../core/brake';
-import { loadBrakeDeceleration } from '../../state/robotConfig';
 import { settings } from '../../state/settings';
 import { docStore } from '../../state/docStore';
 import { RouteCore } from '../../core/route';
@@ -12,7 +10,7 @@ import { RoutePreview } from '../components/field';
 import { SyncPanel } from '../components/syncPanel';
 import { Menu, MenuItem, MenuSeparator } from '../components/menu';
 import {
-  IconArrowDown, IconArrowUp, IconCopy, IconExport, IconImport, IconMirror, IconMore, IconPencil, IconPlus, IconReplay, IconRotate180, IconTrash,
+  IconArrowDown, IconArrowUp, IconCopy, IconExport, IconImport, IconMirror, IconMore, IconPencil, IconPlus, IconRotate180, IconTrash,
 } from '../components/icons';
 import { navigate } from '../router';
 import { S } from '../strings';
@@ -49,37 +47,6 @@ export function RoutesView() {
     const n = await askText({ title: S.routes.pointSymmetryTitle, label: S.routes.nameLabel, initial: `${r.name}${S.routes.pointSymmetrySuffix}` });
     if (n) store.createRoute(n, pointSymmetryNodes(r.points));
   };
-  /** 按机器配置（制动减速度 + 全局切线速度设置）重算所有路径的默认制动区。 */
-  const recomputeBrake = async () => {
-    const current = store.routes.value;
-    if (current.length === 0) return;
-    const decel = await loadBrakeDeceleration();
-    const speed = settings.peek();
-    const compute = (overwriteManual: boolean) =>
-      current.map((r) => recomputeBrakeZones(r.points, { brakeDeceleration: decel.value, speed, overwriteManual }));
-    const preview = compute(false);
-    const auto = preview.reduce((n, r) => n + r.updated, 0);
-    const manual = preview.reduce((n, r) => n + r.kept, 0);
-    if (auto === 0 && manual === 0) {
-      toast(S.routes.recomputeBrakeNone, 'info');
-      return;
-    }
-    const answer = await askConfirm({
-      title: S.routes.recomputeBrakeTitle,
-      message: S.routes.recomputeBrakeMessage(decel.value.toFixed(2), decel.live ? S.routes.brakeFromRobot : S.routes.brakeFromDefault, current.length, auto, manual),
-      ...(manual > 0 ? { extraLabel: S.routes.recomputeBrakeOverwrite(manual) } : {}),
-      okText: S.routes.recomputeBrakeOk,
-    });
-    if (!answer) return;
-    const results = answer.extra ? compute(true) : preview;
-    const next = current.map((r, i) => ({ ...r, points: results[i]!.points }));
-    if (next.every((r, i) => r.points === current[i]!.points)) {
-      toast(S.routes.recomputeBrakeNone, 'info');
-      return;
-    }
-    store.replaceRoutes(next);
-    toast(S.routes.recomputeBrakeDone(results.reduce((n, r) => n + r.updated + r.cleared, 0)), 'ok');
-  };
 
   return (
     <div class="routes-view">
@@ -90,7 +57,6 @@ export function RoutesView() {
         </div>
         <div class="page-actions">
           <button class="ghost" onClick={() => void importIntoStore(store)}><IconImport />{S.routes.import}</button>
-          <button class="ghost" disabled={routes.length === 0} onClick={() => void recomputeBrake()}><IconReplay />{S.routes.recomputeBrake}</button>
           <button class="ghost" disabled={routes.length === 0} onClick={() => void showExportDialog(S.io.exportTitle, exportArchiveJson(routes), 'azconductor-routes.json')}><IconExport />{S.routes.exportAll}</button>
           <button class="primary" onClick={() => void create()}><IconPlus />{S.routes.newRoute}</button>
         </div>

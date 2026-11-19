@@ -6,7 +6,6 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { existsSync } from 'node:fs';
 import { MockRobotServer, seedSampleRobot } from '../src/tools/mock-robot';
-import { makeNode } from '../src/core/node';
 
 const PORT = 4173;
 const log = (m: string) => process.stdout.write(`[e2e] ${m}\n`);
@@ -517,34 +516,6 @@ async function main() {
     await page.locator('dialog button.primary').click();
     check(await until(async () => (await page.locator('.route-card', { hasText: '导入路径' }).count()) === 1, 'imported card'), '粘贴导入生成新路径');
     check(await until(() => robot.routeNames.includes('导入路径'), 'import pushed', 8000), '导入的路径同步到机器');
-
-    // 按机器配置重算默认刹车区：mock 固件调参表 SAFE_BRAKE_DECEL = 30
-    const remoteFrames = async (name: string) => {
-      const r = await fetch(`${robot.url}/api/v2/routes/${encodeURIComponent(name)}`, { headers: { 'X-Az-Session': robot.sessionToken! } });
-      return (await r.json() as { frames: { brakeZoneIn?: number }[] }).frames;
-    };
-    robot.seedRoute('Brake Test', [
-      makeNode({ x: 0, y: 0, duration: 0 }),
-      makeNode({ x: 48, y: 0, dx: 20, duration: 2, brakeZoneIn: 5 }),
-    ]);
-    check(await until(async () => (await page.locator('.route-card', { hasText: 'Brake Test' }).count()) === 1, 'brake route pulled', 8000), '机器上的测试路径同步到本地');
-    await page.getByRole('button', { name: '重算默认刹车区' }).click();
-    const brakeDialog = page.locator('dialog');
-    const brakeDialogText = await brakeDialog.innerText();
-    check(brakeDialogText.includes('30.00 in/s²') && brakeDialogText.includes('机器人当前值'), '确认框显示机器配置的制动减速度');
-    check(brakeDialogText.includes('1 个手动填写的制动区'), '确认框统计手动填写的制动区');
-    await brakeDialog.locator('button.primary').click();
-    check(await until(async () => ((await remoteFrames('蓝 路径(A)'))[1]?.brakeZoneIn ?? 0) > 0, 'auto brake uploaded', 8000), '自动制动区按配置重算并同步到机器');
-    check((await remoteFrames('Brake Test'))[1]?.brakeZoneIn === 5, '默认不覆盖手动填写的制动区');
-
-    await page.getByRole('button', { name: '重算默认刹车区' }).click();
-    await page.locator('dialog input[type=checkbox]').check();
-    await page.locator('dialog button.primary').click();
-    check(await until(async () => {
-      const v = (await remoteFrames('Brake Test'))[1]?.brakeZoneIn;
-      return typeof v === 'number' && v > 5;
-    }, 'manual brake overwritten', 8000), '勾选覆盖后手动制动区按机器配置重算');
-    check((await remoteFrames('Brake Test'))[0]?.brakeZoneIn === undefined, '首个控制点没有来向路段，不写制动区');
 
     // 冲突：断开 → 本地改 + 机器改 → 重连
     await page.locator('.conn').click();
