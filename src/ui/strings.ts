@@ -21,7 +21,7 @@ export const S = {
   settings: {
     title: '设置',
     robotAddress: '机器人地址',
-    robotAddressHint: '例如 192.168.43.1、192.168.43.1:8888 或 https://robot.example.com:8888',
+    robotAddressHint: 'HTTPS 请填完整地址和端口；HTTP 也可直接填 IP（例如 192.168.43.1，默认端口 8888）。',
     fieldMap: '场地地图',
     tangentSpeedRatio: '全局切线速度比例',
     tangentSpeedHint: '适用于所有路径：到点速度按切线模长 × 比例推算。',

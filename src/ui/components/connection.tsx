@@ -3,7 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { showDialog } from './dialogs';
 import { connState, isOwnerTab, reconnect, disconnect, takeOver, addressError } from '../../state/session';
 import { isNonNegativeFiniteNumber, type TangentSpeedSettings } from '../../core/node';
-import { settings, updateSettings } from '../../state/settings';
+import { DEFAULT_ROBOT_ADDRESS, settings, updateSettings } from '../../state/settings';
 import { describeApiError } from '../../net/transport';
 import { isMixedContentCandidate, normalizeRobotUrl } from '../../net/url';
 import { S } from '../strings';
@@ -53,7 +53,7 @@ function ConnectionForm({ onClose }: { onClose: () => void }) {
       <div class="dlg-body settings-form">
         <div>
           <label for="set-addr">{S.settings.robotAddress}</label>
-          <input id="set-addr" type="text" value={addr} placeholder="192.168.43.1" onInput={(e) => setAddr((e.target as HTMLInputElement).value)} aria-describedby="set-addr-hint" />
+          <input id="set-addr" type="text" value={addr} placeholder={DEFAULT_ROBOT_ADDRESS} onInput={(e) => setAddr((e.target as HTMLInputElement).value)} aria-describedby="set-addr-hint" />
           <div id="set-addr-hint" class="hint">{S.settings.robotAddressHint}</div>
           {addr.trim() && !normalized && <div class="field-error" role="alert">{addressError.value ?? '机器人地址无效'}</div>}
           {normalized && <div class="hint mono">→ {normalized}</div>}

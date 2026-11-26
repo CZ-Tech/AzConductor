@@ -3,6 +3,7 @@ import { DEFAULT_TANGENT_SPEED_SETTINGS, isNonNegativeFiniteNumber, type Tangent
 import { kv } from '../storage/kv';
 
 export const SETTINGS_KEY = 'az.settings';
+export const DEFAULT_ROBOT_ADDRESS = 'https://ftc-control-hub.solitarymc.top:8889';
 export type FieldMap = '26' | '27';
 
 export interface Settings extends TangentSpeedSettings {
@@ -13,7 +14,7 @@ export interface Settings extends TangentSpeedSettings {
 }
 
 const DEFAULTS: Settings = {
-  robotAddress: '192.168.43.1', fieldMap: '27', lastRunRoute: '', ...DEFAULT_TANGENT_SPEED_SETTINGS,
+  robotAddress: DEFAULT_ROBOT_ADDRESS, fieldMap: '27', lastRunRoute: '', ...DEFAULT_TANGENT_SPEED_SETTINGS,
 };
 
 function parseSettings(raw: string): Settings {
